@@ -1,0 +1,24 @@
+pr 1
+title Rename git_shim to moongit and fix index padding bug
+source feature
+source-commit 6eab2f7f936e8b1afae0a8eff11f3779e0130c0c
+target main
+target-commit fa32367f1e4f9fb9917b2c265bfb390a36e15c8d
+author mizchi
+created 1769760723
+updated 1769760936
+state merged
+
+## Summary
+- Rename `src/cmd/git_shim/` to `src/cmd/moongit/`
+- Fix index entry padding calculation in `write_index_entries` (was using absolute buffer length, now uses relative entry position)
+- Add `time_js.mbt` and `time_wasm.mbt` stubs for non-native targets
+- Update justfile install path and README documentation
+- Remove debug println statements
+
+## Test plan
+- [x] All 178 native tests pass
+- [x] `moongit status` works correctly
+- [x] Build succeeds for native target
+
+ Generated with [Claude Code](https://claude.com/claude-code)
