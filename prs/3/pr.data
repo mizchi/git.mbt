@@ -1,0 +1,36 @@
+pr 3
+title Add hq command and new clone shorthand syntax
+source hq-and-shorthand
+source-commit 64bcc104c4ef4c807f3c3b102c42f1d76567c456
+target main
+target-commit c492ca3480e98ac41e2bb7ecaf0fe256d5865fe2
+author mizchi
+created 1769946230
+updated 1770030397
+state closed
+
+## Summary
+- Add `bit hq` command for ghq-compatible repository management
+- Change clone shorthand syntax: remove `@` prefix, use `:` for subdir
+
+## Changes
+
+### bit hq (ghq-compatible)
+- `bit hq get user/repo` ’ clone to `~/bhq/user/repo`
+- `bit hq get gitlab.com/user/repo` ’ clone to `~/bhq/gitlab.com/user/repo`
+- `bit hq get user/repo:src/lib` ’ sparse checkout
+- `bit hq list` ’ list cloned repos
+- `bit hq root` ’ show root directory
+- `BHQ_ROOT` env to override root
+
+### Clone shorthand syntax
+- `bit clone user/repo` ’ GitHub clone (no `@` prefix)
+- `bit clone user/repo:src/lib` ’ sparse checkout with `:` separator
+- `bit clone gitlab.com/user/repo` ’ other hosts
+- Ambiguity check: error if local directory conflicts
+
+## Test plan
+- [x] 507 unit tests pass
+- [x] 67 shell integration tests pass (t/)
+
+ Generated with [Claude Code](https://claude.com/claude-code)
