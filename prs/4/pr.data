@@ -1,0 +1,22 @@
+pr 4
+title sha1 only updates
+source sha1-only-updates
+source-commit 4b9ec9da30c917f87d6acaab72c2db65b383fba7
+target main
+target-commit c492ca3480e98ac41e2bb7ecaf0fe256d5865fe2
+author mizchi
+created 1769963129
+updated 1769963958
+state merged
+
+- **Implement bidirectional sync for subdir-clone push**
+- **Add shell-based integration tests for subdir-clone functionality**
+- **Add ghq-compatible repository management (bit hq)**
+- **Change clone shorthand syntax: remove @ prefix, use : for subdir**
+- **Exclude t5313-pack-bounds-checks.sh from compat tests**
+- **Revert "Exclude t5313-pack-bounds-checks.sh from compat tests"**
+- **initial**
+- **submodule: update git tests for sha256 skips**
+- **pack: delegate unsupported options and guard sha256**
+- **docs/tests: note sha1-only and update allowlist**
+- **upload-pack: add v1/v2 parsing and migrate moon.pkg**
