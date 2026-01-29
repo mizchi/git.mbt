@@ -1,64 +1,127 @@
-# MoonBit Template
+# moonbit-git
 
-A minimal MoonBit project template with CI, justfile, and AI coding assistant support.
+A Git implementation in [MoonBit](https://docs.moonbitlang.com), focusing on packfile operations and protocol support.
 
-## Usage
+## Features
 
-Clone this repository and start coding:
+### Core Git Operations
+- **Packfile**: Create, parse, and verify Git packfiles with REF_DELTA and OFS_DELTA support
+- **Pack Index**: Generate `.idx` files compatible with Git
+- **Object Database**: Read/write loose objects and packed objects
+- **SHA-1**: Pure MoonBit SHA-1 implementation
 
-```bash
-git clone https://github.com/mizchi/moonbit-template my-project
-cd my-project
+### Git Commands (via git-shim)
+- `pack-objects`: Create packfiles from object lists or revision specs
+- `index-pack`: Build pack index from packfiles
+- `receive-pack`: Handle push operations (advertisement and data receive)
+- `upload-pack`: Handle fetch operations
+
+### Protocol Support
+- Git protocol v1/v2
+- Smart HTTP transport
+- Pkt-line encoding/decoding
+
+### Repository Operations
+- `init`, `status`, `log`, `diff`
+- `branch`, `checkout`, `reset`
+- `merge`, `rebase`
+- `.gitignore` parsing
+
+## Project Structure
+
 ```
-
-Update `moon.mod.json` with your module name:
-
-```json
-{
-  "name": "your-username/your-project",
-  ...
-}
+src/
+├── packfile.mbt          # Packfile creation with delta compression
+├── packfile_parse.mbt    # Packfile parsing
+├── pack_index_write.mbt  # Pack index generation
+├── object.mbt            # Git object types (blob, tree, commit, tag)
+├── sha1.mbt              # SHA-1 implementation
+├── pktline.mbt           # Pkt-line protocol
+├── remote.mbt            # Remote operations
+├── upload_pack_*.mbt     # Upload-pack implementation
+├── lib/                  # High-level Git operations
+│   ├── receive_pack.mbt  # Receive-pack implementation
+│   ├── smart_http.mbt    # Smart HTTP helpers
+│   ├── object_db.mbt     # Object database
+│   └── ...
+└── cmd/
+    └── git_shim/         # Native git command interceptor
+        ├── main.mbt
+        ├── pack_objects.mbt
+        ├── index_pack.mbt
+        └── pack_helpers.mbt
 ```
 
 ## Quick Commands
 
 ```bash
-just           # check + test
-just fmt       # format code
-just check     # type check
-just test      # run tests
-just test-update  # update snapshot tests
-just run       # run main
-just info      # generate type definition files
+just              # check + test
+just fmt          # format code
+just check        # type check (js + native)
+just test         # run tests (js + native)
+just release-check # fmt + info + check + test
 ```
 
-## Project Structure
+## Git-Shim
 
-```
-my-project/
-├── moon.mod.json      # Module configuration
-├── src/
-│   ├── moon.pkg       # Package configuration
-│   ├── lib.mbt        # Library code
-│   ├── lib_test.mbt   # Tests
-│   ├── lib_bench.mbt  # Benchmarks
-│   ├── API.mbt.md     # Doc tests
-│   └── main/
-│       ├── moon.pkg
-│       └── main.mbt   # Entry point
-├── justfile           # Task runner
-└── .github/workflows/
-    └── ci.yml         # GitHub Actions CI
+The `git-shim` is a native binary that intercepts specific Git commands and handles them in MoonBit:
+
+```bash
+# Build the shim
+moon build --target native
+
+# Copy to tools directory
+cp _build/native/release/build/cmd/git_shim/git_shim.exe tools/git-shim/moon
 ```
 
-## Features
+### Supported Commands
 
-- `src/` directory structure with `moon.pkg` format
-- Snapshot testing with `inspect()`
-- Doc tests in `.mbt.md` files
-- Benchmarks with `moon bench`
-- GitHub Actions CI
-- Claude Code / GitHub Copilot support (AGENTS.md)
+| Command | Status | Notes |
+|---------|--------|-------|
+| `pack-objects` | ✅ | `--revs`, `--all`, `--stdout`, `--delta-base-offset`, `--progress` |
+| `index-pack` | ✅ | `--stdin`, `-o`, `--keep`, `--fix-thin` |
+| `receive-pack` | ✅ | `--advertise-refs`, `--stateless-rpc` |
+| `upload-pack` | 🔄 | In progress |
+
+### Fallback Behavior
+
+- Unsupported options automatically fall back to real Git
+- SHA256 repositories fall back to real Git
+- Set `SHIM_STRICT=1` to error on unsupported commands
+
+### Configuration Support
+
+- `pack.packSizeLimit`: Honors Git config for splitting large packs (minimum 1 MiB)
+
+## Testing
+
+### Unit Tests
+```bash
+just test  # Runs 227 tests (108 js + 119 native)
+```
+
+### Integration Tests (Git Test Suite)
+```bash
+# Run with fallback to real Git
+just git-t-allowlist-shim      # 2534 tests pass
+
+# Run in strict mode (no fallback)
+just git-t-allowlist-shim-strict
+```
+
+### Oracle Testing
+
+Tests use Git as an oracle to verify correctness:
+1. Generate packfiles with `git pack-objects`
+2. Verify with `git verify-pack -v`
+3. Compare outputs byte-for-byte
+
+## Current Limitations
+
+- SHA256 object format: Falls back to real Git
+- SHA1 collision detection: Not implemented
+- Thin pack resolution: Partial support
+- Some advanced options (e.g., `--stdin-packs`, `--filter`, `--threads`)
 
 ## License
 

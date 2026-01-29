@@ -1,8 +1,5 @@
 # MoonBit Project Commands
 
-# Default target (js for browser compatibility)
-target := "js"
-
 # Default task: check and test
 default: check test
 
@@ -10,21 +7,24 @@ default: check test
 fmt:
     moon fmt
 
-# Type check
+# Type check (both js and native)
 check:
-    moon check --deny-warn --target {{target}}
+    moon check --deny-warn --target js
+    moon check --deny-warn --target native
 
-# Run tests
+# Run tests (js target: main packages only, native: all)
 test:
-    moon test --target {{target}}
+    moon test --target js -p mizchi/git -p mizchi/git/lib
+    moon test --target native
 
-# Update snapshot tests
+# Update snapshot tests (both js and native)
 test-update:
-    moon test --update --target {{target}}
+    moon test --update --target js -p mizchi/git -p mizchi/git/lib
+    moon test --update --target native
 
-# Run main
+# Run main (native)
 run:
-    moon run src/main --target {{target}}
+    moon run src/main --target native
 
 # Generate type definition files
 info:

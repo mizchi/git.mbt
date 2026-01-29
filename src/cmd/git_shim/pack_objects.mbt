@@ -229,6 +229,12 @@ async fn handle_pack_objects(args : Array[String]) -> Unit {
         @stdio.stderr.write("fatal: not a git repository\n")
         @sys.exit(1)
       }
+      // SHA256 repositories are not yet supported, fallback to real git
+      if fs.is_dir(git_dir) && is_sha256_repo(git_dir) {
+        run_system_git(prepend_arg("pack-objects", args))
+      }
+      // Read pack.packSizeLimit from config
+      let pack_size_limit = get_pack_size_limit(git_dir)
       let db = @gitlib.ObjectDb::load(fs, git_dir)
       let mut objects : Array[@git.PackObject] = []
       if cfg.all {
@@ -248,8 +254,9 @@ async fn handle_pack_objects(args : Array[String]) -> Unit {
         let exclude_commits : Array[@git.ObjectId] = []
         for line in lines {
           let trimmed = trim_line_bytes(line)
+          // Empty line signals end of input in --revs mode (like git rev-list --stdin)
           if trimmed.length() == 0 {
-            continue
+            break
           }
           let text = line_to_string(trimmed)
           let (negated, spec) = if text.has_prefix("^") {
@@ -329,38 +336,100 @@ async fn handle_pack_objects(args : Array[String]) -> Unit {
       if cfg.path_walk {
         @stdio.stderr.write("Compressing objects by path\n")
       }
-      let (pack, delta_count) = @git.create_packfile_with_delta_stats(
-        objects,
-        cfg.delta_mode,
-      )
+      // Split objects into groups based on packSizeLimit (only for file output, not stdout)
+      let effective_limit = if cfg.stdout { None } else { pack_size_limit }
+      let object_groups = split_objects_by_size_limit(objects, effective_limit)
+      let mut total_delta_count = 0
+      for group in object_groups {
+        let (pack, delta_count) = @git.create_packfile_with_delta_stats(
+          group,
+          cfg.delta_mode,
+        )
+        total_delta_count += delta_count
+        if cfg.stdout {
+          @stdio.stdout.write(pack)
+        } else {
+          let hash_hex = pack_hash_hex(pack)
+          let base_name = match cfg.base_name {
+            Some(name) => name
+            None => {
+              @stdio.stderr.write("fatal: missing base-name\n")
+              @sys.exit(1)
+              ""
+            }
+          }
+          let base_name = resolve_in_cwd(base_name)
+          let pack_path = base_name + "-" + hash_hex + ".pack"
+          let idx_path = base_name + "-" + hash_hex + ".idx"
+          fs.write_file(pack_path, pack)
+          @git.write_pack_index_from_objects(fs, idx_path, pack, group)
+          @stdio.stdout.write(hash_hex + "\n")
+        }
+      }
       if cfg.progress {
         @stdio.stderr.write(
           "Total " +
           objects.length().to_string() +
           " (delta " +
-          delta_count.to_string() +
+          total_delta_count.to_string() +
           ")\n",
         )
       }
       if cfg.stdout {
-        @stdio.stdout.write(pack)
         @sys.exit(0)
       }
-      let hash_hex = pack_hash_hex(pack)
-      let base_name = match cfg.base_name {
-        Some(name) => name
-        None => {
-          @stdio.stderr.write("fatal: missing base-name\n")
-          @sys.exit(1)
-          ""
-        }
+    }
+  }
+}
+
+///|
+/// Split objects into groups based on pack size limit
+fn split_objects_by_size_limit(
+  objects : Array[@git.PackObject],
+  limit : Int64?,
+) -> Array[Array[@git.PackObject]] {
+  match limit {
+    None => [objects]
+    Some(max_size) => {
+      if max_size <= 0L {
+        return [objects]
       }
-      let base_name = resolve_in_cwd(base_name)
-      let pack_path = base_name + "-" + hash_hex + ".pack"
-      let idx_path = base_name + "-" + hash_hex + ".idx"
-      fs.write_file(pack_path, pack)
-      @git.write_pack_index_from_objects(fs, idx_path, pack, objects)
-      @stdio.stdout.write(hash_hex + "\n")
+      // Git enforces a minimum pack size limit of 1 MiB
+      let min_pack_size = 1048576L // 1 MiB
+      let effective_max = if max_size < min_pack_size {
+        min_pack_size
+      } else {
+        max_size
+      }
+      let groups : Array[Array[@git.PackObject]] = []
+      let mut current_group : Array[@git.PackObject] = []
+      let mut current_size = 0L
+      // Pack header is 12 bytes, trailer is 20 bytes
+      let pack_overhead = 32L
+      for obj in objects {
+        // Use raw size as conservative estimate (zlib typically achieves 50-70% compression
+        // but for random data like binary files, compression is minimal)
+        let obj_size = obj.data.length().to_int64()
+        // Add overhead for type/size encoding (variable, estimate ~5 bytes per object)
+        let estimated_size = obj_size + 5L
+        // If this object would exceed the limit, start a new group
+        // But always include at least one object per group
+        if current_group.length() > 0 &&
+          current_size + estimated_size + pack_overhead > effective_max {
+          groups.push(current_group)
+          current_group = []
+          current_size = 0L
+        }
+        current_group.push(obj)
+        current_size += estimated_size
+      }
+      if current_group.length() > 0 {
+        groups.push(current_group)
+      }
+      if groups.length() == 0 {
+        groups.push([])
+      }
+      groups
     }
   }
 }

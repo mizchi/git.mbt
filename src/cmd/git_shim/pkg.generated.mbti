@@ -1,0 +1,23 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "mizchi/git/cmd/git_shim"
+
+import {
+  "mizchi/git",
+}
+
+// Values
+
+// Errors
+
+// Types and methods
+pub struct OsFs {
+  dummy : Int
+}
+pub fn OsFs::new() -> Self
+pub impl @git.FileSystem for OsFs
+pub impl @git.RepoFileSystem for OsFs
+
+// Type aliases
+
+// Traits
+

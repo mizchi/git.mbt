@@ -22,3 +22,5 @@ jobs:
         run: moon check --deny-warn --target js
       - name: Moon test
         run: moon test --target js
+      - name: Moon test (native)
+        run: moon test --target native

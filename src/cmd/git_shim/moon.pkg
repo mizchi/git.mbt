@@ -13,4 +13,11 @@ import {
 
 options(
   is_main: true,
+  targets: {
+    "index_pack.mbt": [ "native" ],
+    "main.mbt": [ "native" ],
+    "main_js.mbt": [ "js" ],
+    "pack_helpers.mbt": [ "native" ],
+    "pack_objects.mbt": [ "native" ],
+  },
 )

@@ -107,6 +107,10 @@ async fn handle_index_pack(args : Array[String]) -> Unit {
           @stdio.stderr.write("fatal: not a git repository\n")
           @sys.exit(1)
         }
+        // SHA256 repositories are not yet supported, fallback to real git
+        if is_sha256_repo(git_dir) {
+          run_system_git(prepend_arg("index-pack", args))
+        }
         let pack_dir = git_dir + "/objects/pack"
         ensure_dir(pack_dir)
         let pack_path = pack_dir + "/pack-" + hash_hex + ".pack"
@@ -120,6 +124,11 @@ async fn handle_index_pack(args : Array[String]) -> Unit {
         write_keep_file(fs, keep_path, cfg.keep_msg)
         @stdio.stdout.write(hash_hex + "\n")
         return ()
+      }
+      // For file mode, check if current repo is SHA256 and fallback
+      let git_dir = git_dir_from_env()
+      if fs.is_dir(git_dir) && is_sha256_repo(git_dir) {
+        run_system_git(prepend_arg("index-pack", args))
       }
       let pack_path = match cfg.pack_path {
         Some(path) => path
