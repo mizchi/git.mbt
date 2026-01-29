@@ -1,0 +1,488 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "mizchi/git"
+
+// Values
+pub fn add_paths(&FileSystem, &RepoFileSystem, String, Array[String]) -> Unit raise GitError
+
+pub fn apply_receive_pack(&FileSystem, &RepoFileSystem, String, ReceivePackRequest) -> ReceivePackResult raise GitError
+
+pub fn build_fetch_request_v0(String, Array[ObjectId], Array[String]) -> Bytes
+
+pub fn build_fetch_request_v2(String, Array[ObjectId]) -> Bytes
+
+pub fn build_ls_refs_request(String, Array[String]) -> Bytes
+
+pub fn build_pack_index(Bytes) -> Bytes raise GitError
+
+pub fn build_pack_index_from_objects(Bytes, Array[PackObject]) -> Bytes raise GitError
+
+pub fn build_ref_update(ObjectId, ObjectId, String, String) -> String
+
+pub fn build_ref_update_simple(ObjectId, ObjectId, String) -> String
+
+pub fn checkout(&FileSystem, &RepoFileSystem, String, String, detach? : Bool, update_worktree? : Bool, update_index? : Bool) -> ObjectId raise GitError
+
+pub fn checkout_commit(ObjectStore, ObjectId) -> Map[String, Bytes] raise GitError
+
+pub fn checkout_commit_to_fs(ObjectStore, ObjectId, &FileSystem, String) -> Unit raise GitError
+
+pub async fn clone_process(String, Bool) -> (Array[(ObjectId, String)], Array[PackObject]) raise GitError
+
+pub async fn clone_process_to_fs(String, Bool, &FileSystem, String) -> Array[(ObjectId, String)] raise GitError
+
+pub async fn clone_remote(String, Bool) -> (Array[(ObjectId, String)], Array[PackObject]) raise GitError
+
+pub async fn clone_remote_to_fs(String, Bool, &FileSystem, String) -> Array[(ObjectId, String)] raise GitError
+
+pub fn collect_reachable_objects(ObjectDb, &RepoFileSystem, ObjectId) -> Array[PackObject] raise GitError
+
+pub fn collect_reachable_objects_from_commits(ObjectDb, &RepoFileSystem, Array[ObjectId]) -> Array[PackObject] raise GitError
+
+pub fn collect_tree_files(ObjectDb, &RepoFileSystem, ObjectId) -> Map[String, TreeFileEntry] raise GitError
+
+pub fn collect_tree_files_from_commit(ObjectDb, &RepoFileSystem, ObjectId) -> Map[String, TreeFileEntry] raise GitError
+
+pub fn commit(&FileSystem, &RepoFileSystem, String, String, String, Int64) -> ObjectId raise GitError
+
+pub fn create_blob(Bytes) -> (ObjectId, Bytes)
+
+pub fn create_blob_packfile(Bytes) -> Bytes
+
+pub fn create_blob_string(String) -> (ObjectId, Bytes)
+
+pub fn create_branch(&FileSystem, &RepoFileSystem, String, String) -> Unit raise GitError
+
+pub fn create_commit(Commit) -> (ObjectId, Bytes)
+
+pub fn create_commit_packfile(Bytes, String, Commit) -> (ObjectId, Bytes)
+
+pub fn create_object(ObjectType, Bytes) -> (ObjectId, Bytes)
+
+pub fn create_packfile(Array[PackObject]) -> Bytes
+
+pub fn create_tree(Array[TreeEntry]) -> (ObjectId, Bytes)
+
+pub fn detect_protocol_version(Bytes) -> ProtocolVersion raise GitError
+
+pub fn diff_index(&RepoFileSystem, String) -> Array[DiffFile] raise GitError
+
+pub fn diff_text(Array[DiffFile]) -> Array[String]
+
+pub fn diff_worktree(&RepoFileSystem, String) -> Array[DiffFile] raise GitError
+
+pub async fn discover_upload_refs(String, Bool) -> (Array[(ObjectId, String)], Array[String], ProtocolVersion, Map[String, String]) raise GitError
+
+pub async fn discover_upload_refs_process(String, Bool) -> (Array[(ObjectId, String)], Array[String], ProtocolVersion, Map[String, String]) raise GitError
+
+pub fn encode_type_and_size(Int, Int, Array[Byte]) -> Unit
+
+pub fn extract_pack_from_v0_response(Bytes) -> Bytes raise GitError
+
+pub fn extract_pack_from_v2_response(Bytes) -> Bytes raise GitError
+
+pub fn fast_forward_to(&FileSystem, &RepoFileSystem, String, ObjectId) -> Unit raise GitError
+
+pub async fn fetch_objects(String, Array[ObjectId], Bool) -> Array[PackObject] raise GitError
+
+pub async fn fetch_objects_process(String, Array[ObjectId], Bool) -> Array[PackObject] raise GitError
+
+pub async fn fetch_pack(String, Array[ObjectId], Bool) -> Bytes raise GitError
+
+pub async fn fetch_pack_process(String, Array[ObjectId], Bool) -> Bytes raise GitError
+
+pub fn gc_repo(&FileSystem, &RepoFileSystem, String) -> GcResult raise GitError
+
+pub fn generate_commit_packfile() -> (ObjectId, Bytes)
+
+pub fn generate_test_packfile() -> Bytes
+
+pub fn hash_blob(Bytes) -> ObjectId
+
+pub fn hash_blob_string(String) -> ObjectId
+
+pub fn hash_object_content(ObjectType, Bytes) -> ObjectId
+
+pub fn hex_dump(Bytes) -> String
+
+pub fn init_repo(&FileSystem, String, default_branch? : String) -> Unit raise GitError
+
+pub fn is_ignored_path(&RepoFileSystem, String, String, Bool) -> Bool raise GitError
+
+pub fn list_branches(&RepoFileSystem, String) -> (HeadRef, Array[BranchInfo]) raise GitError
+
+pub fn list_branches_text(&RepoFileSystem, String) -> Array[String] raise GitError
+
+pub fn list_working_files(&RepoFileSystem, String) -> Array[String] raise GitError
+
+pub fn load_object_store_from_fs(&RepoFileSystem, String) -> ObjectStore raise GitError
+
+pub fn log_head(&RepoFileSystem, String, max_count? : Int) -> Array[LogEntry] raise GitError
+
+pub fn log_head_oneline(&RepoFileSystem, String, max_count? : Int) -> Array[String] raise GitError
+
+pub fn materialize_clone_to_fs(ObjectStore, ObjectId, String, String, &FileSystem, String) -> Unit raise GitError
+
+pub fn merge(&FileSystem, &RepoFileSystem, String, ObjectId, String, String, Int64) -> MergeResult raise GitError
+
+pub fn parse_commit(Bytes) -> CommitInfo raise GitError
+
+pub fn parse_ls_refs_response(Bytes) -> LsRefsResult raise GitError
+
+pub fn parse_packfile(Bytes) -> Array[PackObject] raise GitError
+
+pub fn parse_packfile_stream(Bytes, (PackObject) -> Unit) -> Unit raise GitError
+
+pub fn parse_packfile_stream_with_bases(Bytes, Array[PackObject], (PackObject) -> Unit) -> Unit raise GitError
+
+pub fn parse_packfile_with_bases(Bytes, Array[PackObject]) -> Array[PackObject] raise GitError
+
+pub fn parse_receive_pack_request(Bytes) -> ReceivePackRequest raise GitError
+
+pub fn parse_refs(Bytes) -> Array[(ObjectId, String)] raise GitError
+
+pub fn parse_remote(String) -> RemoteSpec
+
+pub fn parse_tree(Bytes) -> Array[TreeEntry] raise GitError
+
+pub fn parse_v0_advertised_caps(Bytes) -> Array[String] raise GitError
+
+pub fn parse_v2_advertised_caps(Bytes) -> Array[String] raise GitError
+
+pub fn pktline_decode(Bytes) -> Array[(Bytes, Bool)] raise GitError
+
+pub fn pktline_delim() -> Bytes
+
+pub fn pktline_encode(String) -> Bytes
+
+pub fn pktline_encode_bytes(Bytes) -> Bytes
+
+pub fn pktline_flush() -> Bytes
+
+pub fn prune_repo(&FileSystem, &RepoFileSystem, String) -> PruneResult raise GitError
+
+pub fn read_head_ref(&RepoFileSystem, String) -> HeadRef raise GitError
+
+pub fn read_index_entries(&RepoFileSystem, String) -> Array[IndexEntry] raise GitError
+
+pub fn rebase_onto(&FileSystem, &RepoFileSystem, String, ObjectId) -> ObjectId raise GitError
+
+pub fn receive_pack(&FileSystem, &RepoFileSystem, String, Bytes) -> Bytes raise GitError
+
+pub fn repack_repo(&FileSystem, &RepoFileSystem, String) -> RepackResult? raise GitError
+
+pub fn reset(&FileSystem, &RepoFileSystem, String, String, ResetMode) -> ObjectId raise GitError
+
+pub fn resolve_head_commit(&RepoFileSystem, String) -> ObjectId? raise GitError
+
+pub fn resolve_ref(&RepoFileSystem, String, String) -> ObjectId? raise GitError
+
+pub fn rev_parse(&RepoFileSystem, String, String) -> ObjectId? raise GitError
+
+pub fn select_default_ref(Array[(ObjectId, String)], Map[String, String]) -> (String, ObjectId)?
+
+pub fn select_default_wants(Array[(ObjectId, String)], Map[String, String]) -> Array[ObjectId]
+
+pub fn sha1(Bytes) -> ObjectId
+
+pub fn sha1_array(Array[Byte]) -> ObjectId
+
+pub fn sha1_array_prefix(Array[Byte], Int) -> ObjectId
+
+pub fn sha1_prefix(Bytes, Int) -> ObjectId
+
+pub fn show_ref(&RepoFileSystem, String) -> Array[(String, ObjectId)] raise GitError
+
+pub fn show_ref_text(&RepoFileSystem, String) -> Array[String] raise GitError
+
+pub fn status(&RepoFileSystem, String) -> Status raise GitError
+
+pub fn status_porcelain(&RepoFileSystem, String) -> Array[String] raise GitError
+
+pub fn status_porcelain_from(Status) -> Array[String]
+
+pub fn status_text(&RepoFileSystem, String) -> String raise GitError
+
+pub fn switch_branch(&FileSystem, &RepoFileSystem, String, String, create? : Bool, checkout? : Bool) -> Unit raise GitError
+
+pub fn tree_files_to_index(ObjectDb, &RepoFileSystem, Map[String, TreeFileEntry]) -> Array[IndexEntry] raise GitError
+
+pub fn update_head_ref(&FileSystem, &RepoFileSystem, String, ObjectId) -> Unit raise GitError
+
+pub async fn upload_pack_info_refs(String, Bool) -> Bytes raise GitError
+
+pub async fn upload_pack_info_refs_process(String, Bool) -> Bytes raise GitError
+
+pub async fn upload_pack_request(String, Bytes, Bool) -> Bytes raise GitError
+
+pub async fn upload_pack_request_process(String, Bytes, Bool) -> Bytes raise GitError
+
+pub fn write_git_metadata(ObjectStore, ObjectId, String, String, &FileSystem, String) -> Unit raise GitError
+
+pub fn write_index_entries(&FileSystem, String, Array[IndexEntry]) -> Unit raise GitError
+
+pub fn write_loose_object(&FileSystem, String, ObjectType, Bytes) -> ObjectId raise GitError
+
+pub fn write_object_bytes(&FileSystem, String, ObjectId, Bytes) -> Unit raise GitError
+
+pub fn write_pack_index(&FileSystem, String, Bytes) -> Unit raise GitError
+
+pub fn write_pack_index_from_objects(&FileSystem, String, Bytes, Array[PackObject]) -> Unit raise GitError
+
+pub fn write_packfile_with_index(&FileSystem, String, Bytes, Array[PackObject]) -> Unit raise GitError
+
+pub fn write_tree_from_index(&FileSystem, String, Array[IndexEntry]) -> ObjectId raise GitError
+
+pub fn write_worktree_from_files(ObjectDb, &FileSystem, &RepoFileSystem, String, String, Map[String, TreeFileEntry], remove_missing? : Bool) -> Unit raise GitError
+
+// Errors
+pub(all) suberror GitError {
+  InvalidObject(String)
+  HashMismatch(String, String)
+  PackfileError(String)
+  ProtocolError(String)
+  IoError(String)
+}
+pub impl Eq for GitError
+pub impl Show for GitError
+
+// Types and methods
+pub struct BranchInfo {
+  name : String
+  id : ObjectId
+  current : Bool
+}
+
+pub struct Commit {
+  tree : ObjectId
+  parents : Array[ObjectId]
+  author : String
+  author_time : Int64
+  author_tz : String
+  committer : String
+  commit_time : Int64
+  committer_tz : String
+  message : String
+}
+pub fn Commit::new(ObjectId, Array[ObjectId], String, Int64, String, String, Int64, String, String) -> Self
+
+pub struct CommitInfo {
+  tree : ObjectId
+  parents : Array[ObjectId]
+}
+
+pub struct DiffFile {
+  path : String
+  kind : DiffKind
+  old_content : Bytes?
+  new_content : Bytes?
+}
+
+pub enum DiffKind {
+  Added
+  Modified
+  Deleted
+}
+
+pub struct GcResult {
+  pack : RepackResult?
+  dangling : Array[ObjectId]
+}
+
+pub enum HeadRef {
+  Branch(String)
+  Detached(ObjectId)
+}
+
+pub struct IndexEntry {
+  path : String
+  id : ObjectId
+  mode : Int
+  size : Int
+}
+
+pub struct LogEntry {
+  id : ObjectId
+  message : String
+  author : String
+  timestamp : Int64
+}
+
+pub struct LsRefsResult {
+  refs : Array[(ObjectId, String)]
+  symrefs : Map[String, String]
+}
+
+pub struct MergeResult {
+  status : MergeStatus
+  commit_id : ObjectId?
+  conflicts : Array[String]
+}
+
+pub enum MergeStatus {
+  AlreadyUpToDate
+  FastForward
+  Merged
+  Conflicted
+}
+
+pub struct ObjectDb {
+  loose : Map[String, PackObject]
+  packs : Array[PackIndex]
+}
+pub fn ObjectDb::get(Self, &RepoFileSystem, ObjectId) -> PackObject? raise GitError
+pub fn ObjectDb::load(&RepoFileSystem, String) -> Self raise GitError
+
+pub struct ObjectId {
+  bytes : FixedArray[Byte]
+}
+pub fn ObjectId::from_hex(String) -> Self raise GitError
+pub fn ObjectId::new(FixedArray[Byte]) -> Self
+pub fn ObjectId::to_hex(Self) -> String
+pub fn ObjectId::zero() -> Self
+pub impl Eq for ObjectId
+pub impl Show for ObjectId
+
+pub struct ObjectStore {
+  objects : Map[String, PackObject]
+}
+pub fn ObjectStore::add_objects(Self, Array[PackObject]) -> Unit
+pub fn ObjectStore::contains(Self, ObjectId) -> Bool
+pub fn ObjectStore::from_pack(Array[PackObject]) -> Self
+pub fn ObjectStore::get(Self, ObjectId) -> PackObject?
+pub fn ObjectStore::new() -> Self
+
+pub(all) enum ObjectType {
+  Blob
+  Tree
+  Commit
+  Tag
+}
+pub fn ObjectType::to_packfile_type(Self) -> Int
+pub fn ObjectType::to_string(Self) -> String
+pub impl Eq for ObjectType
+pub impl Show for ObjectType
+
+pub struct PackIndex {
+  pack_path : String
+  ids : Array[String]
+  offsets : Array[Int64]
+}
+pub fn PackIndex::find_offset(Self, ObjectId) -> Int64?
+pub fn PackIndex::find_offset_hex(Self, String) -> Int64?
+
+pub struct PackObject {
+  obj_type : ObjectType
+  data : Bytes
+}
+pub fn PackObject::new(ObjectType, Bytes) -> Self
+
+pub(all) enum ProtocolVersion {
+  V0
+  V2
+}
+pub impl Eq for ProtocolVersion
+
+pub struct PruneResult {
+  pruned : Array[ObjectId]
+}
+
+pub struct ReceivePackRequest {
+  updates : Array[RefUpdate]
+  capabilities : Array[String]
+  pack : Bytes
+}
+
+pub struct ReceivePackResult {
+  updated : Array[String]
+  rejected : Array[(String, String)]
+}
+
+pub struct RefUpdate {
+  old_id : ObjectId
+  new_id : ObjectId
+  refname : String
+}
+
+pub(all) enum RemoteKind {
+  Http
+  Ssh
+  File
+}
+pub impl Eq for RemoteKind
+
+pub struct RemoteSpec {
+  kind : RemoteKind
+  raw : String
+  host : String?
+  path : String
+  base_url : String?
+}
+
+pub struct RepackResult {
+  pack_id : ObjectId
+  object_count : Int
+  pack_bytes : Int
+}
+
+pub(all) enum ResetMode {
+  Soft
+  Mixed
+  Hard
+}
+
+pub struct Status {
+  staged_added : Array[String]
+  staged_modified : Array[String]
+  staged_deleted : Array[String]
+  unstaged_modified : Array[String]
+  unstaged_deleted : Array[String]
+  untracked : Array[String]
+}
+
+pub struct TestFs {
+  files : Map[String, Bytes]
+  dirs : Map[String, Bool]
+}
+pub fn TestFs::exists(Self, String) -> Bool
+pub fn TestFs::is_dir(Self, String) -> Bool
+pub fn TestFs::is_file(Self, String) -> Bool
+pub fn TestFs::mkdir_p(Self, String) -> Unit
+pub fn TestFs::new() -> Self
+pub fn TestFs::read_file(Self, String) -> Bytes raise GitError
+pub fn TestFs::read_string(Self, String) -> String raise GitError
+pub fn TestFs::readdir(Self, String) -> Array[String] raise GitError
+pub fn TestFs::remove_file(Self, String) -> Unit raise GitError
+pub fn TestFs::write_file(Self, String, Bytes) -> Unit
+pub fn TestFs::write_string(Self, String, String) -> Unit
+pub impl FileSystem for TestFs
+pub impl RepoFileSystem for TestFs
+
+pub struct TreeEntry {
+  mode : String
+  name : String
+  id : ObjectId
+}
+pub fn TreeEntry::new(String, String, ObjectId) -> Self
+
+pub struct TreeFileEntry {
+  id : ObjectId
+  mode : Int
+}
+
+// Type aliases
+
+// Traits
+pub(open) trait FileSystem {
+  mkdir_p(Self, String) -> Unit raise GitError
+  write_file(Self, String, Bytes) -> Unit raise GitError
+  write_string(Self, String, String) -> Unit raise GitError
+  remove_file(Self, String) -> Unit raise GitError
+}
+
+pub(open) trait RepoFileSystem {
+  read_file(Self, String) -> Bytes raise GitError
+  readdir(Self, String) -> Array[String] raise GitError
+  is_dir(Self, String) -> Bool
+  is_file(Self, String) -> Bool
+}
+
