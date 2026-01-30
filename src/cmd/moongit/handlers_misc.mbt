@@ -1,4 +1,4 @@
-///| Miscellaneous handlers: diff, merge, tag, rm, mv, config, sparse-checkout, rev-parse, cat-file, ls-files
+///| Miscellaneous handlers: diff, merge, tag, rm, mv, config, sparse-checkout, rev-parse, cat-file, ls-files, hash-object, ls-tree, write-tree, show-ref, update-ref, symbolic-ref
 
 ///|
 async fn handle_diff(args : Array[String]) -> Unit raise Error {
@@ -578,4 +578,290 @@ fn format_mode(mode : Int) -> String {
   }
   digits.rev_in_place()
   digits.iter().fold(init="", fn(acc, d) { acc + d })
+}
+
+///|
+async fn handle_hash_object(args : Array[String]) -> Unit raise Error {
+  let root = get_work_root()
+  let git_dir = root + "/.git"
+  let fs = OsFs::new()
+  let mut write_object = false
+  let mut stdin_mode = false
+  let mut obj_type = "blob"
+  let paths : Array[String] = []
+  for arg in args {
+    match arg {
+      "-w" => write_object = true
+      "--stdin" => stdin_mode = true
+      "-t" => () // next arg is type, handled below
+      _ if arg.has_prefix("-t") =>
+        obj_type = String::unsafe_substring(arg, start=2, end=arg.length())
+      _ if not(arg.has_prefix("-")) => paths.push(arg)
+      _ => ()
+    }
+  }
+  // Handle -t <type> pattern
+  let mut i = 0
+  while i < args.length() {
+    if args[i] == "-t" && i + 1 < args.length() {
+      obj_type = args[i + 1]
+    }
+    i += 1
+  }
+  if stdin_mode {
+    let content = read_all_stdin()
+    let id = @git.hash_object_content(parse_object_type(obj_type), content)
+    if write_object {
+      let _ = @gitlib.write_loose_object(fs, git_dir, parse_object_type(obj_type), content)
+
+    }
+    print_line(id.to_hex())
+    return ()
+  }
+  for path in paths {
+    let abs = if path.has_prefix("/") { path } else { root + "/" + path }
+    let content = fs.read_file(abs)
+    let id = @git.hash_object_content(parse_object_type(obj_type), content)
+    if write_object {
+      let _ = @gitlib.write_loose_object(fs, git_dir, parse_object_type(obj_type), content)
+
+    }
+    print_line(id.to_hex())
+  }
+}
+
+///|
+fn parse_object_type(s : String) -> @git.ObjectType {
+  match s {
+    "blob" => @git.ObjectType::Blob
+    "tree" => @git.ObjectType::Tree
+    "commit" => @git.ObjectType::Commit
+    "tag" => @git.ObjectType::Tag
+    _ => @git.ObjectType::Blob
+  }
+}
+
+///|
+async fn handle_ls_tree(args : Array[String]) -> Unit raise Error {
+  let root = get_work_root()
+  let git_dir = root + "/.git"
+  let fs = OsFs::new()
+  let mut recursive = false
+  let mut name_only = false
+  let mut tree_spec : String? = None
+  for arg in args {
+    match arg {
+      "-r" | "--recursive" => recursive = true
+      "--name-only" | "--name-status" => name_only = true
+      _ if not(arg.has_prefix("-")) => tree_spec = Some(arg)
+      _ => ()
+    }
+  }
+  guard tree_spec is Some(spec) else {
+    raise @git.GitError::InvalidObject("tree-ish required")
+  }
+  let tree_id = @gitlib.rev_parse(fs, git_dir, spec)
+  guard tree_id is Some(tid) else {
+    raise @git.GitError::InvalidObject("Not a valid object name: \{spec}")
+  }
+  let db = @gitlib.ObjectDb::load(fs, git_dir)
+  // Resolve to tree if it's a commit
+  let actual_tree_id = resolve_to_tree(db, fs, tid)
+  print_tree_entries(db, fs, actual_tree_id, "", recursive, name_only)
+}
+
+///|
+fn resolve_to_tree(
+  db : @gitlib.ObjectDb,
+  fs : &@git.RepoFileSystem,
+  id : @git.ObjectId,
+) -> @git.ObjectId raise @git.GitError {
+  let obj = db.get(fs, id)
+  guard obj is Some(o) else {
+    raise @git.GitError::InvalidObject("Object not found")
+  }
+  match o.obj_type {
+    @git.ObjectType::Tree => id
+    @git.ObjectType::Commit => {
+      let info = @git.parse_commit(o.data)
+      info.tree
+    }
+    _ => raise @git.GitError::InvalidObject("Not a tree or commit")
+  }
+}
+
+///|
+async fn print_tree_entries(
+  db : @gitlib.ObjectDb,
+  fs : &@git.RepoFileSystem,
+  tree_id : @git.ObjectId,
+  prefix : String,
+  recursive : Bool,
+  name_only : Bool,
+) -> Unit raise Error {
+  let obj = db.get(fs, tree_id)
+  guard obj is Some(o) else {
+    raise @git.GitError::InvalidObject("Tree not found")
+  }
+  let entries = @git.parse_tree(o.data)
+  for entry in entries {
+    let path = if prefix.length() == 0 {
+      entry.name
+    } else {
+      prefix + "/" + entry.name
+    }
+    let is_tree = entry.mode == "40000" || entry.mode == "040000"
+    if name_only {
+      if not(is_tree) || not(recursive) {
+        print_line(path)
+      }
+    } else {
+      let mode_str = if entry.mode == "40000" { "040000" } else { entry.mode }
+      let type_str = if is_tree { "tree" } else { "blob" }
+      print_line("\{mode_str} \{type_str} \{entry.id.to_hex()}\t\{path}")
+    }
+    if recursive && is_tree {
+      print_tree_entries(db, fs, entry.id, path, recursive, name_only)
+    }
+  }
+}
+
+///|
+async fn handle_write_tree(args : Array[String]) -> Unit raise Error {
+  let root = get_work_root()
+  let git_dir = root + "/.git"
+  let fs = OsFs::new()
+  ignore(args)
+  let entries = @gitlib.read_index_entries(fs, git_dir)
+  let tree_id = @gitlib.write_tree_from_index(fs, git_dir, entries)
+  print_line(tree_id.to_hex())
+}
+
+///|
+async fn handle_show_ref(args : Array[String]) -> Unit raise Error {
+  let root = get_work_root()
+  let git_dir = root + "/.git"
+  let fs = OsFs::new()
+  let mut heads_only = false
+  let mut tags_only = false
+  for arg in args {
+    match arg {
+      "--heads" => heads_only = true
+      "--tags" => tags_only = true
+      _ => ()
+    }
+  }
+  let refs = @gitlib.show_ref(fs, git_dir)
+  for item in refs {
+    let (refname, id) = item
+    if heads_only && not(refname.has_prefix("refs/heads/")) {
+      continue
+    }
+    if tags_only && not(refname.has_prefix("refs/tags/")) {
+      continue
+    }
+    print_line("\{id.to_hex()} \{refname}")
+  }
+}
+
+///|
+fn handle_update_ref(args : Array[String]) -> Unit raise Error {
+  let root = get_work_root()
+  let git_dir = root + "/.git"
+  let fs = OsFs::new()
+  let mut delete_mode = false
+  let positional : Array[String] = []
+  for arg in args {
+    match arg {
+      "-d" | "--delete" => delete_mode = true
+      _ if not(arg.has_prefix("-")) => positional.push(arg)
+      _ => ()
+    }
+  }
+  if delete_mode {
+    if positional.length() < 1 {
+      raise @git.GitError::InvalidObject("usage: git update-ref -d <refname>")
+    }
+    let refname = positional[0]
+    let ref_path = git_dir + "/" + refname
+    if fs.is_file(ref_path) {
+      fs.remove_file(ref_path)
+    }
+    return ()
+  }
+  if positional.length() < 2 {
+    raise @git.GitError::InvalidObject(
+      "usage: git update-ref <refname> <newvalue>",
+    )
+  }
+  let refname = positional[0]
+  let new_value = positional[1]
+  let new_id = @git.ObjectId::from_hex(new_value)
+  let ref_path = git_dir + "/" + refname
+  // Ensure parent directory exists
+  let dir = match ref_path.rev_find("/") {
+    None => ""
+    Some(i) => String::unsafe_substring(ref_path, start=0, end=i)
+  }
+  if dir.length() > 0 {
+    fs.mkdir_p(dir)
+  }
+  fs.write_string(ref_path, new_id.to_hex() + "\n")
+}
+
+///|
+async fn handle_symbolic_ref(args : Array[String]) -> Unit raise Error {
+  let root = get_work_root()
+  let git_dir = root + "/.git"
+  let fs = OsFs::new()
+  let mut delete_mode = false
+  let mut short_mode = false
+  let positional : Array[String] = []
+  for arg in args {
+    match arg {
+      "-d" | "--delete" => delete_mode = true
+      "--short" => short_mode = true
+      _ if not(arg.has_prefix("-")) => positional.push(arg)
+      _ => ()
+    }
+  }
+  if positional.length() == 0 {
+    raise @git.GitError::InvalidObject("usage: git symbolic-ref <name> [<ref>]")
+  }
+  let name = positional[0]
+  let ref_path = if name == "HEAD" { git_dir + "/HEAD" } else { git_dir + "/" + name }
+  if delete_mode {
+    if fs.is_file(ref_path) {
+      fs.remove_file(ref_path)
+    }
+    return ()
+  }
+  if positional.length() == 1 {
+    // Read mode
+    if not(fs.is_file(ref_path)) {
+      raise @git.GitError::InvalidObject("ref \{name} not found")
+    }
+    let content = decode_bytes(fs.read_file(ref_path))
+    let trimmed = content.trim_end(chars="\n\r ").to_string()
+    if trimmed.has_prefix("ref: ") {
+      let target = String::unsafe_substring(
+        trimmed,
+        start=5,
+        end=trimmed.length(),
+      )
+      if short_mode && target.has_prefix("refs/heads/") {
+        print_line(
+          String::unsafe_substring(target, start=11, end=target.length()),
+        )
+      } else {
+        print_line(target)
+      }
+    } else {
+      raise @git.GitError::InvalidObject("ref \{name} is not a symbolic ref")
+    }
+  } else {
+    // Write mode
+    let target = positional[1]
+    fs.write_string(ref_path, "ref: \{target}\n")
+  }
 }

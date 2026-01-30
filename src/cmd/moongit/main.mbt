@@ -45,12 +45,18 @@ async fn show_help() -> Unit {
     #|low-level / plumbing
     #|   cat-file        Provide content or type info for repository objects
     #|   config          Get and set repository options
-    #|   ls-files        Show information about files in the index
-    #|   rev-parse       Parse revision specifications
-    #|   pack-objects    Create a packed archive of objects
+    #|   hash-object     Compute object ID and optionally creates a blob
     #|   index-pack      Build pack index file for an existing packed archive
-    #|   upload-pack     Send objects packed back to git-fetch-pack
+    #|   ls-files        Show information about files in the index
+    #|   ls-tree         List the contents of a tree object
+    #|   pack-objects    Create a packed archive of objects
     #|   receive-pack    Receive what is pushed into the repository
+    #|   rev-parse       Parse revision specifications
+    #|   show-ref        List references in a local repository
+    #|   symbolic-ref    Read, modify and delete symbolic refs
+    #|   update-ref      Update the object name stored in a ref safely
+    #|   upload-pack     Send objects packed back to git-fetch-pack
+    #|   write-tree      Create a tree object from the current index
     #|
     #|See 'git help <command>' for more information on a specific command.
   print_line(help)
@@ -267,6 +273,30 @@ async fn dispatch_command(
     "ls-files" =>
       handle_ls_files(rest) catch {
         err => exit_with_error("ls-files", err)
+      }
+    "hash-object" =>
+      handle_hash_object(rest) catch {
+        err => exit_with_error("hash-object", err)
+      }
+    "ls-tree" =>
+      handle_ls_tree(rest) catch {
+        err => exit_with_error("ls-tree", err)
+      }
+    "write-tree" =>
+      handle_write_tree(rest) catch {
+        err => exit_with_error("write-tree", err)
+      }
+    "show-ref" =>
+      handle_show_ref(rest) catch {
+        err => exit_with_error("show-ref", err)
+      }
+    "update-ref" =>
+      handle_update_ref(rest) catch {
+        err => exit_with_error("update-ref", err)
+      }
+    "symbolic-ref" =>
+      handle_symbolic_ref(rest) catch {
+        err => exit_with_error("symbolic-ref", err)
       }
     "version" | "--version" => print_line("git version 2.47.0 (moongit)")
     // Fallback to system git for unknown commands
