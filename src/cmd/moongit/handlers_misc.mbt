@@ -516,26 +516,50 @@ async fn handle_ls_files(args : Array[String]) -> Unit raise Error {
   let mut show_stage = false
   let mut show_others = false
   let mut show_deleted = false
+  let mut show_directory = false
   for arg in args {
     match arg {
       "-s" | "--stage" => show_stage = true
       "-c" | "--cached" => () // default mode, no-op
       "-o" | "--others" => show_others = true
       "-d" | "--deleted" => show_deleted = true
+      "--directory" => show_directory = true
       _ => ()
     }
   }
   let entries = @gitlib.read_index_entries(fs, git_dir)
   if show_others {
-    // Show untracked files
+    // Build set of tracked paths and their parent directories
     let tracked : Map[String, Bool] = {}
+    let tracked_dirs : Map[String, Bool] = {}
     for e in entries {
       tracked[e.path] = true
+      // Mark all parent directories as tracked
+      let mut path = e.path
+      while true {
+        match path.rev_find("/") {
+          Some(idx) => {
+            let dir = (try! path[:idx]).to_string()
+            tracked_dirs[dir] = true
+            path = dir
+          }
+          None => break
+        }
+      }
     }
-    let all_files = @gitlib.list_working_files(fs, root)
-    for path in all_files {
-      if not(tracked.contains(path)) {
-        print_line(path)
+    if show_directory {
+      // Show untracked directories (not individual files)
+      let untracked_dirs = collect_untracked_dirs(fs, root, tracked_dirs)
+      for dir in untracked_dirs {
+        print_line(dir + "/")
+      }
+    } else {
+      // Show untracked files
+      let all_files = @gitlib.list_working_files(fs, root)
+      for path in all_files {
+        if not(tracked.contains(path)) {
+          print_line(path)
+        }
       }
     }
     return ()
@@ -560,6 +584,48 @@ async fn handle_ls_files(args : Array[String]) -> Unit raise Error {
   } else {
     for e in entries {
       print_line(e.path)
+    }
+  }
+}
+
+///|
+/// Collect untracked directories at the top level
+fn collect_untracked_dirs(
+  fs : &@git.RepoFileSystem,
+  root : String,
+  tracked_dirs : Map[String, Bool],
+) -> Array[String] raise @git.GitError {
+  let result : Array[String] = []
+  collect_untracked_dirs_recursive(fs, root, "", tracked_dirs, result)
+  result.sort()
+  result
+}
+
+///|
+fn collect_untracked_dirs_recursive(
+  fs : &@git.RepoFileSystem,
+  root : String,
+  prefix : String,
+  tracked_dirs : Map[String, Bool],
+  out : Array[String],
+) -> Unit raise @git.GitError {
+  let dir = if prefix == "" { root } else { root + "/" + prefix }
+  let items = fs.readdir(dir)
+  for name in items {
+    if name == "." || name == ".." || name == ".git" {
+      continue
+    }
+    let rel_path = if prefix == "" { name } else { prefix + "/" + name }
+    let abs_path = root + "/" + rel_path
+    if fs.is_dir(abs_path) {
+      // Check if this directory or any of its subdirectories are tracked
+      if tracked_dirs.contains(rel_path) {
+        // This directory has tracked content, recurse into it
+        collect_untracked_dirs_recursive(fs, root, rel_path, tracked_dirs, out)
+      } else {
+        // This directory is completely untracked, add it and don't recurse
+        out.push(rel_path)
+      }
     }
   }
 }
