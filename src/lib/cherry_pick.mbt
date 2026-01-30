@@ -94,17 +94,15 @@ pub fn cherry_pick(
   for entry in modified_files.iter() {
     let (path, file_entry) = entry
     match result_files.get(path) {
-      None => {
+      None =>
         // File doesn't exist in head - add it
         result_files[path] = file_entry
-      }
-      Some(head_entry) => {
+      Some(head_entry) =>
         // Check if head has the same content as parent
         match parent_files.get(path) {
-          Some(parent_entry) if parent_entry.id == head_entry.id => {
+          Some(parent_entry) if parent_entry.id == head_entry.id =>
             // No conflict - head hasn't changed the file
             result_files[path] = file_entry
-          }
           _ => {
             // Conflict - both sides modified
             conflicts.push(path)
@@ -112,13 +110,12 @@ pub fn cherry_pick(
             result_files[path] = file_entry
           }
         }
-      }
     }
   }
   // Apply deletions (check for conflicts)
   for path in deleted_files {
     match result_files.get(path) {
-      Some(head_entry) => {
+      Some(head_entry) =>
         // Check if head has the same content as parent
         match parent_files.get(path) {
           Some(parent_entry) if parent_entry.id == head_entry.id => {
@@ -133,7 +130,6 @@ pub fn cherry_pick(
 
           }
         }
-      }
       None => () // Already deleted
     }
   }

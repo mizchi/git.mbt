@@ -490,7 +490,9 @@ async fn handle_cat_file(args : Array[String]) -> Unit raise Error {
             entry.mode
           }
           let type_str = if entry.mode == "40000" { "tree" } else { "blob" }
-          print_line("\{mode_str} \{type_str} \{entry.id.to_hex()}\t\{entry.name}")
+          print_line(
+            "\{mode_str} \{type_str} \{entry.id.to_hex()}\t\{entry.name}",
+          )
         }
       }
       @git.ObjectType::Commit => {
@@ -678,7 +680,12 @@ async fn handle_hash_object(args : Array[String]) -> Unit raise Error {
     let content = read_all_stdin()
     let id = @git.hash_object_content(parse_object_type(obj_type), content)
     if write_object {
-      let _ = @gitlib.write_loose_object(fs, git_dir, parse_object_type(obj_type), content)
+      let _ = @gitlib.write_loose_object(
+        fs,
+        git_dir,
+        parse_object_type(obj_type),
+        content,
+      )
 
     }
     print_line(id.to_hex())
@@ -689,7 +696,12 @@ async fn handle_hash_object(args : Array[String]) -> Unit raise Error {
     let content = fs.read_file(abs)
     let id = @git.hash_object_content(parse_object_type(obj_type), content)
     if write_object {
-      let _ = @gitlib.write_loose_object(fs, git_dir, parse_object_type(obj_type), content)
+      let _ = @gitlib.write_loose_object(
+        fs,
+        git_dir,
+        parse_object_type(obj_type),
+        content,
+      )
 
     }
     print_line(id.to_hex())
@@ -805,7 +817,7 @@ async fn handle_write_tree(args : Array[String]) -> Unit raise Error {
     }
   }
   let entries = @gitlib.read_index_entries(fs, git_dir)
-  let tree_id = @gitlib.write_tree_from_index(fs, git_dir, entries, prefix=prefix)
+  let tree_id = @gitlib.write_tree_from_index(fs, git_dir, entries, prefix~)
   print_line(tree_id.to_hex())
 }
 
@@ -901,7 +913,11 @@ async fn handle_symbolic_ref(args : Array[String]) -> Unit raise Error {
     raise @git.GitError::InvalidObject("usage: git symbolic-ref <name> [<ref>]")
   }
   let name = positional[0]
-  let ref_path = if name == "HEAD" { git_dir + "/HEAD" } else { git_dir + "/" + name }
+  let ref_path = if name == "HEAD" {
+    git_dir + "/HEAD"
+  } else {
+    git_dir + "/" + name
+  }
   if delete_mode {
     if fs.is_file(ref_path) {
       fs.remove_file(ref_path)

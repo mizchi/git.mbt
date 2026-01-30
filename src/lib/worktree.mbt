@@ -353,9 +353,7 @@ pub fn write_tree_from_index(
       for e in entries {
         if e.path.has_prefix(prefix_with_slash) {
           // Strip the prefix from the path
-          let new_path = try {
-            e.path[prefix_with_slash.length():].to_string()
-          } catch {
+          let new_path = e.path[prefix_with_slash.length():].to_string() catch {
             _ => continue
           }
           result.push({ path: new_path, id: e.id, mode: e.mode, size: e.size })

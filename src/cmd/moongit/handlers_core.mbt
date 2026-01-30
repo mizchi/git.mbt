@@ -69,11 +69,16 @@ async fn handle_init(args : Array[String]) -> Unit raise Error {
     None => if bare { path } else { path + "/.git" }
   }
   // Check if this is a reinit (repository already exists)
-  let is_reinit = fs.is_dir(actual_git_dir) && fs.is_file(actual_git_dir + "/HEAD")
+  let is_reinit = fs.is_dir(actual_git_dir) &&
+    fs.is_file(actual_git_dir + "/HEAD")
   // Initialize repository (init_repo handles both new and reinit)
-  @gitlib.init_repo(fs, path, default_branch=branch, bare=bare)
+  @gitlib.init_repo(fs, path, default_branch=branch, bare~)
   // Print appropriate message
-  let verb = if is_reinit { "Reinitialized existing" } else { "Initialized empty" }
+  let verb = if is_reinit {
+    "Reinitialized existing"
+  } else {
+    "Initialized empty"
+  }
   if bare {
     print_line(verb + " Git repository in " + actual_git_dir + "/")
   } else {

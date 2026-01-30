@@ -362,3 +362,323 @@ test "git compat: commit with parent" {
     content="2fe96b04b8c1f081765898435f0d2497cfef21ea",
   )
 }
+
+// =============================================================================
+// Blob Integrity Tests (Binary Data)
+// =============================================================================
+
+///|
+test "blob integrity: null bytes preserved" {
+  // Verify null bytes are not truncated or corrupted
+  let data = Bytes::from_array([b'\x00', b'a', b'\x00', b'b', b'\x00'])
+  let (id, compressed) = @git.create_blob(data)
+  let decompressed = @zlib.zlib_decompress(compressed)
+  // Skip header "blob 5\0" (7 bytes)
+  let header_len = 7
+  assert_true(decompressed.length() == header_len + data.length())
+  for i = 0; i < data.length(); i = i + 1 {
+    assert_true(decompressed[header_len + i] == data[i])
+  }
+  // Verify hash is consistent
+  let id2 = @git.hash_blob(data)
+  assert_true(id == id2)
+}
+
+///|
+test "blob integrity: high bytes (0x80-0xFF)" {
+  // Verify bytes > 127 are handled correctly
+  let data = Bytes::from_array([b'\x80', b'\xFF', b'\xFE', b'\xAB', b'\xCD'])
+  let (id, compressed) = @git.create_blob(data)
+  let decompressed = @zlib.zlib_decompress(compressed)
+  let header_len = 7 // "blob 5\0"
+  assert_true(decompressed.length() == header_len + data.length())
+  for i = 0; i < data.length(); i = i + 1 {
+    assert_true(decompressed[header_len + i] == data[i])
+  }
+  let id2 = @git.hash_blob(data)
+  assert_true(id == id2)
+}
+
+///|
+test "blob integrity: all byte values roundtrip" {
+  // Create blob with all 256 possible byte values
+  let data : Array[Byte] = []
+  for i = 0; i < 256; i = i + 1 {
+    data.push(i.to_byte())
+  }
+  let bytes = Bytes::from_array(FixedArray::makei(256, fn(i) { data[i] }))
+  let (id, compressed) = @git.create_blob(bytes)
+  let decompressed = @zlib.zlib_decompress(compressed)
+  let header_len = 9 // "blob 256\0"
+  assert_true(decompressed.length() == header_len + 256)
+  for i = 0; i < 256; i = i + 1 {
+    assert_true(decompressed[header_len + i] == i.to_byte())
+  }
+  // Verify hash consistency
+  let id2 = @git.hash_blob(bytes)
+  assert_true(id == id2)
+}
+
+///|
+test "blob integrity: single byte" {
+  let data = Bytes::from_array([b'X'])
+  let (id, compressed) = @git.create_blob(data)
+  let decompressed = @zlib.zlib_decompress(compressed)
+  let header_len = 7 // "blob 1\0"
+  assert_true(decompressed.length() == header_len + 1)
+  assert_true(decompressed[header_len] == b'X')
+  let id2 = @git.hash_blob(data)
+  assert_true(id == id2)
+}
+
+///|
+test "blob integrity: 1KB binary data" {
+  // Test with larger binary data
+  let size = 1024
+  let data : Array[Byte] = []
+  for i = 0; i < size; i = i + 1 {
+    data.push((i % 256).to_byte())
+  }
+  let bytes = Bytes::from_array(FixedArray::makei(size, fn(i) { data[i] }))
+  let (id, compressed) = @git.create_blob(bytes)
+  let decompressed = @zlib.zlib_decompress(compressed)
+  // header: "blob 1024\0" = 10 bytes
+  let header_len = 10
+  assert_true(decompressed.length() == header_len + size)
+  for i = 0; i < size; i = i + 1 {
+    assert_true(decompressed[header_len + i] == (i % 256).to_byte())
+  }
+  let id2 = @git.hash_blob(bytes)
+  assert_true(id == id2)
+}
+
+///|
+test "blob integrity: 100KB binary data" {
+  // Test with data larger than single zlib block
+  let size = 100 * 1024
+  let data : Array[Byte] = []
+  for i = 0; i < size; i = i + 1 {
+    data.push((i % 256).to_byte())
+  }
+  let bytes = Bytes::from_array(FixedArray::makei(size, fn(i) { data[i] }))
+  let (id, compressed) = @git.create_blob(bytes)
+  let decompressed = @zlib.zlib_decompress(compressed)
+  // header: "blob 102400\0" = 12 bytes
+  let header_len = 12
+  assert_true(decompressed.length() == header_len + size)
+  // Check first and last bytes
+  assert_true(decompressed[header_len] == b'\x00')
+  assert_true(decompressed[header_len + 255] == b'\xFF')
+  assert_true(
+    decompressed[header_len + size - 1] == ((size - 1) % 256).to_byte(),
+  )
+  let id2 = @git.hash_blob(bytes)
+  assert_true(id == id2)
+}
+
+///|
+test "blob integrity: zlib compress/decompress roundtrip" {
+  // Test zlib roundtrip independently
+  let original = Bytes::from_array([
+    b'\x00', b'\x01', b'\x7F', b'\x80', b'\xFF', b'a', b'b', b'c',
+  ])
+  let compressed = @zlib.zlib_compress(original)
+  let decompressed = @zlib.zlib_decompress(compressed)
+  assert_true(decompressed.length() == original.length())
+  for i = 0; i < original.length(); i = i + 1 {
+    assert_true(decompressed[i] == original[i])
+  }
+}
+
+///|
+test "blob integrity: create_object and hash_object_content consistent" {
+  // Verify create_object and hash_object_content produce same ID
+  let data = Bytes::from_array([b'h', b'e', b'l', b'l', b'o'])
+  let (id1, _) = @git.create_object(@git.ObjectType::Blob, data)
+  let id2 = @git.hash_object_content(@git.ObjectType::Blob, data)
+  assert_true(id1 == id2)
+}
+
+///|
+test "blob integrity: repeated creation yields same ID" {
+  // Verify idempotency
+  let data = Bytes::from_array([b't', b'e', b's', b't'])
+  let (id1, _) = @git.create_blob(data)
+  let (id2, _) = @git.create_blob(data)
+  let (id3, _) = @git.create_blob(data)
+  assert_true(id1 == id2)
+  assert_true(id2 == id3)
+}
+
+// =============================================================================
+// ObjectId Tests (Additional)
+// =============================================================================
+
+///|
+test "ObjectId: equality for same hex" {
+  let hex = "ce013625030ba8dba906f756967f9e9ca394464a"
+  let id1 = @git.ObjectId::from_hex(hex)
+  let id2 = @git.ObjectId::from_hex(hex)
+  assert_true(id1 == id2)
+}
+
+///|
+test "ObjectId: inequality for different hex" {
+  let id1 = @git.ObjectId::from_hex("ce013625030ba8dba906f756967f9e9ca394464a")
+  let id2 = @git.ObjectId::from_hex("cc628ccd10742baea8241c5924df992b5c019f71")
+  assert_true(id1 != id2)
+}
+
+// =============================================================================
+// Git-Verified Binary Blob Hash Tests
+// =============================================================================
+
+///|
+test "git compat: blob hash binary 0x00 0x01 0x7f 0x80 0xff" {
+  // printf '\x00\x01\x7f\x80\xff' | git hash-object --stdin
+  let data = Bytes::from_array([b'\x00', b'\x01', b'\x7F', b'\x80', b'\xFF'])
+  let id = @git.hash_blob(data)
+  inspect(id.to_hex(), content="3f841d7e56eef5a4d10f557d3db2228bb9948b2b")
+}
+
+///|
+test "git compat: blob hash all 256 byte values" {
+  // python3 -c 'import sys; sys.stdout.buffer.write(bytes(range(256)))' | git hash-object --stdin
+  let data : Array[Byte] = []
+  for i = 0; i < 256; i = i + 1 {
+    data.push(i.to_byte())
+  }
+  let bytes = Bytes::from_array(FixedArray::makei(256, fn(i) { data[i] }))
+  let id = @git.hash_blob(bytes)
+  inspect(id.to_hex(), content="c86626638e0bc8cf47ca49bb1525b40e9737ee64")
+}
+
+// =============================================================================
+// Object Roundtrip Tests (create -> compress -> decompress -> parse -> verify)
+// =============================================================================
+
+///|
+/// Helper: parse header from raw loose object format "type size\0content"
+/// Returns (type_str, content_start_index)
+fn parse_loose_header(raw : Bytes) -> (String, Int) {
+  let type_buf = StringBuilder::new()
+  let mut i = 0
+  // Read type until space
+  while i < raw.length() && raw[i] != b' ' {
+    type_buf.write_char(raw[i].to_int().unsafe_to_char())
+    i += 1
+  }
+  i += 1 // skip space
+  // Skip size digits until null byte
+  while i < raw.length() && raw[i] != b'\x00' {
+    i += 1
+  }
+  i += 1 // skip null byte
+  (type_buf.to_string(), i)
+}
+
+///|
+test "roundtrip: binary blob create -> compress -> decompress" {
+  // Create blob with binary data including null bytes and high bytes
+  let original = Bytes::from_array([
+    b'\x00', b'\x01', b'\x7F', b'\x80', b'\xFE', b'\xFF',
+  ])
+  let (expected_id, compressed) = @git.create_blob(original)
+
+  // Decompress
+  let raw = @zlib.zlib_decompress(compressed)
+
+  // Parse header
+  let (type_str, content_start) = parse_loose_header(raw)
+
+  // Verify type
+  assert_true(type_str == "blob")
+
+  // Extract content
+  let content_len = raw.length() - content_start
+  assert_true(content_len == original.length())
+
+  // Verify every byte matches original
+  for i = 0; i < original.length(); i = i + 1 {
+    assert_true(raw[content_start + i] == original[i])
+  }
+
+  // Verify re-hashing gives same ID
+  let computed_id = @git.hash_blob(original)
+  assert_true(computed_id == expected_id)
+}
+
+///|
+test "roundtrip: tree create -> compress -> decompress" {
+  // Create tree
+  let blob_id = @git.ObjectId::from_hex(
+    "ce013625030ba8dba906f756967f9e9ca394464a",
+  )
+  let entries = [@git.TreeEntry::new("100644", "test.txt", blob_id)]
+  let (expected_id, compressed) = @git.create_tree(entries)
+
+  // Decompress
+  let raw = @zlib.zlib_decompress(compressed)
+
+  // Parse header
+  let (type_str, content_start) = parse_loose_header(raw)
+  assert_true(type_str == "tree")
+
+  // Extract content
+  let content_len = raw.length() - content_start
+  let content = Bytes::from_array(
+    FixedArray::makei(content_len, fn(i) { raw[content_start + i] }),
+  )
+
+  // Verify tree can be parsed
+  let parsed_entries = @git.parse_tree(content)
+  assert_true(parsed_entries.length() == 1)
+  assert_true(parsed_entries[0].name == "test.txt")
+  assert_true(parsed_entries[0].mode == "100644")
+  assert_true(parsed_entries[0].id == blob_id)
+
+  // Verify re-hashing gives same ID
+  let computed_id = @git.hash_object_content(@git.ObjectType::Tree, content)
+  assert_true(computed_id == expected_id)
+}
+
+///|
+test "roundtrip: commit create -> compress -> decompress" {
+  let tree_id = @git.ObjectId::from_hex(
+    "88e38705fdbd3608cddbe904b67c731f3234c45b",
+  )
+  let commit = @git.Commit::new(
+    tree_id,
+    [],
+    "Test <test@example.com>",
+    1700000000L,
+    "+0000",
+    "Test <test@example.com>",
+    1700000000L,
+    "+0000",
+    "Test commit\n",
+  )
+  let (expected_id, compressed) = @git.create_commit(commit)
+
+  // Decompress
+  let raw = @zlib.zlib_decompress(compressed)
+
+  // Parse header
+  let (type_str, content_start) = parse_loose_header(raw)
+  assert_true(type_str == "commit")
+
+  // Extract content
+  let content_len = raw.length() - content_start
+  let content = Bytes::from_array(
+    FixedArray::makei(content_len, fn(i) { raw[content_start + i] }),
+  )
+
+  // Verify commit can be parsed
+  let parsed = @git.parse_commit(content)
+  assert_true(parsed.tree == tree_id)
+  assert_true(parsed.parents.length() == 0)
+
+  // Verify re-hashing gives same ID
+  let computed_id = @git.hash_object_content(@git.ObjectType::Commit, content)
+  assert_true(computed_id == expected_id)
+}

@@ -38,13 +38,15 @@ pub fn stash_list(
       None => continue
       Some(idx) => {
         let prefix = String::unsafe_substring(line, start=0, end=idx)
-        let message = String::unsafe_substring(line, start=idx + 1, end=line.length())
+        let message = String::unsafe_substring(
+          line,
+          start=idx + 1,
+          end=line.length(),
+        )
         let parts = prefix.split(" ").map(fn(v) { v.to_string() }).collect()
         if parts.length() >= 2 {
           let new_sha = parts[1]
-          let id = @git.ObjectId::from_hex(new_sha) catch {
-            _ => continue
-          }
+          let id = @git.ObjectId::from_hex(new_sha) catch { _ => continue }
           entries.push({ id, message })
         }
       }
@@ -121,7 +123,9 @@ pub fn stash_push(
   let old_id = if rfs.is_file(stash_ref_path) {
     let content = @utf8.decode_lossy(rfs.read_file(stash_ref_path)[:])
     let hex = content.trim_end(chars="\n\r ").to_string()
-    @git.ObjectId::from_hex(hex) catch { _ => @git.ObjectId::zero() }
+    @git.ObjectId::from_hex(hex) catch {
+      _ => @git.ObjectId::zero()
+    }
   } else {
     @git.ObjectId::zero()
   }
@@ -194,7 +198,13 @@ pub fn stash_apply(
   // Apply worktree state from stash
   let stash_files = collect_tree_files(db, rfs, commit_info.tree)
   write_worktree_from_files(
-    db, fs, rfs, git_dir, root, stash_files, remove_missing=false,
+    db,
+    fs,
+    rfs,
+    git_dir,
+    root,
+    stash_files,
+    remove_missing=false,
   )
   // Also update index from first parent's second parent (index commit) if exists
   if commit_info.parents.length() >= 2 {
@@ -267,9 +277,9 @@ fn stash_drop_at(
   } else {
     // Reverse back and write
     lines.rev_in_place()
-    let new_content = lines.iter().fold(init="", fn(acc, line) {
-      acc + line + "\n"
-    })
+    let new_content = lines
+      .iter()
+      .fold(init="", fn(acc, line) { acc + line + "\n" })
     fs.write_string(reflog_path, new_content)
     // Update refs/stash to newest entry (last line has newest)
     let newest = lines[lines.length() - 1]

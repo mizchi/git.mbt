@@ -310,7 +310,9 @@ async fn handle_upload_pack(args : Array[String]) -> Unit {
   // Handle -h option
   for arg in args {
     if arg == "-h" {
-      print_line("usage: git upload-pack [--[no-]strict] [--timeout=<n>] [--stateless-rpc]")
+      print_line(
+        "usage: git upload-pack [--[no-]strict] [--timeout=<n>] [--stateless-rpc]",
+      )
       print_line("                       [--advertise-refs] <dir>")
       @sys.exit(129)
     }
@@ -539,12 +541,7 @@ async fn handle_push(args : Array[String]) -> Unit raise Error {
   }
   // Determine refspec
   let refname = match refspec {
-    Some(r) =>
-      if r.has_prefix("refs/") {
-        r
-      } else {
-        "refs/heads/" + r
-      }
+    Some(r) => if r.has_prefix("refs/") { r } else { "refs/heads/" + r }
     None => {
       // Use current branch
       let head_ref = @gitlib.read_head_ref(fs, git_dir)

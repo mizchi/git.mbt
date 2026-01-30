@@ -58,7 +58,7 @@ pub fn fast_forward_to(&@git.FileSystem, &@git.RepoFileSystem, String, @git.Obje
 
 pub fn gc_repo(&@git.FileSystem, &@git.RepoFileSystem, String) -> GcResult raise @git.GitError
 
-pub fn init_repo(&@git.FileSystem, String, default_branch? : String) -> Unit raise @git.GitError
+pub fn init_repo(&@git.FileSystem, String, default_branch? : String, bare? : Bool) -> Unit raise @git.GitError
 
 pub fn is_ignored_path(&@git.RepoFileSystem, String, String, Bool) -> Bool raise @git.GitError
 
@@ -182,7 +182,7 @@ pub fn write_object_bytes(&@git.FileSystem, String, @git.ObjectId, Bytes) -> Uni
 
 pub fn write_sparse_patterns(&@git.FileSystem, String, Array[String]) -> Unit raise @git.GitError
 
-pub fn write_tree_from_index(&@git.FileSystem, String, Array[IndexEntry]) -> @git.ObjectId raise @git.GitError
+pub fn write_tree_from_index(&@git.FileSystem, String, Array[IndexEntry], prefix? : String?) -> @git.ObjectId raise @git.GitError
 
 pub fn write_worktree_from_files(ObjectDb, &@git.FileSystem, &@git.RepoFileSystem, String, String, Map[String, TreeFileEntry], remove_missing? : Bool) -> Unit raise @git.GitError
 

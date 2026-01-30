@@ -305,9 +305,14 @@ async fn handle_stash(args : Array[String]) -> Unit raise Error {
     "push"
   } else {
     let first = args[0]
-    if first.has_prefix("-") { "push" } else { first }
+    if first.has_prefix("-") {
+      "push"
+    } else {
+      first
+    }
   }
-  let rest : Array[String] = if args.length() > 0 && not(args[0].has_prefix("-")) {
+  let rest : Array[String] = if args.length() > 0 &&
+    not(args[0].has_prefix("-")) {
     args.iter().drop(1).collect()
   } else {
     args.iter().collect()
@@ -374,7 +379,8 @@ async fn handle_stash(args : Array[String]) -> Unit raise Error {
       }
       print_line("Cleared all stash entries")
     }
-    _ => raise @git.GitError::InvalidObject("Unknown stash subcommand: \{subcmd}")
+    _ =>
+      raise @git.GitError::InvalidObject("Unknown stash subcommand: \{subcmd}")
   }
 }
 

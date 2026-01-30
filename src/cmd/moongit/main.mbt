@@ -276,10 +276,7 @@ async fn dispatch_command(
       }
     // Misc operations
     "diff" => handle_diff(rest) catch { err => exit_with_error("diff", err) }
-    "merge" =>
-      handle_merge(rest) catch {
-        err => exit_with_error("merge", err)
-      }
+    "merge" => handle_merge(rest) catch { err => exit_with_error("merge", err) }
     "tag" => handle_tag(rest) catch { err => exit_with_error("tag", err) }
     "rm" => handle_rm(rest) catch { err => exit_with_error("rm", err) }
     "mv" => handle_mv(rest) catch { err => exit_with_error("mv", err) }

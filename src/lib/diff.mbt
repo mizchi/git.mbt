@@ -262,13 +262,12 @@ fn diff_read_blob(
   let obj = db.get(fs, id)
   match obj {
     None => None // Object might be in a submodule or unavailable
-    Some(o) => {
+    Some(o) =>
       if o.obj_type != @git.ObjectType::Blob {
         None // Submodule entries point to commits, not blobs
       } else {
         Some(o.data)
       }
-    }
   }
 }
 
