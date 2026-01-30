@@ -10,10 +10,10 @@ config|partial|get,set,--global,--local,--list|--edit,--unset,--add,--get-regexp
 clone|partial|--depth,--branch,-b,--single-branch|--mirror,--bare,--recurse-submodules,--shallow-submodules|HTTP only
 
 # Basic Snapshotting
-add|partial|<pathspec>|--all,-A,--patch,-p,--interactive,-i,--force,-f|
+add|partial|<pathspec>,--all,-A,--force,-f|--patch,-p,--interactive,-i|
 status|partial|--porcelain,--short,-s,--branch,-b|--long,--verbose,-v,--untracked-files,-u,--ignored|
 diff|partial|--stat,--cached,--staged|--color,--word-diff,--name-only,--name-status|Basic diff only
-commit|partial|-m,--message,-a,--all,--amend|--interactive,--patch,-p,--author,--date,--gpg-sign|
+commit|partial|-m,--message,-a,--all,--amend,--author,--date|--interactive,--patch,-p,--gpg-sign|
 reset|full|--soft,--mixed,--hard,<commit>||
 rm|partial|--cached,-r,--recursive,--force,-f|--dry-run,-n|
 mv|partial|<source>,<destination>|--force,-f,--dry-run,-n,--verbose,-v|

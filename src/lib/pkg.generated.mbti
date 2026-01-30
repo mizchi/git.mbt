@@ -34,9 +34,9 @@ pub fn collect_tree_files(ObjectDb, &@git.RepoFileSystem, @git.ObjectId) -> Map[
 
 pub fn collect_tree_files_from_commit(ObjectDb, &@git.RepoFileSystem, @git.ObjectId) -> Map[String, TreeFileEntry] raise @git.GitError
 
-pub fn commit(&@git.FileSystem, &@git.RepoFileSystem, String, String, String, Int64) -> @git.ObjectId raise @git.GitError
+pub fn commit(&@git.FileSystem, &@git.RepoFileSystem, String, String, String, Int64, committer? : String, committer_timestamp? : Int64) -> @git.ObjectId raise @git.GitError
 
-pub fn commit_amend(&@git.FileSystem, &@git.RepoFileSystem, String, String, String, Int64) -> @git.ObjectId raise @git.GitError
+pub fn commit_amend(&@git.FileSystem, &@git.RepoFileSystem, String, String, String, Int64, committer? : String, committer_timestamp? : Int64) -> @git.ObjectId raise @git.GitError
 
 pub fn create_annotated_tag(&@git.FileSystem, &@git.RepoFileSystem, String, String, @git.ObjectId, String, String, Int64) -> Unit raise @git.GitError
 
@@ -70,6 +70,10 @@ pub fn gc_repo(&@git.FileSystem, &@git.RepoFileSystem, String) -> GcResult raise
 
 pub fn get_reflog_path(String, String) -> String
 
+pub fn get_worktree_lock_reason(&@git.RepoFileSystem, String, String) -> String? raise @git.GitError
+
+pub fn get_worktree_prunable_reason(&@git.RepoFileSystem, String, String) -> String? raise @git.GitError
+
 pub fn init_repo(&@git.FileSystem, String, default_branch? : String, bare? : Bool) -> Unit raise @git.GitError
 
 pub fn init_repo_with_options(&@git.FileSystem, String, InitOptions) -> Unit raise @git.GitError
@@ -100,6 +104,8 @@ pub fn load_object_store_from_fs(&@git.RepoFileSystem, String) -> @git.ObjectSto
 
 pub fn load_rebase_state(&@git.RepoFileSystem, String) -> RebaseState? raise @git.GitError
 
+pub fn lock_worktree(&@git.FileSystem, &@git.RepoFileSystem, String, String, reason? : String?) -> Unit raise @git.GitError
+
 pub fn log_head(&@git.RepoFileSystem, String, max_count? : Int) -> Array[LogEntry] raise @git.GitError
 
 pub fn log_head_oneline(&@git.RepoFileSystem, String, max_count? : Int) -> Array[String] raise @git.GitError
@@ -107,6 +113,8 @@ pub fn log_head_oneline(&@git.RepoFileSystem, String, max_count? : Int) -> Array
 pub fn matches_sparse_pattern(String, Array[String]) -> Bool
 
 pub fn merge(&@git.FileSystem, &@git.RepoFileSystem, String, @git.ObjectId, String, String, Int64) -> MergeResult raise @git.GitError
+
+pub fn move_worktree(&@git.FileSystem, &@git.RepoFileSystem, String, String, String, force? : Bool) -> Unit raise @git.GitError
 
 pub fn mv_path(&@git.FileSystem, &@git.RepoFileSystem, String, String, String, force? : Bool) -> Unit raise @git.GitError
 
@@ -151,6 +159,8 @@ pub fn reflog_exists(&@git.RepoFileSystem, String, String) -> Bool
 pub fn remove_worktree(&@git.FileSystem, &@git.RepoFileSystem, String, String, force? : Bool) -> Unit raise @git.GitError
 
 pub fn repack_repo(&@git.FileSystem, &@git.RepoFileSystem, String) -> RepackResult? raise @git.GitError
+
+pub fn repair_worktree(&@git.FileSystem, &@git.RepoFileSystem, String, worktree_paths? : Array[String]) -> Array[String] raise @git.GitError
 
 pub fn reset(&@git.FileSystem, &@git.RepoFileSystem, String, String, ResetMode) -> @git.ObjectId raise @git.GitError
 
@@ -197,6 +207,8 @@ pub fn status_text(&@git.RepoFileSystem, String) -> String raise @git.GitError
 pub fn switch_branch(&@git.FileSystem, &@git.RepoFileSystem, String, String, create? : Bool, checkout? : Bool) -> Unit raise @git.GitError
 
 pub fn tree_files_to_index(ObjectDb, &@git.RepoFileSystem, Map[String, TreeFileEntry]) -> Array[IndexEntry] raise @git.GitError
+
+pub fn unlock_worktree(&@git.FileSystem, &@git.RepoFileSystem, String, String) -> Unit raise @git.GitError
 
 pub fn update_head_ref(&@git.FileSystem, &@git.RepoFileSystem, String, @git.ObjectId) -> Unit raise @git.GitError
 

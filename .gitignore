@@ -6,3 +6,7 @@ target
 .moonagent/
 .jj/tools/git-shim/shim.log
 tools/git-shim/shim.log
+tools/git-shim/git
+tools/git-shim/moon
+tools/moon
+tools/real-git-path

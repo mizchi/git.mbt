@@ -197,7 +197,9 @@ pub fn commit(
   root : String,
   message : String,
   author : String,
-  timestamp : Int64,
+  author_timestamp : Int64,
+  committer~ : String = author,
+  committer_timestamp~ : Int64 = author_timestamp,
 ) -> @git.ObjectId raise @git.GitError {
   let git_dir = join_path(root, ".git")
   let entries = read_index_entries(rfs, git_dir)
@@ -211,7 +213,15 @@ pub fn commit(
     None => []
   }
   let commit = @git.Commit::new(
-    tree_id, parents, author, timestamp, "+0000", author, timestamp, "+0000", message,
+    tree_id,
+    parents,
+    author,
+    author_timestamp,
+    "+0000",
+    committer,
+    committer_timestamp,
+    "+0000",
+    message,
   )
   let (commit_id, compressed) = @git.create_commit(commit)
   write_object_bytes(fs, git_dir, commit_id, compressed)
@@ -563,7 +573,9 @@ pub fn commit_amend(
   root : String,
   message : String,
   author : String,
-  timestamp : Int64,
+  author_timestamp : Int64,
+  committer~ : String = author,
+  committer_timestamp~ : Int64 = author_timestamp,
 ) -> @git.ObjectId raise @git.GitError {
   let git_dir = join_path(root, ".git")
   let entries = read_index_entries(rfs, git_dir)
@@ -589,7 +601,15 @@ pub fn commit_amend(
     None => []
   }
   let commit = @git.Commit::new(
-    tree_id, parents, author, timestamp, "+0000", author, timestamp, "+0000", message,
+    tree_id,
+    parents,
+    author,
+    author_timestamp,
+    "+0000",
+    committer,
+    committer_timestamp,
+    "+0000",
+    message,
   )
   let (commit_id, compressed) = @git.create_commit(commit)
   write_object_bytes(fs, git_dir, commit_id, compressed)
