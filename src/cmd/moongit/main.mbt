@@ -351,6 +351,10 @@ async fn dispatch_command(
       handle_bisect(rest) catch {
         err => exit_with_error("bisect", err)
       }
+    "describe" =>
+      handle_describe(rest) catch {
+        err => exit_with_error("describe", err)
+      }
     "version" | "--version" => print_line("git version 2.47.0 (moongit)")
     // Fallback to system git for unknown commands
     _ =>
