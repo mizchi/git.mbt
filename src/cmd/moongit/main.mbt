@@ -342,6 +342,10 @@ async fn dispatch_command(
       handle_submodule(rest) catch {
         err => exit_with_error("submodule", err)
       }
+    "revert" =>
+      handle_revert(rest) catch {
+        err => exit_with_error("revert", err)
+      }
     "version" | "--version" => print_line("git version 2.47.0 (moongit)")
     // Fallback to system git for unknown commands
     _ =>

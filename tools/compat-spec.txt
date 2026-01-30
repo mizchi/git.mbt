@@ -68,6 +68,6 @@ format-patch|none|||
 gc|partial|--prune,-q,--quiet|--aggressive,--auto,--keep-largest-pack|Repack + prune unreachable
 grep|partial|<pattern>,-n,--line-number,-i,--ignore-case,-l,--files-with-matches,-c,--count,-v,--invert-match|-E,-P,--extended-regexp,--perl-regexp,-w,--word-regexp|
 notes|none|||
-revert|none|||
+revert|partial|<commit>,-n,--no-commit,-m|--continue,--abort,--skip|
 shortlog|none|||
 submodule|partial|status,init,update,deinit,sync,--init,--recursive|add,foreach,absorbgitdirs|

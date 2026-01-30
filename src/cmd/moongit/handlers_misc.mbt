@@ -2676,3 +2676,200 @@ fn update_remote_origin(content : String, url : String) -> String {
   }
   lines.join("\n")
 }
+
+///|
+async fn handle_revert(args : Array[String]) -> Unit raise Error {
+  let root = get_work_root()
+  let git_dir = root + "/.git"
+  let fs = OsFs::new()
+  let mut no_commit = false
+  let mut mainline : Int? = None
+  let commits : Array[String] = []
+  let mut i = 0
+  while i < args.length() {
+    let arg = args[i]
+    match arg {
+      "-n" | "--no-commit" => no_commit = true
+      "-m" if i + 1 < args.length() => {
+        mainline = Some(@strconv.parse_int(args[i + 1]))
+        i += 1
+      }
+      _ if arg.has_prefix("-m") =>
+        mainline = Some(
+          @strconv.parse_int(
+            String::unsafe_substring(arg, start=2, end=arg.length()),
+          ),
+        )
+      "--continue" | "--abort" | "--skip" => {
+        eprint_line("revert --continue/--abort/--skip not yet implemented")
+        @sys.exit(1)
+      }
+      _ if not(arg.has_prefix("-")) => commits.push(arg)
+      _ => ()
+    }
+    i += 1
+  }
+  if commits.length() == 0 {
+    raise @git.GitError::InvalidObject("usage: git revert <commit>...")
+  }
+  let rfs : &@git.RepoFileSystem = fs
+  let wfs : &@git.FileSystem = fs
+  let db = @gitlib.ObjectDb::load(rfs, git_dir)
+  for commit_ref in commits {
+    // Resolve commit
+    let commit_id = @gitlib.rev_parse(rfs, git_dir, commit_ref)
+    guard commit_id is Some(cid) else {
+      raise @git.GitError::InvalidObject("unknown revision: \{commit_ref}")
+    }
+    // Load commit
+    let obj = db.get(rfs, cid)
+    guard obj is Some(o) else {
+      raise @git.GitError::InvalidObject("commit not found: \{cid.to_hex()}")
+    }
+    let commit_info = @git.parse_commit(o.data)
+    // Get parent (for merge commits, use mainline)
+    let parent_id = if commit_info.parents.length() == 0 {
+      raise @git.GitError::InvalidObject(
+        "cannot revert initial commit without --root",
+      )
+    } else if commit_info.parents.length() > 1 {
+      // Merge commit
+      match mainline {
+        Some(m) =>
+          if m < 1 || m > commit_info.parents.length() {
+            raise @git.GitError::InvalidObject(
+              "mainline must be 1..\{commit_info.parents.length()}",
+            )
+          } else {
+            commit_info.parents[m - 1]
+          }
+        None =>
+          raise @git.GitError::InvalidObject(
+            "commit is a merge, -m option required",
+          )
+      }
+    } else {
+      commit_info.parents[0]
+    }
+    // Get trees for commit and parent
+    let commit_files = @gitlib.collect_tree_files_from_commit(db, rfs, cid)
+    let parent_files = @gitlib.collect_tree_files_from_commit(db, rfs, parent_id)
+    // Apply reverse changes
+    let mut has_conflicts = false
+    // Files that were added in commit -> delete them
+    for item in commit_files.to_array() {
+      let (path, _) = item
+      if not(parent_files.contains(path)) {
+        // File was added in commit, remove it
+        let abs_path = root + "/" + path
+        if rfs.is_file(abs_path) {
+          wfs.remove_file(abs_path)
+        }
+        // Remove from index
+        remove_from_index(wfs, rfs, git_dir, path)
+      }
+    }
+    // Files that were deleted in commit -> restore them
+    for item in parent_files.to_array() {
+      let (path, entry) = item
+      if not(commit_files.contains(path)) {
+        // File was deleted in commit, restore it
+        let blob_obj = db.get(rfs, entry.id)
+        guard blob_obj is Some(bo) else { continue }
+        let abs_path = root + "/" + path
+        // Ensure parent dir exists
+        match abs_path.rev_find("/") {
+          Some(idx) => {
+            let parent = String::unsafe_substring(abs_path, start=0, end=idx)
+            wfs.mkdir_p(parent)
+          }
+          None => ()
+        }
+        wfs.write_file(abs_path, bo.data)
+        // Add to index
+        @gitlib.add_paths(wfs, rfs, root, [path])
+      }
+    }
+    // Files that were modified in commit -> restore parent version
+    for item in commit_files.to_array() {
+      let (path, commit_entry) = item
+      match parent_files.get(path) {
+        Some(parent_entry) =>
+          if commit_entry.id.to_hex() != parent_entry.id.to_hex() {
+            // File was modified, restore parent version
+            let abs_path = root + "/" + path
+            // Check if current file matches commit version (clean revert)
+            let current_content = rfs.read_file(abs_path) catch { _ => b"" }
+            let current_id = @git.hash_blob(current_content)
+            if current_id.to_hex() != commit_entry.id.to_hex() {
+              // Current file differs from commit, potential conflict
+              eprint_line("warning: \{path} has local modifications")
+              has_conflicts = true
+              continue
+            }
+            // Restore parent version
+            let blob_obj = db.get(rfs, parent_entry.id)
+            guard blob_obj is Some(bo) else { continue }
+            wfs.write_file(abs_path, bo.data)
+            @gitlib.add_paths(wfs, rfs, root, [path])
+          }
+        None => ()
+      }
+    }
+    if has_conflicts {
+      eprint_line("error: could not revert \{commit_ref}")
+      eprint_line("hint: resolve conflicts and run 'git revert --continue'")
+      @sys.exit(1)
+    }
+    // Create revert commit unless --no-commit
+    if not(no_commit) {
+      let original_msg = extract_commit_message(o.data)
+      let first_line = match original_msg.find("\n") {
+        Some(idx) =>
+          String::unsafe_substring(original_msg, start=0, end=idx)
+        None => original_msg
+      }
+      let revert_msg = "Revert \"\{first_line}\"\n\nThis reverts commit \{cid.to_hex()}.\n"
+      let author = get_author_string()
+      let timestamp = get_commit_timestamp()
+      let new_commit_id = @gitlib.commit(wfs, rfs, root, revert_msg, author, timestamp)
+      let short_id = (try! new_commit_id.to_hex()[:7]).to_string()
+      print_line("[\{short_id}] Revert \"\{first_line}\"")
+    }
+  }
+}
+
+///|
+fn extract_commit_message(data : Bytes) -> String {
+  let text = decode_bytes(data)
+  let mut in_message = false
+  let msg_lines : Array[String] = []
+  for line_view in text.split("\n") {
+    let line = line_view.to_string()
+    if in_message {
+      msg_lines.push(line)
+      continue
+    }
+    if line.length() == 0 {
+      in_message = true
+    }
+  }
+  msg_lines.join("\n")
+}
+
+///|
+fn remove_from_index(
+  wfs : &@git.FileSystem,
+  rfs : &@git.RepoFileSystem,
+  git_dir : String,
+  path : String,
+) -> Unit {
+  let entries = @gitlib.read_index_entries(rfs, git_dir) catch { _ => return }
+  let new_entries : Array[@gitlib.IndexEntry] = []
+  for e in entries {
+    if e.path != path {
+      new_entries.push(e)
+    }
+  }
+  @gitlib.write_index_entries(wfs, git_dir, new_entries) catch { _ => () }
+}
