@@ -1,0 +1,73 @@
+# Git Command Compatibility Specification
+# Format: command|status|supported_options|unsupported_options|notes
+# status: full, partial, none (fallback to system git)
+
+# Setup and Config
+init|full|--bare,-b,--initial-branch,--quiet,-q,--separate-git-dir,--template|--shared,--object-format|
+config|partial|get,set,--global,--local,--list|--edit,--unset,--add,--get-regexp,--replace-all|Read/write only
+
+# Getting and Creating Projects
+clone|partial|--depth,--branch,-b,--single-branch|--mirror,--bare,--recurse-submodules,--shallow-submodules|HTTP only
+
+# Basic Snapshotting
+add|partial|<pathspec>|--all,-A,--patch,-p,--interactive,-i,--force,-f|
+status|partial|--porcelain,--short,-s,--branch,-b|--long,--verbose,-v,--untracked-files,-u,--ignored|
+diff|partial|--stat,--cached,--staged|--color,--word-diff,--name-only,--name-status|Basic diff only
+commit|partial|-m,--message,-a,--all,--amend|--interactive,--patch,-p,--author,--date,--gpg-sign|
+reset|full|--soft,--mixed,--hard,<commit>||
+rm|partial|--cached,-r,--recursive,--force,-f|--dry-run,-n|
+mv|partial|<source>,<destination>|--force,-f,--dry-run,-n,--verbose,-v|
+
+# Branching and Merging
+branch|partial|--list,-l,--delete,-d,-D,--force,-f,--verbose,-v,--all,-a,--remotes,-r|--move,-m,--copy,-c,--set-upstream-to,-u,--unset-upstream|
+checkout|partial|<branch>,<commit>,-b,--detach|--patch,-p,--ours,--theirs,--merge,-m|
+switch|partial|<branch>,-c,--create|--detach,-d,--discard-changes|
+merge|partial|<branch>|--no-ff,--ff-only,--squash,--abort,--continue|Fast-forward only
+log|partial|--oneline,-n,--max-count|--graph,--all,--decorate,--stat,--patch,-p,--author,--since,--until|
+stash|partial|push,pop,apply,drop,list|show,branch,clear,create,store|
+tag|partial|--list,-l,--delete,-d,-a,--annotate,-m,--message|--force,-f,--sign,-s,--verify,-v|
+worktree|partial|list,add,remove,prune,lock,unlock,move,repair|--porcelain (partial),-z|
+
+# Sharing and Updating
+fetch|partial|<remote>|--all,--prune,-p,--tags,--depth,--shallow-since|HTTP only
+pull|partial|<remote>,--rebase|--no-rebase,--ff-only,--no-ff|HTTP only
+push|partial|<remote>,<branch>|--force,-f,--tags,--delete,-d,--set-upstream,-u|HTTP only
+remote|partial|add,remove,rename,-v,--verbose|set-url,get-url,prune,update|
+
+# Inspection and Comparison
+show|partial|<commit>,--pretty=raw|--stat,--name-only,--format|
+show-ref|full|--head,--heads,--tags||
+
+# Patching
+cherry-pick|partial|<commit>|--continue,--abort,--skip,--no-commit,-n|
+rebase|partial|<branch>,--continue,--abort,--skip|--interactive,-i,--onto,--root|
+
+# Plumbing Commands
+cat-file|partial|-t,-s,-p,--batch,--batch-check|--batch-all-objects|
+hash-object|partial|-w,--stdin,-t|--literally|
+ls-files|partial|--cached,-c,--deleted,-d,--modified,-m,--others,-o,--stage,-s,--exclude,--exclude-from,-z,--recurse-submodules,--directory|--full-name,--abbrev,--debug|
+ls-tree|partial|-r,--name-only,--name-status,-l,--long,-d,-z,--full-name,--full-tree,--abbrev,--recurse-submodules,<path>|--object-only|
+rev-parse|partial|<commit>,HEAD,--short,--verify,--git-dir,--show-toplevel,--is-inside-work-tree,--is-bare-repository,--show-cdup,--absolute-git-dir|--symbolic,--symbolic-full-name|
+write-tree|full|||
+symbolic-ref|partial|HEAD,-d,--delete,-q,--quiet|--short|
+update-ref|partial|-d,--delete,--stdin,--no-deref|--create-reflog|
+reflog|partial|show,delete,expire|exists|
+
+# Pack Commands
+pack-objects|partial|--stdout,--revs,--all,--delta-base-offset,--include-tag|--thin,--shallow,--window,--depth|
+index-pack|partial|--stdin,-o,--verify,-v|--fix-thin,--keep|
+receive-pack|full|||Protocol v1/v2
+upload-pack|full|||Protocol v1/v2
+
+# Not Implemented (fallback to system git)
+bisect|none|||
+blame|none|||
+clean|none|||
+describe|none|||
+format-patch|none|||
+gc|none|||
+grep|none|||
+notes|none|||
+revert|none|||
+shortlog|none|||
+submodule|none|||
