@@ -43,6 +43,9 @@ async fn show_help() -> Unit {
     #|   push        Update remote refs along with associated objects
     #|   remote      Manage set of tracked repositories
     #|
+    #|work with multiple working trees
+    #|   worktree    Manage multiple working trees
+    #|
     #|low-level / plumbing
     #|   cat-file        Provide content or type info for repository objects
     #|   config          Get and set repository options
@@ -327,6 +330,10 @@ async fn dispatch_command(
     "reflog" =>
       handle_reflog(rest) catch {
         err => exit_with_error("reflog", err)
+      }
+    "worktree" =>
+      handle_worktree(rest) catch {
+        err => exit_with_error("worktree", err)
       }
     "version" | "--version" => print_line("git version 2.47.0 (moongit)")
     // Fallback to system git for unknown commands

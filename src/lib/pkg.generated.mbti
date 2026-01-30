@@ -48,6 +48,8 @@ pub fn create_lightweight_tag(&@git.FileSystem, String, String, @git.ObjectId) -
 
 pub fn create_reflog(&@git.FileSystem, &@git.RepoFileSystem, String, String) -> Unit raise @git.GitError
 
+pub fn create_worktree(&@git.FileSystem, &@git.RepoFileSystem, String, String, String?, detach? : Bool, new_branch? : String?) -> Unit raise @git.GitError
+
 pub fn delete_branch(&@git.FileSystem, &@git.RepoFileSystem, String, String, force? : Bool) -> Unit raise @git.GitError
 
 pub fn delete_reflog(&@git.FileSystem, &@git.RepoFileSystem, String, String) -> Unit raise @git.GitError
@@ -72,6 +74,8 @@ pub fn init_repo(&@git.FileSystem, String, default_branch? : String, bare? : Boo
 
 pub fn init_repo_with_options(&@git.FileSystem, String, InitOptions) -> Unit raise @git.GitError
 
+pub fn is_branch_checked_out(&@git.RepoFileSystem, String, String) -> String? raise @git.GitError
+
 pub fn is_ignored_path(&@git.RepoFileSystem, String, String, Bool) -> Bool raise @git.GitError
 
 pub fn is_rebase_in_progress(&@git.RepoFileSystem, String) -> Bool
@@ -89,6 +93,8 @@ pub fn list_remote_branches(&@git.RepoFileSystem, String) -> Array[String]
 pub fn list_tags(&@git.RepoFileSystem, String) -> Array[String]
 
 pub fn list_working_files(&@git.RepoFileSystem, String) -> Array[String] raise @git.GitError
+
+pub fn list_worktrees(&@git.RepoFileSystem, String) -> Array[WorktreeInfo] raise @git.GitError
 
 pub fn load_object_store_from_fs(&@git.RepoFileSystem, String) -> @git.ObjectStore raise @git.GitError
 
@@ -109,6 +115,8 @@ pub fn parse_receive_pack_request(Bytes) -> ReceivePackRequest raise @git.GitErr
 pub fn parse_upload_pack_request(Bytes) -> UploadPackRequest raise @git.GitError
 
 pub fn prune_repo(&@git.FileSystem, &@git.RepoFileSystem, String) -> PruneResult raise @git.GitError
+
+pub fn prune_worktrees(&@git.FileSystem, &@git.RepoFileSystem, String, dry_run? : Bool) -> Array[String] raise @git.GitError
 
 pub async fn pull_http(&@git.FileSystem, &@git.RepoFileSystem, String, String, Bool, rebase? : Bool) -> @git.ObjectId? raise @git.GitError
 
@@ -139,6 +147,8 @@ pub fn receive_pack_info_refs_response(&@git.RepoFileSystem, String, String?, St
 pub fn receive_pack_response(&@git.FileSystem, &@git.RepoFileSystem, String, String?, String, Bytes) -> HttpResponse raise @git.GitError
 
 pub fn reflog_exists(&@git.RepoFileSystem, String, String) -> Bool
+
+pub fn remove_worktree(&@git.FileSystem, &@git.RepoFileSystem, String, String, force? : Bool) -> Unit raise @git.GitError
 
 pub fn repack_repo(&@git.FileSystem, &@git.RepoFileSystem, String) -> RepackResult? raise @git.GitError
 
@@ -395,6 +405,14 @@ pub struct UploadPackRequest {
   haves : Array[@git.ObjectId]
   capabilities : Array[String]
   done : Bool
+}
+
+pub(all) struct WorktreeInfo {
+  path : String
+  head_id : @git.ObjectId?
+  branch : String?
+  locked : Bool
+  is_main : Bool
 }
 
 // Type aliases

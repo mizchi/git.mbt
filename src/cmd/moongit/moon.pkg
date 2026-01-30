@@ -18,6 +18,7 @@ options(
     "handlers_core.mbt": [ "native" ],
     "handlers_misc.mbt": [ "native" ],
     "handlers_remote.mbt": [ "native" ],
+    "handlers_worktree.mbt": [ "native" ],
     "helpers.mbt": [ "native" ],
     "index_pack.mbt": [ "native" ],
     "main.mbt": [ "native" ],
