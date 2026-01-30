@@ -50,8 +50,12 @@ uninstall:
     @rm -f ~/.local/bin/moongit
     @echo "Removed ~/.local/bin/moongit"
 
+# Run e2e tests (moongit integration tests)
+e2e:
+    bash e2e/run-tests.sh
+
 # Pre-release check
-release-check: fmt info check test
+release-check: fmt info check test e2e
 
 # Run Git's upstream test suite (submodule at third_party/git)
 git-t:
