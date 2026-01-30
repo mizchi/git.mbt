@@ -2978,3 +2978,361 @@ fn remove_from_index(
     _ => ()
   }
 }
+
+///|
+/// Handle git notes command
+async fn handle_notes(args : Array[String]) -> Unit raise Error {
+  let root = get_work_root()
+  let git_dir = root + "/.git"
+  let fs = OsFs::new()
+  let wfs : &@git.FileSystem = fs
+  let rfs : &@git.RepoFileSystem = fs
+  let notes_ref = "refs/notes/commits"
+  let notes_ref_path = git_dir + "/" + notes_ref
+  // Parse subcommand
+  let subcmd = args.get(0).unwrap_or("list")
+  match subcmd {
+    "list" => notes_list(rfs, git_dir, notes_ref_path)
+    "show" => {
+      let commit_ref = args.get(1).unwrap_or("HEAD")
+      notes_show(rfs, git_dir, notes_ref_path, commit_ref)
+    }
+    "add" => {
+      let mut message : String? = None
+      let mut force = false
+      let mut commit_ref = "HEAD"
+      let mut i = 1
+      while i < args.length() {
+        match args[i] {
+          "-m" | "--message" =>
+            if i + 1 < args.length() {
+              message = Some(args[i + 1])
+              i += 2
+            } else {
+              i += 1
+            }
+          "-f" | "--force" => {
+            force = true
+            i += 1
+          }
+          _ if not(args[i].has_prefix("-")) => {
+            commit_ref = args[i]
+            i += 1
+          }
+          _ => i += 1
+        }
+      }
+      guard message is Some(msg) else {
+        eprint_line("error: notes add requires -m <message>")
+        @sys.exit(1)
+      }
+      notes_add(wfs, rfs, git_dir, notes_ref_path, commit_ref, msg, force)
+    }
+    "remove" => {
+      let commit_ref = args.get(1).unwrap_or("HEAD")
+      notes_remove(wfs, rfs, git_dir, notes_ref_path, commit_ref)
+    }
+    "prune" => notes_prune(wfs, rfs, git_dir, notes_ref_path)
+    _ => {
+      eprint_line("usage: git notes [list | show | add | remove | prune]")
+      @sys.exit(1)
+    }
+  }
+}
+
+///|
+async fn notes_list(
+  rfs : &@git.RepoFileSystem,
+  git_dir : String,
+  notes_ref_path : String,
+) -> Unit raise Error {
+  if not(rfs.is_file(notes_ref_path)) {
+    return
+  }
+  let ref_content = decode_bytes(rfs.read_file(notes_ref_path))
+  let commit_hex = trim_string(ref_content)
+  let commit_id = @git.ObjectId::from_hex(commit_hex)
+  let db = @gitlib.ObjectDb::load(rfs, git_dir)
+  let obj = db.get(rfs, commit_id)
+  guard obj is Some(o) else { return }
+  let commit_info = @git.parse_commit(o.data)
+  // Read tree
+  let tree_obj = db.get(rfs, commit_info.tree)
+  guard tree_obj is Some(to) else { return }
+  let entries = @git.parse_tree(to.data)
+  for entry in entries {
+    print_line("\{entry.id.to_hex()} \{entry.name}")
+  }
+}
+
+///|
+async fn notes_show(
+  rfs : &@git.RepoFileSystem,
+  git_dir : String,
+  notes_ref_path : String,
+  commit_ref : String,
+) -> Unit raise Error {
+  // Resolve target commit
+  let target_id = @gitlib.rev_parse(rfs, git_dir, commit_ref)
+  guard target_id is Some(tid) else {
+    raise @git.GitError::InvalidObject("unknown revision: \{commit_ref}")
+  }
+  let target_hex = tid.to_hex()
+  // Check if notes ref exists
+  if not(rfs.is_file(notes_ref_path)) {
+    eprint_line("error: no note found for \{target_hex}")
+    @sys.exit(1)
+  }
+  let ref_content = decode_bytes(rfs.read_file(notes_ref_path))
+  let commit_hex = trim_string(ref_content)
+  let commit_id = @git.ObjectId::from_hex(commit_hex)
+  let db = @gitlib.ObjectDb::load(rfs, git_dir)
+  let obj = db.get(rfs, commit_id)
+  guard obj is Some(o) else {
+    eprint_line("error: notes ref corrupt")
+    @sys.exit(1)
+  }
+  let commit_info = @git.parse_commit(o.data)
+  // Read tree
+  let tree_obj = db.get(rfs, commit_info.tree)
+  guard tree_obj is Some(to) else {
+    eprint_line("error: notes tree corrupt")
+    @sys.exit(1)
+  }
+  let entries = @git.parse_tree(to.data)
+  // Find entry matching target commit
+  for entry in entries {
+    if entry.name == target_hex {
+      let note_obj = db.get(rfs, entry.id)
+      guard note_obj is Some(no) else {
+        eprint_line("error: note blob corrupt")
+        @sys.exit(1)
+      }
+      print_line(decode_bytes(no.data))
+      return
+    }
+  }
+  eprint_line("error: no note found for \{target_hex}")
+  @sys.exit(1)
+}
+
+///|
+async fn notes_add(
+  wfs : &@git.FileSystem,
+  rfs : &@git.RepoFileSystem,
+  git_dir : String,
+  notes_ref_path : String,
+  commit_ref : String,
+  message : String,
+  force : Bool,
+) -> Unit raise Error {
+  // Resolve target commit
+  let target_id = @gitlib.rev_parse(rfs, git_dir, commit_ref)
+  guard target_id is Some(tid) else {
+    raise @git.GitError::InvalidObject("unknown revision: \{commit_ref}")
+  }
+  let target_hex = tid.to_hex()
+  // Create blob for note content
+  let note_content = Bytes::from_array(
+    message.to_array().map(fn(c) { c.to_int().to_byte() }),
+  )
+  let note_id = @gitlib.write_loose_object(
+    wfs,
+    git_dir,
+    @git.ObjectType::Blob,
+    note_content,
+  )
+  // Get existing tree entries if notes ref exists
+  let entries : Array[@git.TreeEntry] = []
+  let mut parent_commit : @git.ObjectId? = None
+  if rfs.is_file(notes_ref_path) {
+    let ref_content = decode_bytes(rfs.read_file(notes_ref_path))
+    let commit_hex = trim_string(ref_content)
+    let commit_id = @git.ObjectId::from_hex(commit_hex)
+    parent_commit = Some(commit_id)
+    let db = @gitlib.ObjectDb::load(rfs, git_dir)
+    let obj = db.get(rfs, commit_id)
+    match obj {
+      Some(o) => {
+        let commit_info = @git.parse_commit(o.data)
+        let tree_obj = db.get(rfs, commit_info.tree)
+        match tree_obj {
+          Some(to) => {
+            let existing = @git.parse_tree(to.data)
+            for e in existing {
+              if e.name == target_hex {
+                if not(force) {
+                  eprint_line("error: note already exists for \{target_hex}")
+                  eprint_line("Use -f to overwrite existing note")
+                  @sys.exit(1)
+                }
+                // Skip existing note (will be replaced)
+              } else {
+                entries.push(e)
+              }
+            }
+          }
+          None => ()
+        }
+      }
+      None => ()
+    }
+  }
+  // Add new note entry
+  entries.push(@git.TreeEntry::new("100644", target_hex, note_id))
+  // Sort entries by name (git requires sorted trees)
+  entries.sort_by(fn(a, b) { a.name.compare(b.name) })
+  // Create tree
+  let (tree_id, tree_data) = @git.create_tree(entries)
+  @gitlib.write_object_bytes(wfs, git_dir, tree_id, tree_data)
+  // Create commit
+  let author = get_author_string()
+  let timestamp = @sys.get_env_var("GIT_COMMITTER_DATE")
+    .map(fn(d) { parse_commit_date(d) })
+    .unwrap_or(get_current_timestamp())
+  let parents = match parent_commit {
+    Some(p) => [p]
+    None => []
+  }
+  let commit = @git.Commit::new(
+    tree_id, parents, author, timestamp, "+0000", author, timestamp, "+0000", "Notes added by 'git notes add'\n",
+  )
+  let (commit_id, commit_data) = @git.create_commit(commit)
+  @gitlib.write_object_bytes(wfs, git_dir, commit_id, commit_data)
+  // Ensure refs/notes directory exists
+  wfs.mkdir_p(git_dir + "/refs/notes")
+  // Update notes ref
+  wfs.write_string(notes_ref_path, commit_id.to_hex() + "\n")
+}
+
+///|
+async fn notes_remove(
+  wfs : &@git.FileSystem,
+  rfs : &@git.RepoFileSystem,
+  git_dir : String,
+  notes_ref_path : String,
+  commit_ref : String,
+) -> Unit raise Error {
+  // Resolve target commit
+  let target_id = @gitlib.rev_parse(rfs, git_dir, commit_ref)
+  guard target_id is Some(tid) else {
+    raise @git.GitError::InvalidObject("unknown revision: \{commit_ref}")
+  }
+  let target_hex = tid.to_hex()
+  // Check if notes ref exists
+  if not(rfs.is_file(notes_ref_path)) {
+    eprint_line("error: no note found for \{target_hex}")
+    @sys.exit(1)
+  }
+  let ref_content = decode_bytes(rfs.read_file(notes_ref_path))
+  let commit_hex = trim_string(ref_content)
+  let commit_id = @git.ObjectId::from_hex(commit_hex)
+  let db = @gitlib.ObjectDb::load(rfs, git_dir)
+  let obj = db.get(rfs, commit_id)
+  guard obj is Some(o) else {
+    eprint_line("error: notes ref corrupt")
+    @sys.exit(1)
+  }
+  let commit_info = @git.parse_commit(o.data)
+  let tree_obj = db.get(rfs, commit_info.tree)
+  guard tree_obj is Some(to) else {
+    eprint_line("error: notes tree corrupt")
+    @sys.exit(1)
+  }
+  let existing = @git.parse_tree(to.data)
+  // Filter out target entry
+  let mut found = false
+  let entries : Array[@git.TreeEntry] = []
+  for e in existing {
+    if e.name == target_hex {
+      found = true
+    } else {
+      entries.push(e)
+    }
+  }
+  if not(found) {
+    eprint_line("error: no note found for \{target_hex}")
+    @sys.exit(1)
+  }
+  // Create new tree
+  let (tree_id, tree_data) = @git.create_tree(entries)
+  @gitlib.write_object_bytes(wfs, git_dir, tree_id, tree_data)
+  // Create commit
+  let author = get_author_string()
+  let timestamp = get_current_timestamp()
+  let commit = @git.Commit::new(
+    tree_id,
+    [commit_id],
+    author,
+    timestamp,
+    "+0000",
+    author,
+    timestamp,
+    "+0000",
+    "Notes removed by 'git notes remove'\n",
+  )
+  let (new_commit_id, commit_data) = @git.create_commit(commit)
+  @gitlib.write_object_bytes(wfs, git_dir, new_commit_id, commit_data)
+  // Update notes ref
+  wfs.write_string(notes_ref_path, new_commit_id.to_hex() + "\n")
+  print_line("Removing note for \{target_hex}")
+}
+
+///|
+async fn notes_prune(
+  wfs : &@git.FileSystem,
+  rfs : &@git.RepoFileSystem,
+  git_dir : String,
+  notes_ref_path : String,
+) -> Unit raise Error {
+  // Check if notes ref exists
+  if not(rfs.is_file(notes_ref_path)) {
+    return
+  }
+  let ref_content = decode_bytes(rfs.read_file(notes_ref_path))
+  let commit_hex = trim_string(ref_content)
+  let commit_id = @git.ObjectId::from_hex(commit_hex)
+  let db = @gitlib.ObjectDb::load(rfs, git_dir)
+  let obj = db.get(rfs, commit_id)
+  guard obj is Some(o) else { return }
+  let commit_info = @git.parse_commit(o.data)
+  let tree_obj = db.get(rfs, commit_info.tree)
+  guard tree_obj is Some(to) else { return }
+  let existing = @git.parse_tree(to.data)
+  // Filter entries where the referenced commit still exists
+  let entries : Array[@git.TreeEntry] = []
+  let mut pruned = 0
+  for e in existing {
+    let ref_id = @git.ObjectId::from_hex(e.name)
+    let ref_obj = db.get(rfs, ref_id) catch { _ => None }
+    match ref_obj {
+      Some(_) => entries.push(e)
+      None => pruned += 1
+    }
+  }
+  if pruned == 0 {
+    return
+  }
+  // Create new tree
+  let (tree_id, tree_data) = @git.create_tree(entries)
+  @gitlib.write_object_bytes(wfs, git_dir, tree_id, tree_data)
+  // Create commit
+  let author = get_author_string()
+  let timestamp = get_current_timestamp()
+  let commit = @git.Commit::new(
+    tree_id,
+    [commit_id],
+    author,
+    timestamp,
+    "+0000",
+    author,
+    timestamp,
+    "+0000",
+    "Notes pruned by 'git notes prune'\n",
+  )
+  let (new_commit_id, commit_data) = @git.create_commit(commit)
+  @gitlib.write_object_bytes(wfs, git_dir, new_commit_id, commit_data)
+  // Update notes ref
+  wfs.write_string(notes_ref_path, new_commit_id.to_hex() + "\n")
+  print_line("Pruned \{pruned} notes")
+}

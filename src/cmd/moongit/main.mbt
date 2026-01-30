@@ -346,6 +346,7 @@ async fn dispatch_command(
       handle_revert(rest) catch {
         err => exit_with_error("revert", err)
       }
+    "notes" => handle_notes(rest) catch { err => exit_with_error("notes", err) }
     "version" | "--version" => print_line("git version 2.47.0 (moongit)")
     // Fallback to system git for unknown commands
     _ =>
