@@ -65,7 +65,7 @@ blame|none|||
 clean|none|||
 describe|none|||
 format-patch|none|||
-gc|none|||
+gc|partial|--prune,-q,--quiet|--aggressive,--auto,--keep-largest-pack|Repack + prune unreachable
 grep|none|||
 notes|none|||
 revert|none|||
