@@ -682,3 +682,565 @@ test "roundtrip: commit create -> compress -> decompress" {
   let computed_id = @git.hash_object_content(@git.ObjectType::Commit, content)
   assert_true(computed_id == expected_id)
 }
+
+// =============================================================================
+// Tree Parsing Tests
+// =============================================================================
+
+///|
+test "git compat: parse_tree single entry" {
+  // Create tree and extract content
+  let blob_id = @git.ObjectId::from_hex(
+    "ce013625030ba8dba906f756967f9e9ca394464a",
+  )
+  let entries = [@git.TreeEntry::new("100644", "hello.txt", blob_id)]
+  let (_, compressed) = @git.create_tree(entries)
+  let raw = @zlib.zlib_decompress(compressed)
+  let (_, content_start) = parse_loose_header(raw)
+  let content = Bytes::from_array(
+    FixedArray::makei(raw.length() - content_start, fn(i) {
+      raw[content_start + i]
+    }),
+  )
+
+  // Parse and verify
+  let parsed = @git.parse_tree(content)
+  assert_true(parsed.length() == 1)
+  assert_true(parsed[0].mode == "100644")
+  assert_true(parsed[0].name == "hello.txt")
+  assert_true(parsed[0].id == blob_id)
+}
+
+///|
+test "git compat: parse_tree multiple entries sorted" {
+  // Create tree with multiple files
+  let hello_id = @git.ObjectId::from_hex(
+    "ce013625030ba8dba906f756967f9e9ca394464a",
+  )
+  let world_id = @git.ObjectId::from_hex(
+    "cc628ccd10742baea8241c5924df992b5c019f71",
+  )
+  let entries = [
+    @git.TreeEntry::new("100644", "hello.txt", hello_id),
+    @git.TreeEntry::new("100644", "world.txt", world_id),
+  ]
+  let (_, compressed) = @git.create_tree(entries)
+  let raw = @zlib.zlib_decompress(compressed)
+  let (_, content_start) = parse_loose_header(raw)
+  let content = Bytes::from_array(
+    FixedArray::makei(raw.length() - content_start, fn(i) {
+      raw[content_start + i]
+    }),
+  )
+
+  // Parse and verify order is preserved
+  let parsed = @git.parse_tree(content)
+  assert_true(parsed.length() == 2)
+  assert_true(parsed[0].name == "hello.txt")
+  assert_true(parsed[1].name == "world.txt")
+}
+
+///|
+test "git compat: parse_tree with directory entry" {
+  // Tree with file and subdirectory
+  let blob_id = @git.ObjectId::from_hex(
+    "ce013625030ba8dba906f756967f9e9ca394464a",
+  )
+  let tree_id = @git.ObjectId::from_hex(
+    "b032d4b998c65562e088abaa88fdd859476c089e",
+  )
+  let entries = [
+    @git.TreeEntry::new("100644", "hello.txt", blob_id),
+    @git.TreeEntry::new("40000", "subdir", tree_id),
+  ]
+  let (_, compressed) = @git.create_tree(entries)
+  let raw = @zlib.zlib_decompress(compressed)
+  let (_, content_start) = parse_loose_header(raw)
+  let content = Bytes::from_array(
+    FixedArray::makei(raw.length() - content_start, fn(i) {
+      raw[content_start + i]
+    }),
+  )
+
+  // Parse and verify
+  let parsed = @git.parse_tree(content)
+  assert_true(parsed.length() == 2)
+  // Files and dirs should be in sorted order
+  assert_true(parsed[0].name == "hello.txt")
+  assert_true(parsed[0].mode == "100644")
+  assert_true(parsed[1].name == "subdir")
+  assert_true(parsed[1].mode == "40000")
+}
+
+///|
+test "git compat: parse_tree with executable file" {
+  // Tree with executable file (mode 100755)
+  let blob_id = @git.ObjectId::from_hex(
+    "ce013625030ba8dba906f756967f9e9ca394464a",
+  )
+  let entries = [@git.TreeEntry::new("100755", "script.sh", blob_id)]
+  let (_, compressed) = @git.create_tree(entries)
+  let raw = @zlib.zlib_decompress(compressed)
+  let (_, content_start) = parse_loose_header(raw)
+  let content = Bytes::from_array(
+    FixedArray::makei(raw.length() - content_start, fn(i) {
+      raw[content_start + i]
+    }),
+  )
+  let parsed = @git.parse_tree(content)
+  assert_true(parsed.length() == 1)
+  assert_true(parsed[0].mode == "100755")
+  assert_true(parsed[0].name == "script.sh")
+}
+
+// =============================================================================
+// Commit Parsing Tests
+// =============================================================================
+
+///|
+test "git compat: parse_commit initial commit" {
+  // Create initial commit (no parents)
+  let tree_id = @git.ObjectId::from_hex(
+    "88e38705fdbd3608cddbe904b67c731f3234c45b",
+  )
+  let commit = @git.Commit::new(
+    tree_id,
+    [],
+    "Author <author@example.com>",
+    1700000000L,
+    "+0000",
+    "Committer <committer@example.com>",
+    1700000100L,
+    "+0900",
+    "Initial commit\n",
+  )
+  let (_, compressed) = @git.create_commit(commit)
+  let raw = @zlib.zlib_decompress(compressed)
+  let (_, content_start) = parse_loose_header(raw)
+  let content = Bytes::from_array(
+    FixedArray::makei(raw.length() - content_start, fn(i) {
+      raw[content_start + i]
+    }),
+  )
+  let parsed = @git.parse_commit(content)
+  assert_true(parsed.tree == tree_id)
+  assert_true(parsed.parents.length() == 0)
+}
+
+///|
+test "git compat: parse_commit with one parent" {
+  let tree_id = @git.ObjectId::from_hex(
+    "88e38705fdbd3608cddbe904b67c731f3234c45b",
+  )
+  let parent_id = @git.ObjectId::from_hex(
+    "681226a87c4a64f59b7b47bd497af25e16ac4635",
+  )
+  let commit = @git.Commit::new(
+    tree_id,
+    [parent_id],
+    "Test <test@example.com>",
+    1700000100L,
+    "+0000",
+    "Test <test@example.com>",
+    1700000100L,
+    "+0000",
+    "Second commit\n",
+  )
+  let (_, compressed) = @git.create_commit(commit)
+  let raw = @zlib.zlib_decompress(compressed)
+  let (_, content_start) = parse_loose_header(raw)
+  let content = Bytes::from_array(
+    FixedArray::makei(raw.length() - content_start, fn(i) {
+      raw[content_start + i]
+    }),
+  )
+  let parsed = @git.parse_commit(content)
+  assert_true(parsed.tree == tree_id)
+  assert_true(parsed.parents.length() == 1)
+  assert_true(parsed.parents[0] == parent_id)
+}
+
+///|
+test "git compat: parse_commit with merge (two parents)" {
+  let tree_id = @git.ObjectId::from_hex(
+    "88e38705fdbd3608cddbe904b67c731f3234c45b",
+  )
+  let parent1 = @git.ObjectId::from_hex(
+    "681226a87c4a64f59b7b47bd497af25e16ac4635",
+  )
+  let parent2 = @git.ObjectId::from_hex(
+    "2fe96b04b8c1f081765898435f0d2497cfef21ea",
+  )
+  let commit = @git.Commit::new(
+    tree_id,
+    [parent1, parent2],
+    "Test <test@example.com>",
+    1700000200L,
+    "+0000",
+    "Test <test@example.com>",
+    1700000200L,
+    "+0000",
+    "Merge branch 'feature'\n",
+  )
+  let (_, compressed) = @git.create_commit(commit)
+  let raw = @zlib.zlib_decompress(compressed)
+  let (_, content_start) = parse_loose_header(raw)
+  let content = Bytes::from_array(
+    FixedArray::makei(raw.length() - content_start, fn(i) {
+      raw[content_start + i]
+    }),
+  )
+  let parsed = @git.parse_commit(content)
+  assert_true(parsed.tree == tree_id)
+  assert_true(parsed.parents.length() == 2)
+  assert_true(parsed.parents[0] == parent1)
+  assert_true(parsed.parents[1] == parent2)
+}
+
+// =============================================================================
+// Delta Application Tests
+// =============================================================================
+// Git delta format:
+// - source size (varint)
+// - target size (varint)
+// - instructions:
+//   - Copy (bit 7 set): opcode byte has bitmask for which offset/size bytes follow
+//     - bits 0-3: offset bytes present (0-4 bytes)
+//     - bits 4-6: size bytes present (0-3 bytes)
+//     - if size is 0 after reading, it means 0x10000
+//   - Insert (bit 7 clear): opcode is length (1-127), followed by that many literal bytes
+
+///|
+test "git compat: delta copy instruction" {
+  // Test delta that copies from base
+  // Base: "hello world" (11 bytes)
+  // Delta: copy all of base
+  let base = Bytes::from_array([
+    b'h', b'e', b'l', b'l', b'o', b' ', b'w', b'o', b'r', b'l', b'd',
+  ])
+
+  // Delta format for copying 11 bytes from offset 0:
+  // opcode = 0x80 | 0x10 = 0x90 (copy, size byte 0 present)
+  // Since offset is 0, no offset bytes needed
+  // size byte 0 = 0x0b (11)
+  let delta = Bytes::from_array([
+      b'\x0b', // source size: 11
+       b'\x0b', // target size: 11
+       b'\x90', // copy: bit7=1 (copy), bit4=1 (size byte 0 present)
+       b'\x0b',
+    ], // size: 11
+  )
+  let result = @git.apply_delta(base, delta)
+  assert_true(result.length() == 11)
+  for i = 0; i < base.length(); i = i + 1 {
+    assert_true(result[i] == base[i])
+  }
+}
+
+///|
+test "git compat: delta insert instruction" {
+  // Test delta that inserts new data
+  // Base: "old" (3 bytes)
+  // Delta: insert "new data" (ignore base completely)
+  let base = Bytes::from_array([b'o', b'l', b'd'])
+
+  // Delta format:
+  // - source size: 3
+  // - target size: 8 (length of "new data")
+  // - insert instruction: 0x08 (insert 8 bytes), followed by "new data"
+  let delta = Bytes::from_array([
+    b'\x03', // source size: 3
+     b'\x08', // target size: 8
+     b'\x08', // insert 8 bytes (bit 7 clear, lower 7 bits = length)
+     b'n', b'e', b'w', b' ', b'd', b'a', b't', b'a',
+  ])
+  let result = @git.apply_delta(base, delta)
+  assert_true(result.length() == 8)
+  // Verify "new data"
+  assert_true(result[0] == b'n')
+  assert_true(result[1] == b'e')
+  assert_true(result[2] == b'w')
+  assert_true(result[3] == b' ')
+  assert_true(result[4] == b'd')
+  assert_true(result[5] == b'a')
+  assert_true(result[6] == b't')
+  assert_true(result[7] == b'a')
+}
+
+///|
+test "git compat: delta mixed copy and insert" {
+  // Base: "hello" (5 bytes)
+  // Target: "hello world" (copy "hello", insert " world")
+  let base = Bytes::from_array([b'h', b'e', b'l', b'l', b'o'])
+
+  // Delta:
+  // - source size: 5
+  // - target size: 11
+  // - copy 5 bytes from offset 0: opcode=0x90, size=5
+  // - insert 6 bytes " world": opcode=0x06, then literal bytes
+  let delta = Bytes::from_array([
+    b'\x05', // source size: 5
+     b'\x0b', // target size: 11
+     b'\x90', // copy: bit7=1, bit4=1 (size byte 0 present)
+     b'\x05', // size: 5
+     b'\x06', // insert 6 bytes
+     b' ', b'w', b'o', b'r', b'l', b'd',
+  ])
+  let result = @git.apply_delta(base, delta)
+  assert_true(result.length() == 11)
+  // Check "hello world"
+  assert_true(result[0] == b'h')
+  assert_true(result[4] == b'o')
+  assert_true(result[5] == b' ')
+  assert_true(result[10] == b'd')
+}
+
+///|
+test "git compat: delta copy with offset" {
+  // Base: "hello world" (11 bytes)
+  // Target: "world" (copy 5 bytes from offset 6)
+  let base = Bytes::from_array([
+    b'h', b'e', b'l', b'l', b'o', b' ', b'w', b'o', b'r', b'l', b'd',
+  ])
+
+  // Delta:
+  // - source size: 11
+  // - target size: 5
+  // - copy 5 bytes from offset 6: opcode=0x91, offset=6, size=5
+  //   (bit0=1: offset byte 0 present, bit4=1: size byte 0 present)
+  let delta = Bytes::from_array([
+      b'\x0b', // source size: 11
+       b'\x05', // target size: 5
+       b'\x91', // copy: bit7=1, bit0=1 (offset byte 0), bit4=1 (size byte 0)
+       b'\x06', // offset: 6
+       b'\x05',
+    ], // size: 5
+  )
+  let result = @git.apply_delta(base, delta)
+  assert_true(result.length() == 5)
+  // Check "world"
+  assert_true(result[0] == b'w')
+  assert_true(result[1] == b'o')
+  assert_true(result[2] == b'r')
+  assert_true(result[3] == b'l')
+  assert_true(result[4] == b'd')
+}
+
+// =============================================================================
+// Packfile Parsing Tests (git-generated)
+// =============================================================================
+
+///|
+/// Helper: convert hex string to bytes
+fn compat_hex_to_bytes(hex : String) -> Bytes {
+  let result : Array[Byte] = []
+  let mut i = 0
+  while i < hex.length() {
+    let high = compat_hex_digit_to_int(hex[i])
+    let low = compat_hex_digit_to_int(hex[i + 1])
+    result.push(((high << 4) | low).to_byte())
+    i += 2
+  }
+  Bytes::from_array(FixedArray::makei(result.length(), fn(j) { result[j] }))
+}
+
+///|
+fn compat_hex_digit_to_int(code : UInt16) -> Int {
+  let c = code.to_int()
+  if c >= '0'.to_int() && c <= '9'.to_int() {
+    c - '0'.to_int()
+  } else if c >= 'a'.to_int() && c <= 'f'.to_int() {
+    c - 'a'.to_int() + 10
+  } else if c >= 'A'.to_int() && c <= 'F'.to_int() {
+    c - 'A'.to_int() + 10
+  } else {
+    0
+  }
+}
+
+///|
+test "git compat: parse git-generated packfile (single blob)" {
+  // Packfile generated by: echo "hello" | git hash-object -w --stdin && git pack-objects --stdout
+  // Contains blob "hello\n" (ce013625030ba8dba906f756967f9e9ca394464a)
+  let packfile_hex = "5041434b000000020000000136789ccb48cdc9c9e70200084b021fde0412401f4a9e5f05411f44eaf9c86d46096746"
+  let packfile = compat_hex_to_bytes(packfile_hex)
+
+  // Verify header
+  assert_true(packfile[0] == b'P')
+  assert_true(packfile[1] == b'A')
+  assert_true(packfile[2] == b'C')
+  assert_true(packfile[3] == b'K')
+
+  // Parse packfile
+  let objects = @git.parse_packfile(packfile)
+  assert_true(objects.length() == 1)
+  assert_true(objects[0].obj_type == @git.ObjectType::Blob)
+
+  // Verify content
+  let content = objects[0].data
+  assert_true(content.length() == 6) // "hello\n"
+  assert_true(content[0] == b'h')
+  assert_true(content[1] == b'e')
+  assert_true(content[2] == b'l')
+  assert_true(content[3] == b'l')
+  assert_true(content[4] == b'o')
+  assert_true(content[5] == b'\n')
+
+  // Verify hash matches expected
+  let id = @git.hash_blob(content)
+  inspect(id.to_hex(), content="ce013625030ba8dba906f756967f9e9ca394464a")
+}
+
+///|
+test "git compat: packfile create and parse roundtrip" {
+  // Create a blob object
+  let content = Bytes::from_array([b't', b'e', b's', b't', b'\n'])
+  let (blob_id, _) = @git.create_blob(content)
+  let obj = @git.PackObject::new(@git.ObjectType::Blob, content)
+
+  // Create packfile
+  let packfile = @git.create_packfile([obj])
+
+  // Verify header
+  assert_true(packfile[0] == b'P')
+  assert_true(packfile[1] == b'A')
+  assert_true(packfile[2] == b'C')
+  assert_true(packfile[3] == b'K')
+
+  // Parse back
+  let parsed = @git.parse_packfile(packfile)
+  assert_true(parsed.length() == 1)
+  assert_true(parsed[0].obj_type == @git.ObjectType::Blob)
+
+  // Verify content preserved
+  assert_true(parsed[0].data.length() == content.length())
+  for i = 0; i < content.length(); i = i + 1 {
+    assert_true(parsed[0].data[i] == content[i])
+  }
+
+  // Verify hash matches
+  let parsed_id = @git.hash_blob(parsed[0].data)
+  assert_true(parsed_id == blob_id)
+}
+
+///|
+test "git compat: packfile with multiple objects roundtrip" {
+  // Create multiple objects
+  let blob1 = Bytes::from_array([b'a', b'\n'])
+  let blob2 = Bytes::from_array([b'b', b'\n'])
+  let obj1 = @git.PackObject::new(@git.ObjectType::Blob, blob1)
+  let obj2 = @git.PackObject::new(@git.ObjectType::Blob, blob2)
+
+  // Create packfile
+  let packfile = @git.create_packfile([obj1, obj2])
+
+  // Verify object count in header
+  assert_true(packfile[8] == b'\x00')
+  assert_true(packfile[9] == b'\x00')
+  assert_true(packfile[10] == b'\x00')
+  assert_true(packfile[11] == b'\x02') // 2 objects
+
+  // Parse back
+  let parsed = @git.parse_packfile(packfile)
+  assert_true(parsed.length() == 2)
+}
+
+// =============================================================================
+// Tree Sorting Edge Cases
+// =============================================================================
+
+///|
+test "git compat: tree entry order preserved" {
+  // create_tree preserves entry order (caller must sort)
+  // Verify entries are written and read back in given order
+  let blob_id = @git.ObjectId::from_hex(
+    "ce013625030ba8dba906f756967f9e9ca394464a",
+  )
+  let tree_id = @git.ObjectId::from_hex(
+    "b032d4b998c65562e088abaa88fdd859476c089e",
+  )
+
+  // Create tree with entries in specific order
+  let entries = [
+    @git.TreeEntry::new("100644", "aaa", blob_id),
+    @git.TreeEntry::new("40000", "bbb", tree_id),
+    @git.TreeEntry::new("100644", "ccc", blob_id),
+  ]
+  let (_, compressed) = @git.create_tree(entries)
+  let raw = @zlib.zlib_decompress(compressed)
+  let (_, content_start) = parse_loose_header(raw)
+  let content = Bytes::from_array(
+    FixedArray::makei(raw.length() - content_start, fn(i) {
+      raw[content_start + i]
+    }),
+  )
+
+  // Parse and verify order is preserved
+  let parsed = @git.parse_tree(content)
+  assert_true(parsed.length() == 3)
+  assert_true(parsed[0].name == "aaa")
+  assert_true(parsed[1].name == "bbb")
+  assert_true(parsed[2].name == "ccc")
+}
+
+///|
+test "git compat: tree special characters in filename" {
+  // Test filenames with special characters
+  let blob_id = @git.ObjectId::from_hex(
+    "ce013625030ba8dba906f756967f9e9ca394464a",
+  )
+
+  // Files with special characters (but no null bytes or slashes)
+  let entries = [
+    @git.TreeEntry::new("100644", "file with spaces.txt", blob_id),
+    @git.TreeEntry::new("100644", "file-with-dashes.txt", blob_id),
+    @git.TreeEntry::new("100644", "file_with_underscores.txt", blob_id),
+  ]
+
+  // Should create tree without error
+  let (_, compressed) = @git.create_tree(entries)
+  let raw = @zlib.zlib_decompress(compressed)
+
+  // Should parse back correctly
+  let (_, content_start) = parse_loose_header(raw)
+  let content = Bytes::from_array(
+    FixedArray::makei(raw.length() - content_start, fn(i) {
+      raw[content_start + i]
+    }),
+  )
+  let parsed = @git.parse_tree(content)
+  assert_true(parsed.length() == 3)
+}
+
+// =============================================================================
+// Varint Encoding Tests
+// =============================================================================
+
+///|
+test "git compat: varint encoding small values" {
+  // Test encode_type_and_size for small values
+  let out : Array[Byte] = []
+  @git.encode_type_and_size(3, 5, out) // type=blob, size=5
+
+  // For size 5:
+  // First byte: (type << 4) | (size & 0x0F) = (3 << 4) | 5 = 0x35
+  // Since size fits in 4 bits, no continuation
+  assert_true(out.length() == 1)
+  assert_true(out[0] == b'\x35')
+}
+
+///|
+test "git compat: varint encoding larger values" {
+  // Test encode_type_and_size for values requiring continuation
+  let out : Array[Byte] = []
+  @git.encode_type_and_size(3, 100, out) // type=blob, size=100
+
+  // size=100 in binary: 0110 0100
+  // First 4 bits of size: 0100 = 4
+  // Remaining: 0110 = 6
+  // First byte: 0x80 | (3 << 4) | 4 = 0x80 | 0x30 | 0x04 = 0xB4
+  // Second byte: 6 (no continuation)
+  assert_true(out.length() == 2)
+  assert_true(out[0] == b'\xB4')
+  assert_true(out[1] == b'\x06')
+}
