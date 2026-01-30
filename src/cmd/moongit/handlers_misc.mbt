@@ -631,13 +631,13 @@ async fn handle_hash_object(args : Array[String]) -> Unit raise Error {
 }
 
 ///|
-fn parse_object_type(s : String) -> @git.ObjectType {
+fn parse_object_type(s : String) -> @git.ObjectType raise Error {
   match s {
     "blob" => @git.ObjectType::Blob
     "tree" => @git.ObjectType::Tree
     "commit" => @git.ObjectType::Commit
     "tag" => @git.ObjectType::Tag
-    _ => @git.ObjectType::Blob
+    _ => raise @git.GitError::InvalidObject("invalid object type \"" + s + "\"")
   }
 }
 
