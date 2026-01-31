@@ -1139,7 +1139,7 @@ fn midx_read_pack_index(
 fn midx_build(
   pack_files : Array[String],
   entries : Array[MidxEntry],
-) -> Bytes raise Error {
+) -> Bytes {
   let out : Array[Byte] = []
   // Header
   out.push(b'M')

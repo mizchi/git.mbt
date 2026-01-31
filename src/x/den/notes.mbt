@@ -237,9 +237,7 @@ fn collect_notes_from_tree(
       let commit_id = @git.ObjectId::from_hex(commit_hex) catch {
         _ => continue
       }
-      let note = parse_note(text) catch {
-        _ => parse_note_plain(commit_id, text)
-      }
+      let note = parse_note(text)
       result.push(note)
     }
   }

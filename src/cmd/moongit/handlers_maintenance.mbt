@@ -771,7 +771,7 @@ async fn handle_prune(args : Array[String]) -> Unit raise Error {
 }
 
 ///|
-async fn handle_pack_refs(args : Array[String]) -> Unit raise Error {
+fn handle_pack_refs(args : Array[String]) -> Unit raise Error {
   let fs = OsFs::new()
   let git_dir = find_git_dir(fs)
   let mut all = false
@@ -811,8 +811,8 @@ async fn handle_pack_refs(args : Array[String]) -> Unit raise Error {
   let refs_to_pack : Array[(String, String)] = []
   collect_refs_to_pack(fs, refs_dir, "refs", refs_to_pack, all)
   // Update packed-refs
-  for ref in refs_to_pack {
-    packed[ref.0] = ref.1
+  for r in refs_to_pack {
+    packed[r.0] = r.1
   }
   // Write packed-refs
   let lines : Array[String] = ["# pack-refs with: peeled fully-peeled sorted"]
@@ -824,11 +824,11 @@ async fn handle_pack_refs(args : Array[String]) -> Unit raise Error {
   fs.write_string(packed_refs_path, lines.join("\n") + "\n")
   // Prune loose refs if requested
   if prune {
-    for ref in refs_to_pack {
-      let ref_path = git_dir + "/" + ref.0
+    for r in refs_to_pack {
+      let ref_path = git_dir + "/" + r.0
       if fs.is_file(ref_path) {
         fs.remove_file(ref_path)
-        cleanup_empty_dirs(fs, git_dir, ref.0)
+        cleanup_empty_dirs(fs, git_dir, r.0)
       }
     }
   }

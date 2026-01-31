@@ -1,7 +1,7 @@
 ///| Tests for PR system
 
 ///|
-fn setup_repo_with_branch() -> @git.TestFs raise @git.GitError {
+fn setup_repo_with_branch() -> @git.TestFs {
   let fs = @git.TestFs::new()
   // Initialize basic git structure
   fs.mkdir_p("/repo/.git/refs/heads")

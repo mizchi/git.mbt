@@ -186,7 +186,7 @@ test "integration: generate diff" {
 struct FileChange {
   path : String
   change_type : String // "added", "modified", "deleted"
-  content : Bytes?
+  _content : Bytes?
 }
 
 ///|
@@ -204,13 +204,13 @@ fn collect_changes(
     // Check if file existed before
     let is_new = not(file_exists_in_base(gitfs, osfs, path))
     let change_type = if is_new { "added" } else { "modified" }
-    changes.push({ path, change_type, content: Some(content) })
+    changes.push({ path, change_type, _content: Some(content) })
   }
 
   // Get deleted files
   let deleted_files = gitfs.get_deleted_files()
   for path in deleted_files {
-    changes.push({ path, change_type: "deleted", content: None })
+    changes.push({ path, change_type: "deleted", _content: None })
   }
   changes
 }

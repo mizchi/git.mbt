@@ -610,7 +610,7 @@ pub fn Note::serialize_plain(self : Note) -> String {
 
 ///|
 /// Parse Note from Git-style text format (with metadata)
-pub fn parse_note(text : String) -> Note raise PrError {
+pub fn parse_note(text : String) -> Note {
   let mut commit_id = @git.ObjectId::zero()
   let mut author = ""
   let mut created_at : Int64 = 0

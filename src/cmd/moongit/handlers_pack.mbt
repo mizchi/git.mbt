@@ -300,17 +300,17 @@ async fn verify_single_pack(
   // Parse and verify the packfile
   let objects = @git.parse_packfile(data)
   // Count object types
-  let mut commits = 0
-  let mut trees = 0
-  let mut blobs = 0
-  let mut tags = 0
+  let mut _commits = 0
+  let mut _trees = 0
+  let mut _blobs = 0
+  let mut _tags = 0
   let mut total_size = 0
   for obj in objects {
     match obj.obj_type {
-      @git.ObjectType::Commit => commits += 1
-      @git.ObjectType::Tree => trees += 1
-      @git.ObjectType::Blob => blobs += 1
-      @git.ObjectType::Tag => tags += 1
+      @git.ObjectType::Commit => _commits += 1
+      @git.ObjectType::Tree => _trees += 1
+      @git.ObjectType::Blob => _blobs += 1
+      @git.ObjectType::Tag => _tags += 1
     }
     total_size += obj.data.length()
   }
