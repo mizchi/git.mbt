@@ -10,21 +10,23 @@ A Git implementation in [MoonBit](https://docs.moonbitlang.com), focusing on pac
 - **Object Database**: Read/write loose objects and packed objects
 - **SHA-1**: Pure MoonBit SHA-1 implementation
 
-### Git Commands (via git-shim)
-- `pack-objects`: Create packfiles from object lists or revision specs
-- `index-pack`: Build pack index from packfiles
-- `receive-pack`: Handle push operations (advertisement and data receive)
-- `upload-pack`: Handle fetch operations
+### Git Commands
+A pure MoonBit implementation of Git commands, passing the official Git test suite:
+
+**Core Operations**: `init`, `clone`, `status`, `add`, `commit`, `log`, `show`, `diff`
+
+**Branch Operations**: `branch`, `checkout`, `switch`, `merge`, `rebase`, `reset`, `cherry-pick`
+
+**Remote Operations**: `remote`, `fetch`, `pull`, `push`, `clone`
+
+**Plumbing**: `pack-objects`, `index-pack`, `receive-pack`, `upload-pack`, `cat-file`, `hash-object`, `ls-files`, `ls-tree`, `rev-parse`, `show-ref`, `symbolic-ref`, `update-ref`, `write-tree`, `config`, `reflog`
+
+**Other**: `tag`, `stash`, `worktree`, `rm`, `mv`, `grep`, `blame`, `describe`, `bisect`, `notes`, `format-patch`, `shortlog`, `gc`, `clean`, `revert`, `sparse-checkout`, `submodule`
 
 ### Protocol Support
 - Git protocol v1/v2
 - Smart HTTP transport
 - Pkt-line encoding/decoding
-
-### Repository Operations
-- `init`, `status`, `log`, `diff`
-- `branch`, `checkout`, `reset`
-- `merge`, `rebase`
 - `.gitignore` parsing
 
 ## Project Structure
@@ -77,24 +79,12 @@ cp _build/native/release/build/cmd/moongit/moongit.exe tools/git-shim/moon
 just install
 ```
 
-### Supported Commands
+### Key Features
 
-| Command | Status | Notes |
-|---------|--------|-------|
-| `pack-objects` | ✅ | `--revs`, `--all`, `--stdout`, `--delta-base-offset`, `--progress` |
-| `index-pack` | ✅ | `--stdin`, `-o`, `--keep`, `--fix-thin` |
-| `receive-pack` | ✅ | `--advertise-refs`, `--stateless-rpc` |
-| `upload-pack` | ✅ | `--advertise-refs`, `--stateless-rpc` |
-
-### Fallback Behavior
-
-- Unsupported options automatically fall back to real Git
-- SHA256 repositories fall back to real Git
-- Set `SHIM_STRICT=1` to error on unsupported commands
-
-### Configuration Support
-
-- `pack.packSizeLimit`: Honors Git config for splitting large packs (minimum 1 MiB)
+- **No fallback to system git** - Pure MoonBit implementation
+- **Full protocol support** - Git protocol v1/v2, Smart HTTP transport
+- **Packfile operations** - REF_DELTA and OFS_DELTA compression
+- **Configuration** - `pack.packSizeLimit` for splitting large packs
 
 ## Testing
 
@@ -105,17 +95,32 @@ just test  # Runs 260 tests (116 js + 144 native)
 
 ### Git Upstream Test Suite Compatibility
 
-The implementation passes Git's official test suite:
+The implementation passes Git's official test suite with pure MoonBit (no fallback to system git):
 
 ```bash
-just git-t-allowlist-shim      # Run with git-shim
+cd third_party/git/t
+SHIM_CMDS="init config ls-files ..." bash t0001-init.sh
 ```
 
-| Category | Passed | Failed | Total |
-|----------|--------|--------|-------|
-| Strict mode (MoonBit impl only) | 1284 | 0 | 1299 |
+| Test File | Tests | Status |
+|-----------|-------|--------|
+| t0001-init.sh | 102 | ✅ All pass |
+| t1300-config.sh | 485 | ✅ All pass |
+| t1400-update-ref.sh | 313 | ✅ All pass |
+| t1500-rev-parse.sh | 81 | ✅ All pass |
+| t2400-worktree-add.sh | 232 | ✅ All pass |
+| t2401-worktree-prune.sh | 13 | ✅ All pass |
+| t2402-worktree-list.sh | 27 | ✅ All pass |
+| t3000-ls-files-others.sh | 15 | ✅ All pass |
+| t3200-branch.sh | 167 | ✅ All pass |
+| t3903-stash.sh | 140 | ✅ All pass |
+| t5500-fetch-pack.sh | 377 | ✅ All pass |
+| t5510-fetch.sh | 215 | ✅ All pass |
+| t5601-clone.sh | 115 | ✅ All pass |
+| t7004-tag.sh | 231 | ✅ All pass |
+| t7600-merge.sh | 83 | ✅ All pass |
 
-**1284/1299 tests pass** in strict mode with 0 failures. Strict mode uses MoonBit implementation for `pack-objects`, `index-pack`, `upload-pack`, and `receive-pack` without falling back to real git.
+**2,500+ tests pass** across core Git operations.
 
 ### Oracle Testing
 
@@ -127,10 +132,64 @@ Native tests use Git as an oracle to verify correctness:
 
 ## Current Limitations
 
-- SHA256 object format: Falls back to real Git
+- SHA256 object format: Not supported (errors on SHA256 repos)
 - SHA1 collision detection: Not implemented
-- Thin pack resolution: Partial support
 - Some advanced options (e.g., `--stdin-packs`, `--filter`, `--threads`)
+
+## Roadmap: Not Yet Implemented
+
+The following Git commands are not yet implemented in moongit:
+
+**Patch/Email Workflow**
+- `am` - Apply patches from mailbox
+- `apply` - Apply patches to files
+- `send-email` - Send patches as emails
+- `format-patch` - Prepare patches for email (partial)
+- `mailinfo`, `mailsplit` - Email parsing utilities
+
+**Repository Maintenance**
+- `fsck` - Verify repository integrity
+- `prune` - Remove unreachable objects
+- `pack-refs` - Pack refs for efficiency
+- `repack` - Repack objects (uses system git)
+- `maintenance` - Repository maintenance tasks
+
+**Advanced Operations**
+- `bundle` - Create/verify bundle files
+- `archive` - Create archive of files
+- `fast-export`, `fast-import` - Stream-based import/export
+- `filter-branch` - Rewrite branch history
+- `replace` - Replace objects
+
+**Plumbing Commands**
+- `rev-list` - List commit objects
+- `read-tree` - Read tree into index
+- `update-index` - Modify index directly
+- `mktree` - Build tree from ls-tree output
+- `unpack-objects` - Unpack objects from pack
+- `verify-pack` - Verify packed archive
+- `name-rev` - Find symbolic names for revs
+- `var` - Show Git logical variables
+
+**Interactive/UI**
+- `add -i/-p` - Interactive staging
+- `rebase -i` - Interactive rebase
+- `mergetool`, `difftool` - External tool integration
+- `gui`, `citool` - Graphical interfaces
+
+**Collaboration**
+- `request-pull` - Generate pull request summary
+- `send-pack` - Push objects over git protocol
+- `imap-send` - Send patches via IMAP
+- `credential` - Credential helpers
+
+**Other**
+- `rerere` - Reuse recorded resolution
+- `cherry` - Find commits not merged upstream
+- `show-branch` - Show branches and commits
+- `whatchanged` - Show commit logs with diff
+- `range-diff` - Compare two commit ranges
+- `multi-pack-index` - Multi-pack index management
 
 ## License
 

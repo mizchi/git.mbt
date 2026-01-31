@@ -4,11 +4,10 @@
 async fn show_help() -> Unit {
   let help =
     #|usage: moongit [-v | --version] [-h | --help] [-C <path>]
-    #|               [--no-git-fallback] <command> [<args>]
+    #|               <command> [<args>]
     #|
     #|moongit is a Git implementation in MoonBit.
-    #|Unsupported commands automatically fallback to system git.
-    #|Use --no-git-fallback to disable fallback and fail on unsupported commands.
+    #|Unsupported commands will fail with an error.
     #|
     #|start a working area
     #|   clone      Clone a repository into a new directory
@@ -88,23 +87,26 @@ async fn main_async() -> Unit {
       _ => continue
     }
   }
-  let full_args = collect_args(args, 1)
-  let (subcmd, rest, cwd, unsupported_global, no_fallback, bare) = parse_global_options(
-    args,
-  )
-  guard subcmd is Some(cmd) else {
-    eprint_line("git-shim: missing subcommand")
+  let opts = parse_global_options(args)
+  guard opts.subcmd is Some(cmd) else {
+    eprint_line("moongit: missing subcommand")
     @sys.exit(2)
   }
-  if unsupported_global {
-    if no_fallback {
-      eprint_line("moongit: unsupported global option (--no-git-fallback)")
-      @sys.exit(1)
+  if opts.unsupported_global {
+    eprint_line("moongit: unsupported global option")
+    @sys.exit(1)
+  }
+  // Store config overrides in environment variable for handlers to access
+  if opts.config_overrides.length() > 0 {
+    let encoded : Array[String] = []
+    for pair in opts.config_overrides {
+      // Encode as key=value, separated by newlines
+      encoded.push(pair.0 + "=" + pair.1)
     }
-    run_system_git(full_args)
+    @sys.set_env_var("GIT_CONFIG_OVERRIDES", encoded.join("\n"))
   }
   // Set working directory if -C was used
-  match cwd {
+  match opts.cwd {
     Some(dir) => {
       @sys.set_env_var("GIT_SHIM_CWD", dir)
       if @sys.get_env_var("GIT_DIR") is None {
@@ -117,35 +119,38 @@ async fn main_async() -> Unit {
     None => ()
   }
   // If --bare was passed globally, prepend it to rest for init command
-  let effective_rest = if bare && cmd == "init" {
-    prepend_arg("--bare", rest)
+  let effective_rest = if opts.bare && cmd == "init" {
+    prepend_arg("--bare", opts.rest)
   } else {
-    rest
+    opts.rest
   }
-  dispatch_command(cmd, effective_rest, full_args, no_fallback)
+  dispatch_command(cmd, effective_rest)
 }
 
 ///|
-fn parse_global_options(
-  args : Array[String],
-) -> (String?, Array[String], String?, Bool, Bool, Bool) {
+struct GlobalOptions {
+  subcmd : String?
+  rest : Array[String]
+  cwd : String?
+  unsupported_global : Bool
+  bare : Bool
+  config_overrides : Array[(String, String)]
+}
+
+///|
+fn parse_global_options(args : Array[String]) -> GlobalOptions {
   let mut i = 1
   let mut in_opts = true
   let mut cwd : String? = None
   let mut unsupported_global = false
-  let mut no_fallback = false
   let mut bare = false
   let mut subcmd : String? = None
   let mut rest : Array[String] = []
+  let config_overrides : Array[(String, String)] = []
   while i < args.length() {
     let arg = args[i]
     if in_opts && arg == "--" {
       in_opts = false
-      i += 1
-      continue
-    }
-    if in_opts && arg == "--no-git-fallback" {
-      no_fallback = true
       i += 1
       continue
     }
@@ -169,7 +174,19 @@ fn parse_global_options(
       continue
     }
     if in_opts && arg == "-c" && i + 1 < args.length() {
-      unsupported_global = true
+      // Parse -c key=value
+      let kv = args[i + 1]
+      match kv.find("=") {
+        Some(eq_idx) => {
+          let key = String::unsafe_substring(kv, start=0, end=eq_idx)
+          let value = String::unsafe_substring(kv, start=eq_idx + 1, end=kv.length())
+          config_overrides.push((key, value))
+        }
+        None => {
+          // Key without value (treated as empty string in git)
+          config_overrides.push((kv, ""))
+        }
+      }
       i += 2
       continue
     }
@@ -190,7 +207,7 @@ fn parse_global_options(
     rest = collect_args(args, i + 1)
     break
   }
-  (subcmd, rest, cwd, unsupported_global, no_fallback, bare)
+  { subcmd, rest, cwd, unsupported_global, bare, config_overrides }
 }
 
 ///|
@@ -208,12 +225,7 @@ fn is_unsupported_global_flag(arg : String) -> Bool {
 }
 
 ///|
-async fn dispatch_command(
-  cmd : String,
-  rest : Array[String],
-  full_args : Array[String],
-  no_fallback : Bool,
-) -> Unit {
+async fn dispatch_command(cmd : String, rest : Array[String]) -> Unit {
   match cmd {
     // Pack operations
     "receive-pack" | "git-receive-pack" =>
@@ -355,17 +367,22 @@ async fn dispatch_command(
       handle_describe(rest) catch {
         err => exit_with_error("describe", err)
       }
-    "version" | "--version" => print_line("git version 2.47.0 (moongit)")
-    // Fallback to system git for unknown commands
-    _ =>
-      if no_fallback {
-        eprint_line("moongit: unsupported command '\{cmd}' (--no-git-fallback)")
-        @sys.exit(1)
-      } else {
-        run_system_git(prepend_arg(cmd, rest))
+    "blame" => handle_blame(rest) catch { err => exit_with_error("blame", err) }
+    "format-patch" =>
+      handle_format_patch(rest) catch {
+        err => exit_with_error("format-patch", err)
       }
+    "shortlog" =>
+      handle_shortlog(rest) catch {
+        err => exit_with_error("shortlog", err)
+      }
+    "version" | "--version" => print_line("git version 2.47.0 (moongit)")
+    // Error for unknown commands
+    _ => {
+      eprint_line("moongit: '\{cmd}' is not a moongit command")
+      @sys.exit(1)
+    }
   }
-  ignore(full_args)
 }
 
 ///|

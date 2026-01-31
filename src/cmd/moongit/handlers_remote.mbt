@@ -320,11 +320,12 @@ async fn handle_upload_pack(args : Array[String]) -> Unit {
   guard parse_pack_args(args) is Some((advertise, repo_path)) else {
     raise @git.GitError::ProtocolError("missing repository path")
   }
-  if repo_path.has_suffix(".git") && !repo_path.has_suffix("/.git") {
-    run_system_git(prepend_arg("upload-pack", args))
-    return ()
+  let root = if repo_path.has_suffix(".git") && !repo_path.has_suffix("/.git") {
+    // Bare repository with .git suffix
+    repo_path
+  } else {
+    normalize_repo_root(repo_path)
   }
-  let root = normalize_repo_root(repo_path)
   let fs = OsFs::new()
   if advertise {
     let out = @gitlib.build_upload_pack_advertisement(fs, root)
@@ -349,11 +350,12 @@ async fn handle_receive_pack(args : Array[String]) -> Unit {
   guard parse_pack_args(args) is Some((advertise, repo_path)) else {
     raise @git.GitError::ProtocolError("missing repository path")
   }
-  if repo_path.has_suffix(".git") && !repo_path.has_suffix("/.git") {
-    run_system_git(prepend_arg("receive-pack", args))
-    return ()
+  let root = if repo_path.has_suffix(".git") && !repo_path.has_suffix("/.git") {
+    // Bare repository with .git suffix
+    repo_path
+  } else {
+    normalize_repo_root(repo_path)
   }
-  let root = normalize_repo_root(repo_path)
   let fs = OsFs::new()
   if advertise {
     let out = @gitlib.build_receive_pack_advertisement(fs, root)

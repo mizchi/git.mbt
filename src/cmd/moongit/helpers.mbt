@@ -100,18 +100,6 @@ fn ensure_dir(path : String) -> Unit raise @git.GitError {
 }
 
 ///|
-fn real_git_path() -> String {
-  match @sys.get_env_var("SHIM_REAL_GIT") {
-    Some(path) => path
-    None =>
-      match @sys.get_env_var("GIT_SHIM_REAL_GIT") {
-        Some(path) => path
-        None => "git"
-      }
-  }
-}
-
-///|
 fn collect_args(args : Array[String], start : Int) -> Array[String] {
   let out : Array[String] = []
   for i in start..<args.length() {
@@ -140,20 +128,6 @@ async fn read_all_stdin() -> Bytes {
     }
   }
   bytes_from_array(out)
-}
-
-///|
-async fn run_system_git(args : Array[String]) -> Unit {
-  let git = real_git_path()
-  let status = @process.run(
-    git,
-    args,
-    inherit_env=true,
-    stdin=@stdio.stdin,
-    stdout=@stdio.stdout,
-    stderr=@stdio.stderr,
-  )
-  @sys.exit(status)
 }
 
 ///|

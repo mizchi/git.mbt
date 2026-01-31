@@ -216,8 +216,10 @@ fn invalid_object_line_message(line : String) -> String {
 ///|
 async fn handle_pack_objects(args : Array[String]) -> Unit {
   match parse_pack_objects_args(args) {
-    PackObjectsParse::Unsupported =>
-      run_system_git(prepend_arg("pack-objects", args))
+    PackObjectsParse::Unsupported => {
+      @stdio.stderr.write("moongit pack-objects: unsupported options\n")
+      @sys.exit(1)
+    }
     PackObjectsParse::Error(msg) => {
       @stdio.stderr.write(msg + "\n")
       @sys.exit(1)
@@ -229,9 +231,10 @@ async fn handle_pack_objects(args : Array[String]) -> Unit {
         @stdio.stderr.write("fatal: not a git repository\n")
         @sys.exit(1)
       }
-      // SHA256 repositories are not yet supported, fallback to real git
+      // SHA256 repositories are not yet supported
       if fs.is_dir(git_dir) && is_sha256_repo(git_dir) {
-        run_system_git(prepend_arg("pack-objects", args))
+        @stdio.stderr.write("moongit: SHA256 repositories are not supported\n")
+        @sys.exit(1)
       }
       // Read pack.packSizeLimit from config
       let pack_size_limit = get_pack_size_limit(git_dir)

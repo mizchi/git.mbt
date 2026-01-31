@@ -147,3 +147,22 @@ git-t-one test_file:
     GIT_TEST_DEFAULT_HASH=sha1 \
     CPATH="$prefix/include" LDFLAGS="-L$prefix/lib" LIBRARY_PATH="$prefix/lib" \
     make -C third_party/git test T="{{test_file}}"
+
+# Run a single test with ALL moongit commands (no fallback)
+git-t-full test_file:
+    @prefix=$(brew --prefix gettext); \
+    real_git="$(pwd)/third_party/git/git"; \
+    if [ -x "$real_git" ]; then \
+      exec_path="$(pwd)/third_party/git"; \
+    else \
+      real_git=$(/usr/bin/which git); \
+      exec_path=$($real_git --exec-path); \
+    fi; \
+    shim_dir="$(pwd)/tools/git-shim/bin"; \
+    echo "$real_git" > tools/git-shim/real-git-path; \
+    SHIM_REAL_GIT="$real_git" SHIM_EXEC_PATH="$exec_path" \
+    SHIM_CMDS="init status add commit log show branch checkout switch reset rebase stash cherry-pick diff merge tag rm mv config sparse-checkout rev-parse cat-file ls-files hash-object ls-tree write-tree show-ref update-ref symbolic-ref reflog worktree gc clean grep submodule revert notes bisect describe blame format-patch shortlog remote clone fetch pull push receive-pack upload-pack pack-objects index-pack" SHIM_STRICT=1 \
+    GIT_TEST_INSTALLED="$shim_dir" GIT_TEST_EXEC_PATH="$exec_path" \
+    GIT_TEST_DEFAULT_HASH=sha1 \
+    CPATH="$prefix/include" LDFLAGS="-L$prefix/lib" LIBRARY_PATH="$prefix/lib" \
+    make -C third_party/git test T="{{test_file}}"

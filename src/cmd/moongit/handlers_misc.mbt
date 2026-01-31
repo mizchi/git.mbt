@@ -1,6 +1,46 @@
 ///| Miscellaneous handlers: diff, merge, tag, rm, mv, config, sparse-checkout, rev-parse, cat-file, ls-files, hash-object, ls-tree, write-tree, show-ref, update-ref, symbolic-ref
 
 ///|
+fn find_git_dir(fs : OsFs) -> String {
+  // Check GIT_DIR environment variable first
+  match @sys.get_env_var("GIT_DIR") {
+    Some(dir) => return dir
+    None => ()
+  }
+  // Check if current directory is a .git directory (bare repo or inside .git)
+  let cwd = get_work_root()
+  if fs.is_file(cwd + "/config") && fs.is_file(cwd + "/HEAD") && fs.is_dir(cwd + "/refs") {
+    return cwd
+  }
+  // Standard case: .git subdirectory
+  cwd + "/.git"
+}
+
+///|
+fn get_config_override(key : String) -> String? {
+  let overrides = @sys.get_env_var("GIT_CONFIG_OVERRIDES")
+  match overrides {
+    Some(data) => {
+      for line_view in data.split("\n") {
+        let line = line_view.to_string()
+        match line.find("=") {
+          Some(eq_idx) => {
+            let k = String::unsafe_substring(line, start=0, end=eq_idx)
+            // Case-insensitive comparison for config keys
+            if k.to_lower() == key.to_lower() {
+              return Some(String::unsafe_substring(line, start=eq_idx + 1, end=line.length()))
+            }
+          }
+          None => ()
+        }
+      }
+      None
+    }
+    None => None
+  }
+}
+
+///|
 async fn handle_diff(args : Array[String]) -> Unit raise Error {
   let root = get_work_root()
   let fs = OsFs::new()
@@ -67,8 +107,15 @@ async fn handle_merge(args : Array[String]) -> Unit raise Error {
   let root = get_work_root()
   let git_dir = root + "/.git"
   let fs = OsFs::new()
+  let wfs : &@git.FileSystem = fs
+  let rfs : &@git.RepoFileSystem = fs
   let mut target_ref : String? = None
   let mut message : String? = None
+  let mut no_ff = false
+  let mut ff_only = false
+  let mut squash = false
+  let mut abort_merge = false
+  let mut continue_merge = false
   let mut i = 0
   while i < args.length() {
     let arg = args[i]
@@ -83,10 +130,89 @@ async fn handle_merge(args : Array[String]) -> Unit raise Error {
         i += 1
         continue
       }
+      "--no-ff" => {
+        no_ff = true
+        i += 1
+        continue
+      }
+      "--ff-only" => {
+        ff_only = true
+        i += 1
+        continue
+      }
+      "--squash" => {
+        squash = true
+        i += 1
+        continue
+      }
+      "--abort" => {
+        abort_merge = true
+        i += 1
+        continue
+      }
+      "--continue" => {
+        continue_merge = true
+        i += 1
+        continue
+      }
       _ if not(arg.has_prefix("-")) => target_ref = Some(arg)
       _ => ()
     }
     i += 1
+  }
+  // Handle --abort
+  if abort_merge {
+    let orig_head_path = git_dir + "/ORIG_HEAD"
+    let merge_head_path = git_dir + "/MERGE_HEAD"
+    if rfs.is_file(orig_head_path) {
+      let orig_hex = trim_string(decode_bytes(rfs.read_file(orig_head_path)))
+      ignore(@gitlib.reset(wfs, rfs, root, orig_hex, @gitlib.ResetMode::Hard))
+      wfs.remove_file(orig_head_path) catch {
+        _ => ()
+      }
+      wfs.remove_file(merge_head_path) catch {
+        _ => ()
+      }
+      wfs.remove_file(git_dir + "/MERGE_MSG") catch {
+        _ => ()
+      }
+      print_line("Merge aborted.")
+    } else {
+      @stdio.stderr.write("fatal: There is no merge to abort (ORIG_HEAD missing).")
+      @sys.exit(128)
+    }
+    return
+  }
+  // Handle --continue
+  if continue_merge {
+    let merge_head_path = git_dir + "/MERGE_HEAD"
+    let merge_msg_path = git_dir + "/MERGE_MSG"
+    if not(rfs.is_file(merge_head_path)) {
+      @stdio.stderr.write("fatal: There is no merge in progress (MERGE_HEAD missing).")
+      @sys.exit(128)
+    }
+    // Commit the merge
+    let msg = if rfs.is_file(merge_msg_path) {
+      trim_string(decode_bytes(rfs.read_file(merge_msg_path)))
+    } else {
+      "Merge commit"
+    }
+    let author = get_author_string()
+    let timestamp = get_commit_timestamp()
+    let commit_id = @gitlib.commit(wfs, rfs, root, msg, author, timestamp)
+    let short = String::unsafe_substring(commit_id.to_hex(), start=0, end=7)
+    // Clean up merge state
+    wfs.remove_file(merge_head_path) catch {
+      _ => ()
+    }
+    wfs.remove_file(merge_msg_path) catch {
+      _ => ()
+    }
+    wfs.remove_file(git_dir + "/ORIG_HEAD") catch {
+      _ => ()
+    }
+    print_line("[\{short}] \{msg}")
+    return
   }
   guard target_ref is Some(refspec) else {
     raise @git.GitError::InvalidObject("No commit to merge specified")
@@ -99,6 +225,102 @@ async fn handle_merge(args : Array[String]) -> Unit raise Error {
   let author = get_author_string()
   let timestamp = get_commit_timestamp()
   let msg = message.unwrap_or("Merge \{refspec}")
+  // Handle --squash
+  if squash {
+    // Squash merge: apply changes but don't commit
+    let result = @gitlib.merge(fs, fs, root, tid, msg, author, timestamp)
+    match result.status {
+      @gitlib.MergeStatus::AlreadyUpToDate => print_line("Already up to date.")
+      @gitlib.MergeStatus::FastForward | @gitlib.MergeStatus::Merged => {
+        // Reset HEAD but keep working tree changes
+        let head = @gitlib.rev_parse(rfs, git_dir, "HEAD")
+        match head {
+          Some(h) =>
+            // Reset index to HEAD but keep working tree
+            ignore(
+              @gitlib.reset(wfs, rfs, root, h.to_hex(), @gitlib.ResetMode::Soft),
+            )
+          None => ()
+        }
+        print_line("Squash commit -- not updating HEAD")
+        // Save merge message for later commit
+        wfs.write_string(
+          git_dir + "/SQUASH_MSG",
+          "Squashed commit of the following:\n\n" + msg + "\n",
+        )
+      }
+      @gitlib.MergeStatus::Conflicted => {
+        print_line("CONFLICT: Merge conflict")
+        for path in result.conflicts {
+          print_line("  \{path}")
+        }
+      }
+    }
+    return
+  }
+  // Check if fast-forward is possible
+  let head = @gitlib.rev_parse(rfs, git_dir, "HEAD")
+  let is_ff = match head {
+    Some(h) => is_ancestor(rfs, git_dir, h, tid)
+    None => false
+  }
+  // Handle --ff-only
+  if ff_only && not(is_ff) {
+    @stdio.stderr.write("fatal: Not possible to fast-forward, aborting.")
+    @sys.exit(128)
+  }
+  // Handle --no-ff: force merge commit even if fast-forward possible
+  if no_ff && is_ff {
+    // Create merge commit even though ff is possible
+    let db = @gitlib.ObjectDb::load(rfs, git_dir)
+    let head_id = @gitlib.rev_parse(rfs, git_dir, "HEAD")
+    guard head_id is Some(hid) else {
+      raise @git.GitError::InvalidObject("Cannot resolve HEAD")
+    }
+    // Use target's tree
+    let target_obj = db.get(rfs, tid)
+    guard target_obj is Some(to) else {
+      raise @git.GitError::InvalidObject("Cannot read target commit")
+    }
+    let target_info = @git.parse_commit(to.data)
+    // Write tree (use target's tree)
+    let tree_id = target_info.tree
+    // Create merge commit with two parents
+    let commit = @git.Commit::new(
+      tree_id,
+      [hid, tid],
+      author,
+      timestamp,
+      "+0000",
+      author,
+      timestamp,
+      "+0000",
+      msg + "\n",
+    )
+    let (commit_id, commit_data) = @git.create_commit(commit)
+    @gitlib.write_object_bytes(wfs, git_dir, commit_id, commit_data)
+    // Update HEAD
+    let head_path = git_dir + "/HEAD"
+    let head_content = trim_string(decode_bytes(rfs.read_file(head_path)))
+    if head_content.has_prefix("ref: ") {
+      let ref_path = git_dir +
+        "/" +
+        String::unsafe_substring(
+          head_content,
+          start=5,
+          end=head_content.length(),
+        )
+      wfs.write_string(ref_path, commit_id.to_hex() + "\n")
+    } else {
+      wfs.write_string(head_path, commit_id.to_hex() + "\n")
+    }
+    // Checkout the new tree
+    ignore(@gitlib.checkout(wfs, rfs, root, commit_id.to_hex(), detach=false))
+    let short = String::unsafe_substring(commit_id.to_hex(), start=0, end=7)
+    print_line("Merge made by the 'ort' strategy (--no-ff). [\{short}]")
+    return
+  }
+  // Regular merge
   let result = @gitlib.merge(fs, fs, root, tid, msg, author, timestamp)
   match result.status {
     @gitlib.MergeStatus::AlreadyUpToDate => print_line("Already up to date.")
@@ -126,6 +348,43 @@ async fn handle_merge(args : Array[String]) -> Unit raise Error {
       print_line("Automatic merge failed; fix conflicts and then commit.")
     }
   }
+}
+
+///|
+fn is_ancestor(
+  rfs : &@git.RepoFileSystem,
+  git_dir : String,
+  ancestor : @git.ObjectId,
+  descendant : @git.ObjectId,
+) -> Bool {
+  // Check if ancestor is an ancestor of descendant
+  let db = @gitlib.ObjectDb::load(rfs, git_dir) catch { _ => return false }
+  let ancestor_hex = ancestor.to_hex()
+  let visited : Map[String, Bool] = {}
+  let queue : Array[@git.ObjectId] = [descendant]
+  while queue.length() > 0 {
+    let current = queue.pop()
+    guard current is Some(cid) else { break }
+    let hex = cid.to_hex()
+    if hex == ancestor_hex {
+      return true
+    }
+    if visited.get(hex).unwrap_or(false) {
+      continue
+    }
+    visited[hex] = true
+    let obj = db.get(rfs, cid) catch { _ => continue }
+    match obj {
+      Some(o) => {
+        let info = @git.parse_commit(o.data) catch { _ => continue }
+        for p in info.parents {
+          queue.push(p)
+        }
+      }
+      None => ()
+    }
+  }
+  false
 }
 
 ///|
@@ -266,9 +525,8 @@ fn handle_mv(args : Array[String]) -> Unit raise Error {
 
 ///|
 async fn handle_config(args : Array[String]) -> Unit raise Error {
-  let root = get_work_root()
-  let git_dir = root + "/.git"
   let fs = OsFs::new()
+  let git_dir = find_git_dir(fs)
   let config_path = git_dir + "/config"
   // Parse arguments
   let mut get_mode = false
@@ -310,11 +568,16 @@ async fn handle_config(args : Array[String]) -> Unit raise Error {
     return
   }
   if get_mode || value is None {
-    // Read config
-    if not(fs.is_file(config_path)) {
-      @sys.exit(1)
+    // Read config - check overrides first
+    let result = match get_config_override(k) {
+      Some(v) => Some(v)
+      None =>
+        if fs.is_file(config_path) {
+          get_config_value(fs, config_path, k)
+        } else {
+          (None : String?)
+        }
     }
-    let result = get_config_value(fs, config_path, k)
     match result {
       Some(val) =>
         if get_bool {
@@ -345,7 +608,7 @@ fn trim_chars(s : String, chars : String) -> String {
   let mut end = s.length()
   while start < end {
     let c = s.unsafe_get(start)
-    if chars.contains(c.to_string()) {
+    if code_in_string(c, chars) {
       start += 1
     } else {
       break
@@ -353,13 +616,23 @@ fn trim_chars(s : String, chars : String) -> String {
   }
   while end > start {
     let c = s.unsafe_get(end - 1)
-    if chars.contains(c.to_string()) {
+    if code_in_string(c, chars) {
       end -= 1
     } else {
       break
     }
   }
   String::unsafe_substring(s, start~, end~)
+}
+
+///|
+fn code_in_string(c : UInt16, s : String) -> Bool {
+  for i in 0..<s.length() {
+    if s.unsafe_get(i) == c {
+      return true
+    }
+  }
+  false
 }
 
 ///|
@@ -1539,13 +1812,13 @@ async fn handle_update_ref(args : Array[String]) -> Unit raise Error {
       match current {
         Some(cur_id) =>
           if cur_id.to_hex() != ov {
-            eprint_line(
+            @stdio.stderr.write(
               "error: cannot lock ref '\{refname}': is at \{cur_id.to_hex()} but expected \{ov}",
             )
             @sys.exit(1)
           }
         None => {
-          eprint_line(
+          @stdio.stderr.write(
             "error: cannot lock ref '\{refname}': unable to resolve reference",
           )
           @sys.exit(1)
@@ -1606,14 +1879,14 @@ async fn handle_update_ref(args : Array[String]) -> Unit raise Error {
       match current_id {
         Some(cur_id) =>
           if cur_id.to_hex() != expected_id.to_hex() {
-            eprint_line(
+            @stdio.stderr.write(
               "error: cannot lock ref '\{refname}': is at \{cur_id.to_hex()} but expected \{expected_id.to_hex()}",
             )
             @sys.exit(1)
           }
         None =>
           if expected_id.to_hex() != @git.ObjectId::zero().to_hex() {
-            eprint_line(
+            @stdio.stderr.write(
               "error: cannot lock ref '\{refname}': unable to resolve reference '\{refname}'",
             )
             @sys.exit(1)
@@ -1834,7 +2107,7 @@ async fn handle_reflog(args : Array[String]) -> Unit raise Error {
     }
     "exists" => {
       if rest.length() == 0 {
-        eprint_line("usage: git reflog exists <ref>")
+        @stdio.stderr.write("usage: git reflog exists <ref>")
         @sys.exit(1)
       }
       let refname = rest[0]
@@ -1846,7 +2119,7 @@ async fn handle_reflog(args : Array[String]) -> Unit raise Error {
     }
     "delete" => {
       if rest.length() == 0 {
-        eprint_line("usage: git reflog delete <ref>")
+        @stdio.stderr.write("usage: git reflog delete <ref>")
         @sys.exit(1)
       }
       let refname = rest[0]
@@ -1949,7 +2222,7 @@ async fn handle_clean(args : Array[String]) -> Unit raise Error {
   }
   // git clean requires -f unless -n is specified
   if not(force) && not(dry_run) {
-    eprint_line(
+    @stdio.stderr.write(
       "fatal: clean.requireForce defaults to true and neither -i, -n, nor -f given; refusing to clean",
     )
     @sys.exit(1)
@@ -1959,7 +2232,7 @@ async fn handle_clean(args : Array[String]) -> Unit raise Error {
   let mut files_to_clean : Array[String] = []
   if remove_only_ignored {
     // -X: only ignored files (not implemented - need gitignore parsing)
-    eprint_line("warning: -X (remove only ignored) not fully implemented")
+    @stdio.stderr.write("warning: -X (remove only ignored) not fully implemented")
   } else {
     // Regular untracked files
     for p in status.untracked {
@@ -2172,7 +2445,7 @@ async fn handle_submodule(args : Array[String]) -> Unit raise Error {
     "deinit" => handle_submodule_deinit(fs, root, git_dir, rest)
     "sync" => handle_submodule_sync(fs, root, git_dir, rest)
     _ => {
-      eprint_line("error: unknown submodule command: \{subcmd}")
+      @stdio.stderr.write("error: unknown submodule command: \{subcmd}")
       @sys.exit(1)
     }
   }
@@ -2341,7 +2614,7 @@ async fn handle_submodule_update(
         modules_dir,
       ])
       if clone_result != 0 {
-        eprint_line("Failed to clone \{sub.url}")
+        @stdio.stderr.write("Failed to clone \{sub.url}")
         continue
       }
       // Create .git file
@@ -2508,7 +2781,7 @@ async fn handle_submodule_deinit(
       if rfs.is_dir(sub_git_dir) {
         let status = @gitlib.status(rfs, sub_path) catch { _ => continue }
         if status.unstaged_modified.length() > 0 {
-          eprint_line(
+          @stdio.stderr.write(
             "error: '\{sub.path}' has local modifications (use --force)",
           )
           @sys.exit(1)
@@ -2708,7 +2981,7 @@ async fn handle_revert(args : Array[String]) -> Unit raise Error {
   // Handle --abort
   if do_abort {
     if not(rfs.is_file(revert_head_path)) {
-      eprint_line("error: no revert in progress")
+      @stdio.stderr.write("error: no revert in progress")
       @sys.exit(1)
     }
     // Restore ORIG_HEAD if exists
@@ -2736,7 +3009,7 @@ async fn handle_revert(args : Array[String]) -> Unit raise Error {
   // Handle --skip
   if do_skip {
     if not(rfs.is_file(revert_head_path)) {
-      eprint_line("error: no revert in progress")
+      @stdio.stderr.write("error: no revert in progress")
       @sys.exit(1)
     }
     // Clean up state files (skip current revert)
@@ -2754,7 +3027,7 @@ async fn handle_revert(args : Array[String]) -> Unit raise Error {
   // Handle --continue
   if do_continue {
     if not(rfs.is_file(revert_head_path)) {
-      eprint_line("error: no revert in progress")
+      @stdio.stderr.write("error: no revert in progress")
       @sys.exit(1)
     }
     // Read the commit message from MERGE_MSG
@@ -2791,7 +3064,7 @@ async fn handle_revert(args : Array[String]) -> Unit raise Error {
   }
   // Check if revert already in progress
   if rfs.is_file(revert_head_path) {
-    eprint_line(
+    @stdio.stderr.write(
       "error: revert already in progress, use --continue, --abort, or --skip",
     )
     @sys.exit(1)
@@ -2893,7 +3166,7 @@ async fn handle_revert(args : Array[String]) -> Unit raise Error {
             let current_id = @git.hash_blob(current_content)
             if current_id.to_hex() != commit_entry.id.to_hex() {
               // Current file differs from commit, potential conflict
-              eprint_line("warning: \{path} has local modifications")
+              @stdio.stderr.write("warning: \{path} has local modifications")
               has_conflicts = true
               continue
             }
@@ -2917,12 +3190,12 @@ async fn handle_revert(args : Array[String]) -> Unit raise Error {
       // Save state for --continue
       wfs.write_string(revert_head_path, cid.to_hex() + "\n")
       wfs.write_string(merge_msg_path, revert_msg)
-      eprint_line("error: could not revert \{commit_ref}")
-      eprint_line(
+      @stdio.stderr.write("error: could not revert \{commit_ref}")
+      @stdio.stderr.write(
         "hint: after resolving conflicts, run 'git revert --continue'",
       )
-      eprint_line("hint: to skip this commit, run 'git revert --skip'")
-      eprint_line("hint: to abort, run 'git revert --abort'")
+      @stdio.stderr.write("hint: to skip this commit, run 'git revert --skip'")
+      @stdio.stderr.write("hint: to abort, run 'git revert --abort'")
       @sys.exit(1)
     }
     // Create revert commit unless --no-commit
@@ -3023,7 +3296,7 @@ async fn handle_notes(args : Array[String]) -> Unit raise Error {
         }
       }
       guard message is Some(msg) else {
-        eprint_line("error: notes add requires -m <message>")
+        @stdio.stderr.write("error: notes add requires -m <message>")
         @sys.exit(1)
       }
       notes_add(wfs, rfs, git_dir, notes_ref_path, commit_ref, msg, force)
@@ -3034,7 +3307,7 @@ async fn handle_notes(args : Array[String]) -> Unit raise Error {
     }
     "prune" => notes_prune(wfs, rfs, git_dir, notes_ref_path)
     _ => {
-      eprint_line("usage: git notes [list | show | add | remove | prune]")
+      @stdio.stderr.write("usage: git notes [list | show | add | remove | prune]")
       @sys.exit(1)
     }
   }
@@ -3080,7 +3353,7 @@ async fn notes_show(
   let target_hex = tid.to_hex()
   // Check if notes ref exists
   if not(rfs.is_file(notes_ref_path)) {
-    eprint_line("error: no note found for \{target_hex}")
+    @stdio.stderr.write("error: no note found for \{target_hex}")
     @sys.exit(1)
   }
   let ref_content = decode_bytes(rfs.read_file(notes_ref_path))
@@ -3089,14 +3362,14 @@ async fn notes_show(
   let db = @gitlib.ObjectDb::load(rfs, git_dir)
   let obj = db.get(rfs, commit_id)
   guard obj is Some(o) else {
-    eprint_line("error: notes ref corrupt")
+    @stdio.stderr.write("error: notes ref corrupt")
     @sys.exit(1)
   }
   let commit_info = @git.parse_commit(o.data)
   // Read tree
   let tree_obj = db.get(rfs, commit_info.tree)
   guard tree_obj is Some(to) else {
-    eprint_line("error: notes tree corrupt")
+    @stdio.stderr.write("error: notes tree corrupt")
     @sys.exit(1)
   }
   let entries = @git.parse_tree(to.data)
@@ -3105,14 +3378,14 @@ async fn notes_show(
     if entry.name == target_hex {
       let note_obj = db.get(rfs, entry.id)
       guard note_obj is Some(no) else {
-        eprint_line("error: note blob corrupt")
+        @stdio.stderr.write("error: note blob corrupt")
         @sys.exit(1)
       }
       print_line(decode_bytes(no.data))
       return
     }
   }
-  eprint_line("error: no note found for \{target_hex}")
+  @stdio.stderr.write("error: no note found for \{target_hex}")
   @sys.exit(1)
 }
 
@@ -3162,8 +3435,8 @@ async fn notes_add(
             for e in existing {
               if e.name == target_hex {
                 if not(force) {
-                  eprint_line("error: note already exists for \{target_hex}")
-                  eprint_line("Use -f to overwrite existing note")
+                  @stdio.stderr.write("error: note already exists for \{target_hex}")
+                  @stdio.stderr.write("Use -f to overwrite existing note")
                   @sys.exit(1)
                 }
                 // Skip existing note (will be replaced)
@@ -3221,7 +3494,7 @@ async fn notes_remove(
   let target_hex = tid.to_hex()
   // Check if notes ref exists
   if not(rfs.is_file(notes_ref_path)) {
-    eprint_line("error: no note found for \{target_hex}")
+    @stdio.stderr.write("error: no note found for \{target_hex}")
     @sys.exit(1)
   }
   let ref_content = decode_bytes(rfs.read_file(notes_ref_path))
@@ -3230,13 +3503,13 @@ async fn notes_remove(
   let db = @gitlib.ObjectDb::load(rfs, git_dir)
   let obj = db.get(rfs, commit_id)
   guard obj is Some(o) else {
-    eprint_line("error: notes ref corrupt")
+    @stdio.stderr.write("error: notes ref corrupt")
     @sys.exit(1)
   }
   let commit_info = @git.parse_commit(o.data)
   let tree_obj = db.get(rfs, commit_info.tree)
   guard tree_obj is Some(to) else {
-    eprint_line("error: notes tree corrupt")
+    @stdio.stderr.write("error: notes tree corrupt")
     @sys.exit(1)
   }
   let existing = @git.parse_tree(to.data)
@@ -3251,7 +3524,7 @@ async fn notes_remove(
     }
   }
   if not(found) {
-    eprint_line("error: no note found for \{target_hex}")
+    @stdio.stderr.write("error: no note found for \{target_hex}")
     @sys.exit(1)
   }
   // Create new tree
@@ -3354,15 +3627,15 @@ async fn handle_bisect(args : Array[String]) -> Unit raise Error {
     "reset" => bisect_reset(wfs, rfs, root, git_dir, args)
     "log" => bisect_log(rfs, git_dir)
     "visualize" | "view" => {
-      eprint_line("bisect visualize not implemented")
+      @stdio.stderr.write("bisect visualize not implemented")
       @sys.exit(1)
     }
     "replay" => {
-      eprint_line("bisect replay not implemented")
+      @stdio.stderr.write("bisect replay not implemented")
       @sys.exit(1)
     }
     "run" => {
-      eprint_line("bisect run not implemented")
+      @stdio.stderr.write("bisect run not implemented")
       @sys.exit(1)
     }
     "help" | _ => {
@@ -3392,8 +3665,8 @@ async fn bisect_start(
   let bisect_refs_dir = git_dir + "/refs/bisect"
   // Check if already in bisect
   if rfs.is_file(bisect_start_path) {
-    eprint_line("error: bisect already in progress")
-    eprint_line("use 'git bisect reset' to abort")
+    @stdio.stderr.write("error: bisect already in progress")
+    @stdio.stderr.write("use 'git bisect reset' to abort")
     @sys.exit(1)
   }
   // Get current branch
@@ -3452,8 +3725,8 @@ async fn bisect_mark(
   let bisect_refs_dir = git_dir + "/refs/bisect"
   // Check if bisect is in progress
   if not(rfs.is_file(bisect_start_path)) {
-    eprint_line("error: not in a bisect session")
-    eprint_line("use 'git bisect start' first")
+    @stdio.stderr.write("error: not in a bisect session")
+    @stdio.stderr.write("use 'git bisect start' first")
     @sys.exit(1)
   }
   // Get commit to mark (default HEAD)
@@ -3505,7 +3778,7 @@ async fn bisect_skip(
   let bisect_refs_dir = git_dir + "/refs/bisect"
   // Check if bisect is in progress
   if not(rfs.is_file(bisect_start_path)) {
-    eprint_line("error: not in a bisect session")
+    @stdio.stderr.write("error: not in a bisect session")
     @sys.exit(1)
   }
   // Get commit to skip (default HEAD)
@@ -3790,7 +4063,7 @@ async fn bisect_log(
 ) -> Unit raise Error {
   let bisect_log_path = git_dir + "/BISECT_LOG"
   if not(rfs.is_file(bisect_log_path)) {
-    eprint_line("error: no bisect log found")
+    @stdio.stderr.write("error: no bisect log found")
     @sys.exit(1)
   }
   let content = decode_bytes(rfs.read_file(bisect_log_path))
@@ -3835,7 +4108,7 @@ async fn handle_describe(args : Array[String]) -> Unit raise Error {
   // Get all tags
   let tags = get_all_tags(rfs, git_dir, use_tags)
   if tags.length() == 0 && not(always) {
-    eprint_line("fatal: No names found, cannot describe anything.")
+    @stdio.stderr.write("fatal: No names found, cannot describe anything.")
     @sys.exit(128)
   }
   // Find closest tag using BFS
@@ -3864,7 +4137,7 @@ async fn handle_describe(args : Array[String]) -> Unit raise Error {
         )
         print_line(short_sha + dirty_mark)
       } else {
-        eprint_line(
+        @stdio.stderr.write(
           "fatal: No tags can describe '\{tid.to_hex()}'.\nTry --always, or create a tag.",
         )
         @sys.exit(128)
@@ -3991,6 +4264,1442 @@ fn parse_int(s : String) -> Int {
     if c >= '0' && c <= '9' {
       result = result * 10 + (c.to_int() - '0'.to_int())
     }
+  }
+  result
+}
+
+///|
+/// Handle git format-patch command
+async fn handle_format_patch(args : Array[String]) -> Unit raise Error {
+  let root = get_work_root()
+  let git_dir = root + "/.git"
+  let fs = OsFs::new()
+  let wfs : &@git.FileSystem = fs
+  let rfs : &@git.RepoFileSystem = fs
+  // Parse options
+  let mut output_dir = "."
+  let mut start_number = 1
+  let mut numbered = false
+  let mut stdout_mode = false
+  let mut cover_letter = false
+  let revisions : Array[String] = []
+  let mut i = 0
+  while i < args.length() {
+    let arg = args[i]
+    match arg {
+      "-o" | "--output-directory" if i + 1 < args.length() => {
+        output_dir = args[i + 1]
+        i += 2
+      }
+      "--start-number" if i + 1 < args.length() => {
+        start_number = parse_int(args[i + 1])
+        i += 2
+      }
+      "-n" | "--numbered" => {
+        numbered = true
+        i += 1
+      }
+      "--stdout" => {
+        stdout_mode = true
+        i += 1
+      }
+      "--cover-letter" => {
+        cover_letter = true
+        i += 1
+      }
+      _ if arg.has_prefix("-o") => {
+        output_dir = String::unsafe_substring(arg, start=2, end=arg.length())
+        i += 1
+      }
+      _ if not(arg.has_prefix("-")) => {
+        revisions.push(arg)
+        i += 1
+      }
+      _ => i += 1
+    }
+  }
+  // Parse revision range
+  let (base_commit, commits) = parse_format_patch_revisions(
+    rfs, git_dir, revisions,
+  )
+  if commits.length() == 0 {
+    @stdio.stderr.write("fatal: no commits specified")
+    @sys.exit(128)
+  }
+  // Create output directory if needed
+  if not(stdout_mode) && not(rfs.is_dir(output_dir)) {
+    wfs.mkdir_p(output_dir)
+  }
+  let db = @gitlib.ObjectDb::load(rfs, git_dir)
+  let total = commits.length()
+  // Generate cover letter if requested
+  if cover_letter && not(stdout_mode) {
+    let cover_path = output_dir + "/0000-cover-letter.patch"
+    let cover_content = generate_cover_letter(commits.length())
+    wfs.write_string(cover_path, cover_content)
+    print_line(cover_path)
+  }
+  // Generate patches
+  for idx in 0..<commits.length() {
+    let commit_id = commits[idx]
+    let patch_num = start_number + idx
+    let patch = generate_patch(
+      db, rfs, commit_id, base_commit, patch_num, total, numbered,
+    )
+    if stdout_mode {
+      print_line(patch)
+      if idx < commits.length() - 1 {
+        print_line("--")
+      }
+    } else {
+      let filename = format_patch_filename(
+        db, rfs, commit_id, patch_num, total, numbered,
+      )
+      let patch_path = output_dir + "/" + filename
+      wfs.write_string(patch_path, patch)
+      print_line(patch_path)
+    }
+  }
+  ignore(base_commit)
+}
+
+///|
+fn parse_format_patch_revisions(
+  rfs : &@git.RepoFileSystem,
+  git_dir : String,
+  revisions : Array[String],
+) -> (@git.ObjectId?, Array[@git.ObjectId]) raise Error {
+  if revisions.length() == 0 {
+    // Default: HEAD~1..HEAD (last commit)
+    let head = @gitlib.rev_parse(rfs, git_dir, "HEAD")
+    guard head is Some(h) else { return (None, []) }
+    return (None, [h])
+  }
+  let rev = revisions[0]
+  // Check for range notation
+  match rev.find("..") {
+    Some(idx) => {
+      let base_ref = String::unsafe_substring(rev, start=0, end=idx)
+      let end_ref = String::unsafe_substring(
+        rev,
+        start=idx + 2,
+        end=rev.length(),
+      )
+      let base_id = @gitlib.rev_parse(rfs, git_dir, base_ref)
+      let end_id = @gitlib.rev_parse(
+        rfs,
+        git_dir,
+        if end_ref.length() == 0 {
+          "HEAD"
+        } else {
+          end_ref
+        },
+      )
+      guard base_id is Some(bid) && end_id is Some(eid) else {
+        return (None, [])
+      }
+      // Collect commits from end to base
+      let commits = collect_commits_in_range(rfs, git_dir, bid, eid)
+      (Some(bid), commits)
+    }
+    None =>
+      // Check for -N notation (last N commits)
+      if rev.has_prefix("-") {
+        let n = parse_int(
+          String::unsafe_substring(rev, start=1, end=rev.length()),
+        )
+        let commits = collect_last_n_commits(rfs, git_dir, n)
+        (None, commits)
+      } else {
+        // Single commit
+        let id = @gitlib.rev_parse(rfs, git_dir, rev)
+        guard id is Some(cid) else { return (None, []) }
+        (None, [cid])
+      }
+  }
+}
+
+///|
+fn collect_commits_in_range(
+  rfs : &@git.RepoFileSystem,
+  git_dir : String,
+  base : @git.ObjectId,
+  end : @git.ObjectId,
+) -> Array[@git.ObjectId] raise Error {
+  let db = @gitlib.ObjectDb::load(rfs, git_dir)
+  let result : Array[@git.ObjectId] = []
+  let mut current = end
+  let base_hex = base.to_hex()
+  while current.to_hex() != base_hex {
+    result.push(current)
+    let obj = db.get(rfs, current)
+    guard obj is Some(o) else { break }
+    let info = @git.parse_commit(o.data)
+    if info.parents.length() == 0 {
+      break
+    }
+    current = info.parents[0]
+  }
+  // Reverse to get chronological order
+  result.rev_in_place()
+  result
+}
+
+///|
+fn collect_last_n_commits(
+  rfs : &@git.RepoFileSystem,
+  git_dir : String,
+  n : Int,
+) -> Array[@git.ObjectId] raise Error {
+  let db = @gitlib.ObjectDb::load(rfs, git_dir)
+  let head = @gitlib.rev_parse(rfs, git_dir, "HEAD")
+  guard head is Some(h) else { return [] }
+  let result : Array[@git.ObjectId] = []
+  let mut current = h
+  for _ in 0..<n {
+    result.push(current)
+    let obj = db.get(rfs, current)
+    guard obj is Some(o) else { break }
+    let info = @git.parse_commit(o.data)
+    if info.parents.length() == 0 {
+      break
+    }
+    current = info.parents[0]
+  }
+  result.rev_in_place()
+  result
+}
+
+///|
+fn generate_cover_letter(num_patches : Int) -> String {
+  let sb = StringBuilder::new()
+  sb.write_string(
+    "From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001\n",
+  )
+  sb.write_string("Subject: [PATCH 0/")
+  sb.write_string(num_patches.to_string())
+  sb.write_string("] *** SUBJECT HERE ***\n\n")
+  sb.write_string("*** BLURB HERE ***\n\n")
+  sb.to_string()
+}
+
+///|
+fn generate_patch(
+  db : @gitlib.ObjectDb,
+  rfs : &@git.RepoFileSystem,
+  commit_id : @git.ObjectId,
+  _base : @git.ObjectId?,
+  patch_num : Int,
+  total : Int,
+  numbered : Bool,
+) -> String raise Error {
+  let obj = db.get(rfs, commit_id)
+  guard obj is Some(o) else {
+    raise @git.GitError::InvalidObject("commit not found")
+  }
+  let commit_text = decode_bytes(o.data)
+  let info = @git.parse_commit(o.data)
+  // Extract commit details
+  let author_line = extract_author_line(commit_text)
+  let message = extract_commit_message(o.data)
+  let subject = get_first_line(message)
+  let body = get_rest_lines(message)
+  // Build patch header
+  let sb = StringBuilder::new()
+  sb.write_string("From ")
+  sb.write_string(commit_id.to_hex())
+  sb.write_string(" Mon Sep 17 00:00:00 2001\n")
+  sb.write_string("From: ")
+  sb.write_string(author_line)
+  sb.write_string("\n")
+  // Date from author line
+  let (_, author_time, author_tz) = parse_author_info(author_line)
+  sb.write_string("Date: ")
+  sb.write_string(format_email_date(author_time, author_tz))
+  sb.write_string("\n")
+  // Subject
+  sb.write_string("Subject: ")
+  if numbered || total > 1 {
+    sb.write_string("[PATCH ")
+    sb.write_string(patch_num.to_string())
+    sb.write_string("/")
+    sb.write_string(total.to_string())
+    sb.write_string("] ")
+  }
+  sb.write_string(subject)
+  sb.write_string("\n\n")
+  // Body
+  if body.length() > 0 {
+    sb.write_string(body)
+    sb.write_string("\n")
+  }
+  sb.write_string("---\n")
+  // Generate diff
+  let parent_id = if info.parents.length() > 0 {
+    Some(info.parents[0])
+  } else {
+    None
+  }
+  let diff = generate_commit_diff(db, rfs, commit_id, parent_id)
+  sb.write_string(diff)
+  sb.write_string("\n-- \n2.47.0 (moongit)\n\n")
+  sb.to_string()
+}
+
+///|
+fn format_patch_filename(
+  db : @gitlib.ObjectDb,
+  rfs : &@git.RepoFileSystem,
+  commit_id : @git.ObjectId,
+  patch_num : Int,
+  _total : Int,
+  _numbered : Bool,
+) -> String raise Error {
+  let obj = db.get(rfs, commit_id)
+  guard obj is Some(o) else {
+    return pad_left_zero(patch_num.to_string(), 4) + "-patch.patch"
+  }
+  let message = extract_commit_message(o.data)
+  let subject = get_first_line(message)
+  // Sanitize subject for filename
+  let sanitized = sanitize_filename(subject)
+  let num_str = pad_left_zero(patch_num.to_string(), 4)
+  num_str + "-" + sanitized + ".patch"
+}
+
+///|
+fn sanitize_filename(s : String) -> String {
+  let sb = StringBuilder::new()
+  let mut last_was_dash = false
+  for c in s {
+    if (c >= 'a' && c <= 'z') ||
+      (c >= 'A' && c <= 'Z') ||
+      (c >= '0' && c <= '9') {
+      sb.write_char(c)
+      last_was_dash = false
+    } else if not(last_was_dash) {
+      sb.write_char('-')
+      last_was_dash = true
+    }
+  }
+  let result = sb.to_string()
+  // Trim trailing dash
+  if result.length() > 0 && result[result.length() - 1] == '-' {
+    String::unsafe_substring(result, start=0, end=result.length() - 1)
+  } else {
+    result
+  }
+}
+
+///|
+fn get_first_line(s : String) -> String {
+  match s.find("\n") {
+    Some(idx) => String::unsafe_substring(s, start=0, end=idx)
+    None => s
+  }
+}
+
+///|
+fn get_rest_lines(s : String) -> String {
+  match s.find("\n") {
+    Some(idx) =>
+      trim_string(String::unsafe_substring(s, start=idx + 1, end=s.length()))
+    None => ""
+  }
+}
+
+///|
+fn format_email_date(ts : Int64, tz : String) -> String {
+  let secs = ts.to_int()
+  let days = secs / 86400
+  let time_of_day = secs % 86400
+  let hours = time_of_day / 3600
+  let minutes = time_of_day % 3600 / 60
+  let seconds = time_of_day % 60
+  let (year, month, day) = days_to_date(days)
+  let weekday = (days + 4) % 7 // Jan 1, 1970 was Thursday (4)
+  let weekday_names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+  let month_names = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov",
+    "Dec",
+  ]
+  let wd = weekday_names[weekday]
+  let mn = month_names[month - 1]
+  "\{wd}, \{day} \{mn} \{year} \{pad_left_zero(hours.to_string(), 2)}:\{pad_left_zero(minutes.to_string(), 2)}:\{pad_left_zero(seconds.to_string(), 2)} \{tz}"
+}
+
+///|
+fn generate_commit_diff(
+  db : @gitlib.ObjectDb,
+  rfs : &@git.RepoFileSystem,
+  commit_id : @git.ObjectId,
+  parent_id : @git.ObjectId?,
+) -> String raise Error {
+  let obj = db.get(rfs, commit_id)
+  guard obj is Some(o) else { return "" }
+  let info = @git.parse_commit(o.data)
+  let tree = info.tree
+  let parent_tree = match parent_id {
+    Some(pid) => {
+      let pobj = db.get(rfs, pid)
+      match pobj {
+        Some(po) => {
+          let pinfo = @git.parse_commit(po.data)
+          Some(pinfo.tree)
+        }
+        None => None
+      }
+    }
+    None => None
+  }
+  // Generate diff between trees
+  diff_trees(db, rfs, parent_tree, tree, "")
+}
+
+///|
+fn diff_trees(
+  db : @gitlib.ObjectDb,
+  rfs : &@git.RepoFileSystem,
+  old_tree : @git.ObjectId?,
+  new_tree : @git.ObjectId,
+  prefix : String,
+) -> String raise Error {
+  let sb = StringBuilder::new()
+  let new_entries = get_tree_entries(db, rfs, new_tree)
+  let old_entries : Map[String, @git.TreeEntry] = {}
+  match old_tree {
+    Some(ot) => {
+      let entries = get_tree_entries(db, rfs, ot)
+      for e in entries {
+        old_entries[e.name] = e
+      }
+    }
+    None => ()
+  }
+  // Check for new/modified files
+  for entry in new_entries {
+    let path = if prefix.length() > 0 {
+      prefix + "/" + entry.name
+    } else {
+      entry.name
+    }
+    if entry.mode == "40000" {
+      // Directory - recurse
+      let old_subtree = match old_entries.get(entry.name) {
+        Some(oe) if oe.mode == "40000" => Some(oe.id)
+        _ => None
+      }
+      let sub_diff = diff_trees(db, rfs, old_subtree, entry.id, path)
+      sb.write_string(sub_diff)
+    } else {
+      // File
+      match old_entries.get(entry.name) {
+        Some(oe) if oe.id.to_hex() != entry.id.to_hex() => {
+          // Modified
+          let diff = diff_blobs(db, rfs, Some(oe.id), entry.id, path)
+          sb.write_string(diff)
+        }
+        None => {
+          // New file
+          let diff = diff_blobs(db, rfs, None, entry.id, path)
+          sb.write_string(diff)
+        }
+        _ => ()
+      }
+    }
+  }
+  // Check for deleted files
+  for name, entry in old_entries {
+    if entry.mode != "40000" {
+      let mut found = false
+      for ne in new_entries {
+        if ne.name == name {
+          found = true
+          break
+        }
+      }
+      if not(found) {
+        let path = if prefix.length() > 0 { prefix + "/" + name } else { name }
+        let diff = diff_blobs(db, rfs, Some(entry.id), entry.id, path) // Deleted
+        sb.write_string(diff)
+      }
+    }
+  }
+  sb.to_string()
+}
+
+///|
+fn get_tree_entries(
+  db : @gitlib.ObjectDb,
+  rfs : &@git.RepoFileSystem,
+  tree_id : @git.ObjectId,
+) -> Array[@git.TreeEntry] raise Error {
+  let obj = db.get(rfs, tree_id)
+  guard obj is Some(o) else { return [] }
+  @git.parse_tree(o.data)
+}
+
+///|
+fn diff_blobs(
+  db : @gitlib.ObjectDb,
+  rfs : &@git.RepoFileSystem,
+  old_id : @git.ObjectId?,
+  new_id : @git.ObjectId,
+  path : String,
+) -> String raise Error {
+  let sb = StringBuilder::new()
+  let old_content = match old_id {
+    Some(oid) => {
+      let obj = db.get(rfs, oid)
+      match obj {
+        Some(o) => decode_bytes(o.data)
+        None => ""
+      }
+    }
+    None => ""
+  }
+  let new_obj = db.get(rfs, new_id)
+  let new_content = match new_obj {
+    Some(o) => decode_bytes(o.data)
+    None => ""
+  }
+  sb.write_string("diff --git a/")
+  sb.write_string(path)
+  sb.write_string(" b/")
+  sb.write_string(path)
+  sb.write_string("\n")
+  if old_id is None {
+    sb.write_string("new file mode 100644\n")
+  }
+  sb.write_string("--- ")
+  if old_id is Some(_) {
+    sb.write_string("a/")
+    sb.write_string(path)
+  } else {
+    sb.write_string("/dev/null")
+  }
+  sb.write_string("\n+++ b/")
+  sb.write_string(path)
+  sb.write_string("\n")
+  // Simple line-by-line diff
+  let old_lines = split_lines(old_content)
+  let new_lines = split_lines(new_content)
+  sb.write_string("@@ -1,")
+  sb.write_string(old_lines.length().to_string())
+  sb.write_string(" +1,")
+  sb.write_string(new_lines.length().to_string())
+  sb.write_string(" @@\n")
+  for line in old_lines {
+    sb.write_string("-")
+    sb.write_string(line)
+    sb.write_string("\n")
+  }
+  for line in new_lines {
+    sb.write_string("+")
+    sb.write_string(line)
+    sb.write_string("\n")
+  }
+  sb.to_string()
+}
+
+///|
+/// Handle git shortlog command
+async fn handle_shortlog(args : Array[String]) -> Unit raise Error {
+  let root = get_work_root()
+  let git_dir = root + "/.git"
+  let fs = OsFs::new()
+  let rfs : &@git.RepoFileSystem = fs
+  // Parse options
+  let mut numbered = false
+  let mut summary = false
+  let mut email = false
+  let mut max_count = -1
+  for arg in args {
+    match arg {
+      "-n" | "--numbered" => numbered = true
+      "-s" | "--summary" => summary = true
+      "-e" | "--email" => email = true
+      _ if arg.has_prefix("-") && not(arg.has_prefix("--")) => {
+        // Could be -N for count
+        let num_str = String::unsafe_substring(arg, start=1, end=arg.length())
+        let n = parse_int(num_str)
+        if n > 0 {
+          max_count = n
+        }
+      }
+      _ => ()
+    }
+  }
+  // Collect commits and group by author
+  let db = @gitlib.ObjectDb::load(rfs, git_dir)
+  let head = @gitlib.rev_parse(rfs, git_dir, "HEAD")
+  guard head is Some(h) else { return }
+  let author_commits : Map[String, Array[String]] = {}
+  let visited : Map[String, Bool] = {}
+  let queue : Array[@git.ObjectId] = [h]
+  let mut count = 0
+  while queue.length() > 0 {
+    if max_count > 0 && count >= max_count {
+      break
+    }
+    let current = queue.pop()
+    guard current is Some(cid) else { break }
+    let hex = cid.to_hex()
+    if visited.get(hex).unwrap_or(false) {
+      continue
+    }
+    visited[hex] = true
+    count += 1
+    let obj = db.get(rfs, cid)
+    match obj {
+      Some(o) => {
+        let commit_text = decode_bytes(o.data)
+        let author_line = extract_author_line(commit_text)
+        let author_key = if email {
+          author_line
+        } else {
+          // Extract just name
+          match author_line.find("<") {
+            Some(idx) =>
+              trim_string(
+                String::unsafe_substring(author_line, start=0, end=idx),
+              )
+            None => author_line
+          }
+        }
+        let message = extract_commit_message(o.data)
+        let subject = get_first_line(message)
+        match author_commits.get(author_key) {
+          Some(arr) => arr.push(subject)
+          None => author_commits[author_key] = [subject]
+        }
+        let info = @git.parse_commit(o.data)
+        for p in info.parents {
+          queue.push(p)
+        }
+      }
+      None => ()
+    }
+  }
+  // Sort authors
+  let authors : Array[(String, Array[String])] = []
+  for author, commits in author_commits {
+    authors.push((author, commits))
+  }
+  if numbered {
+    // Sort by commit count descending
+    authors.sort_by(fn(a, b) { b.1.length().compare(a.1.length()) })
+  } else {
+    // Sort alphabetically
+    authors.sort_by(fn(a, b) { a.0.compare(b.0) })
+  }
+  // Output
+  for entry in authors {
+    let author = entry.0
+    let commits = entry.1
+    print_line("\{author} (\{commits.length()}):")
+    if not(summary) {
+      for commit in commits {
+        print_line("      \{commit}")
+      }
+      print_line("")
+    }
+  }
+}
+
+///|
+/// Handle git blame command
+async fn handle_blame(args : Array[String]) -> Unit raise Error {
+  let root = get_work_root()
+  let git_dir = root + "/.git"
+  let fs = OsFs::new()
+  let rfs : &@git.RepoFileSystem = fs
+  // Parse options
+  let mut long_sha = false
+  let mut porcelain = false
+  let mut incremental = false
+  let mut ignore_whitespace = false
+  let mut detect_moves = false
+  let mut detect_copies = false
+  let mut line_start = 0
+  let mut line_end = 0
+  let mut commit_ref = "HEAD"
+  let mut file_path : String? = None
+  let mut i = 0
+  while i < args.length() {
+    let arg = args[i]
+    match arg {
+      "-l" => {
+        long_sha = true
+        i += 1
+      }
+      "--porcelain" | "-p" => {
+        porcelain = true
+        i += 1
+      }
+      "--incremental" => {
+        incremental = true
+        i += 1
+      }
+      "-w" => {
+        ignore_whitespace = true
+        i += 1
+      }
+      "-M" => {
+        detect_moves = true
+        i += 1
+      }
+      "-C" => {
+        detect_copies = true
+        i += 1
+      }
+      "-L" if i + 1 < args.length() => {
+        let range = args[i + 1]
+        let parsed = parse_line_range(range)
+        line_start = parsed.0
+        line_end = parsed.1
+        i += 2
+      }
+      _ if arg.has_prefix("-L") => {
+        let range = String::unsafe_substring(arg, start=2, end=arg.length())
+        let parsed = parse_line_range(range)
+        line_start = parsed.0
+        line_end = parsed.1
+        i += 1
+      }
+      _ if not(arg.has_prefix("-")) =>
+        // Could be commit ref or file path
+        if file_path is None {
+          // First positional - check if it looks like a file
+          let test_path = root + "/" + arg
+          if fs.is_file(test_path) {
+            file_path = Some(arg)
+          } else {
+            commit_ref = arg
+          }
+          i += 1
+        } else {
+          i += 1
+        }
+      "--" => {
+        // After -- comes file path
+        if i + 1 < args.length() {
+          file_path = Some(args[i + 1])
+        }
+        i += 2
+      }
+      _ => i += 1
+    }
+  }
+  guard file_path is Some(path) else {
+    @stdio.stderr.write("fatal: no file specified")
+    @sys.exit(128)
+  }
+  // Get blame info
+  let blame_opts = BlameOptions::new(
+    ignore_whitespace, detect_moves, detect_copies,
+  )
+  let blame_lines = compute_blame_with_opts(
+    rfs, git_dir, root, commit_ref, path, blame_opts,
+  )
+  // Apply line range filter
+  let filtered = if line_start > 0 {
+    let end_val = if line_end > 0 { line_end } else { blame_lines.length() }
+    let end_clamped = if end_val < blame_lines.length() {
+      end_val
+    } else {
+      blame_lines.length()
+    }
+    let result : Array[BlameLine] = []
+    for idx in (line_start - 1)..<end_clamped {
+      result.push(blame_lines[idx])
+    }
+    result
+  } else {
+    blame_lines
+  }
+  // Output
+  if incremental {
+    output_blame_incremental(filtered)
+  } else if porcelain {
+    output_blame_porcelain(filtered)
+  } else {
+    output_blame_standard(filtered, long_sha)
+  }
+}
+
+///|
+struct BlameOptions {
+  ignore_whitespace : Bool
+  detect_moves : Bool
+  detect_copies : Bool
+}
+
+///|
+fn BlameOptions::new(
+  ignore_whitespace : Bool,
+  detect_moves : Bool,
+  detect_copies : Bool,
+) -> BlameOptions {
+  { ignore_whitespace, detect_moves, detect_copies }
+}
+
+///|
+struct BlameLine {
+  commit_id : @git.ObjectId
+  author : String
+  author_time : Int64
+  author_tz : String
+  line_no : Int
+  content : String
+  is_boundary : Bool
+}
+
+///|
+fn BlameLine::new(
+  commit_id : @git.ObjectId,
+  author : String,
+  author_time : Int64,
+  author_tz : String,
+  line_no : Int,
+  content : String,
+  is_boundary : Bool,
+) -> BlameLine {
+  { commit_id, author, author_time, author_tz, line_no, content, is_boundary }
+}
+
+///|
+fn parse_line_range(range : String) -> (Int, Int) {
+  // Parse "start,end" format
+  match range.find(",") {
+    Some(idx) => {
+      let start_str = String::unsafe_substring(range, start=0, end=idx)
+      let end_str = String::unsafe_substring(
+        range,
+        start=idx + 1,
+        end=range.length(),
+      )
+      (parse_int(start_str), parse_int(end_str))
+    }
+    None => (parse_int(range), 0)
+  }
+}
+
+///|
+fn compute_blame_with_opts(
+  rfs : &@git.RepoFileSystem,
+  git_dir : String,
+  root : String,
+  commit_ref : String,
+  file_path : String,
+  opts : BlameOptions,
+) -> Array[BlameLine] raise Error {
+  let db = @gitlib.ObjectDb::load(rfs, git_dir)
+  // Get target commit
+  let target_id = @gitlib.rev_parse(rfs, git_dir, commit_ref)
+  guard target_id is Some(tid) else {
+    raise @git.GitError::InvalidObject("unknown revision: \{commit_ref}")
+  }
+  // Get file content at target commit
+  let file_content = get_file_at_commit(db, rfs, tid, file_path)
+  guard file_content is Some(content) else {
+    raise @git.GitError::InvalidObject("file not found: \{file_path}")
+  }
+  let lines = split_lines(content)
+  if lines.length() == 0 {
+    return []
+  }
+  // Build commit history for this file
+  let history = build_file_history(db, rfs, tid, file_path)
+  // For -M/-C: also collect other files in commits
+  let other_files : Map[String, Array[(String, @git.ObjectId)]] = {}
+  if opts.detect_moves || opts.detect_copies {
+    collect_other_files(db, rfs, history, file_path, other_files)
+  }
+  // Attribute each line to a commit
+  let result : Array[BlameLine] = []
+  for line_idx in 0..<lines.length() {
+    let line = lines[line_idx]
+    let blame = find_line_origin_with_opts(
+      db, rfs, history, file_path, line, line_idx, opts, other_files,
+    )
+    result.push(
+      BlameLine::new(
+        blame.0,
+        blame.1,
+        blame.2,
+        blame.3,
+        line_idx + 1,
+        line,
+        blame.4,
+      ),
+    )
+  }
+  ignore(root)
+  result
+}
+
+///|
+fn collect_other_files(
+  db : @gitlib.ObjectDb,
+  rfs : &@git.RepoFileSystem,
+  history : Array[@git.ObjectId],
+  exclude_path : String,
+  result : Map[String, Array[(String, @git.ObjectId)]],
+) -> Unit {
+  for commit_id in history {
+    let obj = db.get(rfs, commit_id) catch { _ => continue }
+    guard obj is Some(o) else { continue }
+    let info = @git.parse_commit(o.data) catch { _ => continue }
+    let files = collect_files_in_tree(db, rfs, info.tree, "") catch {
+      _ => continue
+    }
+    for file_entry in files {
+      let path = file_entry.0
+      let blob_id = file_entry.1
+      if path != exclude_path {
+        let hex = commit_id.to_hex()
+        match result.get(hex) {
+          Some(arr) => arr.push((path, blob_id))
+          None => result[hex] = [(path, blob_id)]
+        }
+      }
+    }
+  }
+}
+
+///|
+fn collect_files_in_tree(
+  db : @gitlib.ObjectDb,
+  rfs : &@git.RepoFileSystem,
+  tree_id : @git.ObjectId,
+  prefix : String,
+) -> Array[(String, @git.ObjectId)] raise Error {
+  let result : Array[(String, @git.ObjectId)] = []
+  let tree_obj = db.get(rfs, tree_id)
+  guard tree_obj is Some(to) else { return result }
+  let entries = @git.parse_tree(to.data)
+  for entry in entries {
+    let path = if prefix.length() > 0 {
+      prefix + "/" + entry.name
+    } else {
+      entry.name
+    }
+    if entry.mode.has_prefix("100") {
+      // Regular file
+      result.push((path, entry.id))
+    } else if entry.mode == "40000" {
+      // Directory - recurse
+      let sub_files = collect_files_in_tree(db, rfs, entry.id, path)
+      for f in sub_files {
+        result.push(f)
+      }
+    }
+  }
+  result
+}
+
+///|
+fn get_file_at_commit(
+  db : @gitlib.ObjectDb,
+  rfs : &@git.RepoFileSystem,
+  commit_id : @git.ObjectId,
+  file_path : String,
+) -> String? raise Error {
+  let obj = db.get(rfs, commit_id)
+  guard obj is Some(o) else { return None }
+  let info = @git.parse_commit(o.data)
+  // Walk tree to find file
+  let blob_id = find_blob_in_tree(db, rfs, info.tree, file_path)
+  guard blob_id is Some(bid) else { return None }
+  let blob = db.get(rfs, bid)
+  guard blob is Some(b) else { return None }
+  Some(decode_bytes(b.data))
+}
+
+///|
+fn find_blob_in_tree(
+  db : @gitlib.ObjectDb,
+  rfs : &@git.RepoFileSystem,
+  tree_id : @git.ObjectId,
+  path : String,
+) -> @git.ObjectId? raise Error {
+  let tree_obj = db.get(rfs, tree_id)
+  guard tree_obj is Some(to) else { return None }
+  let entries = @git.parse_tree(to.data)
+  // Split path into components
+  let parts = split_path(path)
+  if parts.length() == 0 {
+    return None
+  }
+  let first = parts[0]
+  for entry in entries {
+    if entry.name == first {
+      if parts.length() == 1 {
+        // Found the file
+        return Some(entry.id)
+      } else {
+        // Need to traverse subtree
+        let rest = join_path(parts, 1)
+        return find_blob_in_tree(db, rfs, entry.id, rest)
+      }
+    }
+  }
+  None
+}
+
+///|
+fn split_path(path : String) -> Array[String] {
+  let result : Array[String] = []
+  let mut start_pos = 0
+  for i in 0..<path.length() {
+    if path[i] == '/' {
+      if i > start_pos {
+        result.push(String::unsafe_substring(path, start=start_pos, end=i))
+      }
+      start_pos = i + 1
+    }
+  }
+  if start_pos < path.length() {
+    result.push(
+      String::unsafe_substring(path, start=start_pos, end=path.length()),
+    )
+  }
+  result
+}
+
+///|
+fn join_path(parts : Array[String], start_idx : Int) -> String {
+  let result : Array[String] = []
+  for i in start_idx..<parts.length() {
+    result.push(parts[i])
+  }
+  result.join("/")
+}
+
+///|
+fn split_lines(content : String) -> Array[String] {
+  let result : Array[String] = []
+  for line_view in content.split("\n") {
+    result.push(line_view.to_string())
+  }
+  // Remove trailing empty line if content ends with newline
+  if result.length() > 0 && result[result.length() - 1] == "" {
+    ignore(result.pop())
+  }
+  result
+}
+
+///|
+fn build_file_history(
+  db : @gitlib.ObjectDb,
+  rfs : &@git.RepoFileSystem,
+  start : @git.ObjectId,
+  file_path : String,
+) -> Array[@git.ObjectId] raise Error {
+  // Walk commit history, collecting commits that touch the file
+  let result : Array[@git.ObjectId] = []
+  let visited : Map[String, Bool] = {}
+  let queue : Array[@git.ObjectId] = [start]
+  while queue.length() > 0 {
+    let current = queue.pop()
+    guard current is Some(cid) else { break }
+    let hex = cid.to_hex()
+    if visited.get(hex).unwrap_or(false) {
+      continue
+    }
+    visited[hex] = true
+    // Check if file exists at this commit
+    let content = get_file_at_commit(db, rfs, cid, file_path)
+    if content is Some(_) {
+      result.push(cid)
+    }
+    // Add parents
+    let obj = db.get(rfs, cid)
+    match obj {
+      Some(o) => {
+        let info = @git.parse_commit(o.data)
+        for p in info.parents {
+          queue.push(p)
+        }
+      }
+      None => ()
+    }
+  }
+  result
+}
+
+///|
+fn find_line_origin_with_opts(
+  db : @gitlib.ObjectDb,
+  rfs : &@git.RepoFileSystem,
+  history : Array[@git.ObjectId],
+  file_path : String,
+  line : String,
+  _line_idx : Int,
+  opts : BlameOptions,
+  other_files : Map[String, Array[(String, @git.ObjectId)]],
+) -> (@git.ObjectId, String, Int64, String, Bool) raise Error {
+  // Find oldest commit in history that contains this line
+  let mut best_commit = history[0]
+  let mut is_boundary = false
+  let compare_line = if opts.ignore_whitespace {
+    normalize_whitespace(line)
+  } else {
+    line
+  }
+  for i in 0..<history.length() {
+    let commit_id = history[i]
+    let content = get_file_at_commit(db, rfs, commit_id, file_path)
+    match content {
+      Some(c) => {
+        let lines = split_lines(c)
+        let mut found = false
+        for l in lines {
+          let compare_l = if opts.ignore_whitespace {
+            normalize_whitespace(l)
+          } else {
+            l
+          }
+          if compare_l == compare_line {
+            found = true
+            break
+          }
+        }
+        if found {
+          best_commit = commit_id
+          // Check if this is the first commit (boundary)
+          if i == history.length() - 1 {
+            is_boundary = true
+          }
+        } else {
+          // Line doesn't exist in this commit
+          // For -M/-C: check other files in this commit
+          if opts.detect_moves || opts.detect_copies {
+            let hex = commit_id.to_hex()
+            match other_files.get(hex) {
+              Some(files) =>
+                for file_entry in files {
+                  let other_path = file_entry.0
+                  let blob_id = file_entry.1
+                  let other_content = get_blob_content(db, rfs, blob_id)
+                  match other_content {
+                    Some(oc) => {
+                      let other_lines = split_lines(oc)
+                      for ol in other_lines {
+                        let compare_ol = if opts.ignore_whitespace {
+                          normalize_whitespace(ol)
+                        } else {
+                          ol
+                        }
+                        if compare_ol == compare_line {
+                          // Found in another file - attribute to this commit
+                          best_commit = commit_id
+                          if i == history.length() - 1 {
+                            is_boundary = true
+                          }
+                          break
+                        }
+                      }
+                      ignore(other_path)
+                    }
+                    None => ()
+                  }
+                }
+              None => ()
+            }
+          }
+          break
+        }
+      }
+      None => break
+    }
+  }
+  // Get commit info - parse author from raw data
+  let obj = db.get(rfs, best_commit)
+  guard obj is Some(o) else {
+    return (best_commit, "unknown", 0L, "+0000", is_boundary)
+  }
+  // Extract author line from commit object
+  let commit_text = decode_bytes(o.data)
+  let author_line = extract_author_line(commit_text)
+  // Parse author info
+  let (author_name, author_time, author_tz) = parse_author_info(author_line)
+  (best_commit, author_name, author_time, author_tz, is_boundary)
+}
+
+///|
+fn normalize_whitespace(s : String) -> String {
+  // Collapse all whitespace to single spaces and trim
+  let result = StringBuilder::new()
+  let mut in_space = true // Start true to trim leading spaces
+  for c in s {
+    if c == ' ' || c == '\t' {
+      if not(in_space) {
+        result.write_char(' ')
+        in_space = true
+      }
+    } else {
+      result.write_char(c)
+      in_space = false
+    }
+  }
+  // Trim trailing space
+  let str = result.to_string()
+  if str.length() > 0 && str[str.length() - 1] == ' ' {
+    String::unsafe_substring(str, start=0, end=str.length() - 1)
+  } else {
+    str
+  }
+}
+
+///|
+fn get_blob_content(
+  db : @gitlib.ObjectDb,
+  rfs : &@git.RepoFileSystem,
+  blob_id : @git.ObjectId,
+) -> String? raise Error {
+  let blob = db.get(rfs, blob_id)
+  guard blob is Some(b) else { return None }
+  Some(decode_bytes(b.data))
+}
+
+///|
+fn extract_author_line(commit_text : String) -> String {
+  for line_view in commit_text.split("\n") {
+    let line = line_view.to_string()
+    if line.has_prefix("author ") {
+      return String::unsafe_substring(line, start=7, end=line.length())
+    }
+    if line.length() == 0 {
+      break
+    }
+  }
+  "unknown"
+}
+
+///|
+fn parse_author_info(author : String) -> (String, Int64, String) {
+  // Format: "Name <email> timestamp tz"
+  match author.rev_find(">") {
+    Some(email_end) => {
+      let name_part = String::unsafe_substring(
+        author,
+        start=0,
+        end=email_end + 1,
+      )
+      let name = match name_part.find("<") {
+        Some(idx) =>
+          trim_string(String::unsafe_substring(name_part, start=0, end=idx))
+        None => name_part
+      }
+      let time_part = String::unsafe_substring(
+        author,
+        start=email_end + 2,
+        end=author.length(),
+      )
+      // Parse "timestamp tz"
+      match time_part.find(" ") {
+        Some(space_idx) => {
+          let ts_str = String::unsafe_substring(
+            time_part,
+            start=0,
+            end=space_idx,
+          )
+          let tz = String::unsafe_substring(
+            time_part,
+            start=space_idx + 1,
+            end=time_part.length(),
+          )
+          let timestamp = parse_int64(trim_string(ts_str))
+          (name, timestamp, trim_string(tz))
+        }
+        None => (name, 0L, "+0000")
+      }
+    }
+    None => (author, 0L, "+0000")
+  }
+}
+
+///|
+async fn output_blame_standard(
+  lines : Array[BlameLine],
+  long_sha : Bool,
+) -> Unit raise Error {
+  // Find max author name length for alignment
+  let mut max_author = 0
+  for line in lines {
+    if line.author.length() > max_author {
+      max_author = line.author.length()
+    }
+  }
+  // Find max line number width
+  let max_line_no = if lines.length() > 0 {
+    lines[lines.length() - 1].line_no
+  } else {
+    0
+  }
+  let line_width = int_width(max_line_no)
+  for line in lines {
+    let sha = if long_sha {
+      line.commit_id.to_hex()
+    } else {
+      let hex = line.commit_id.to_hex()
+      String::unsafe_substring(hex, start=0, end=8)
+    }
+    let prefix = if line.is_boundary { "^" } else { "" }
+    let date_str = format_timestamp(line.author_time, line.author_tz)
+    let padded_author = pad_right(line.author, max_author)
+    let padded_line_no = pad_left(line.line_no.to_string(), line_width)
+    print_line(
+      "\{prefix}\{sha} (\{padded_author} \{date_str} \{padded_line_no}) \{line.content}",
+    )
+  }
+}
+
+///|
+async fn output_blame_porcelain(lines : Array[BlameLine]) -> Unit raise Error {
+  for line in lines {
+    let sha = line.commit_id.to_hex()
+    print_line("\{sha} \{line.line_no} \{line.line_no} 1")
+    print_line("author \{line.author}")
+    print_line("author-time \{line.author_time}")
+    print_line("author-tz \{line.author_tz}")
+    if line.is_boundary {
+      print_line("boundary")
+    }
+    print_line("\t\{line.content}")
+  }
+}
+
+///|
+async fn output_blame_incremental(lines : Array[BlameLine]) -> Unit raise Error {
+  // Incremental format: each entry is immediately flushed
+  // Track which commits we've already output headers for
+  let seen_commits : Map[String, Bool] = {}
+  for line in lines {
+    let sha = line.commit_id.to_hex()
+    print_line("\{sha} \{line.line_no} \{line.line_no} 1")
+    // Only output full header for first occurrence of each commit
+    if not(seen_commits.get(sha).unwrap_or(false)) {
+      seen_commits[sha] = true
+      print_line("author \{line.author}")
+      print_line("author-time \{line.author_time}")
+      print_line("author-tz \{line.author_tz}")
+      if line.is_boundary {
+        print_line("boundary")
+      }
+    }
+    print_line("\t\{line.content}")
+  }
+}
+
+///|
+fn format_timestamp(ts : Int64, tz : String) -> String {
+  // Convert Unix timestamp to YYYY-MM-DD HH:MM:SS format
+  // Simplified: just output timestamp as date string
+  let secs = ts.to_int()
+  // Calculate date parts (simplified, assumes UTC)
+  let days = secs / 86400
+  let time_of_day = secs % 86400
+  let hours = time_of_day / 3600
+  let minutes = time_of_day % 3600 / 60
+  let seconds = time_of_day % 60
+  // Calculate year/month/day from days since epoch (1970-01-01)
+  let (year, month, day) = days_to_date(days)
+  let y = pad_left_zero(year.to_string(), 4)
+  let m = pad_left_zero(month.to_string(), 2)
+  let d = pad_left_zero(day.to_string(), 2)
+  let h = pad_left_zero(hours.to_string(), 2)
+  let mi = pad_left_zero(minutes.to_string(), 2)
+  let s = pad_left_zero(seconds.to_string(), 2)
+  "\{y}-\{m}-\{d} \{h}:\{mi}:\{s} \{tz}"
+}
+
+///|
+fn pad_left_zero(s : String, width : Int) -> String {
+  if s.length() >= width {
+    return s
+  }
+  let padding = width - s.length()
+  let mut result = ""
+  for _ in 0..<padding {
+    result = result + "0"
+  }
+  result + s
+}
+
+///|
+fn days_to_date(days : Int) -> (Int, Int, Int) {
+  // Convert days since epoch to (year, month, day)
+  let mut remaining = days
+  let mut year = 1970
+  while true {
+    let days_in_year = if is_leap_year(year) { 366 } else { 365 }
+    if remaining < days_in_year {
+      break
+    }
+    remaining = remaining - days_in_year
+    year = year + 1
+  }
+  // Now find month and day
+  let days_in_months = if is_leap_year(year) {
+    [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  } else {
+    [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  }
+  let mut month = 1
+  for m in days_in_months {
+    if remaining < m {
+      break
+    }
+    remaining = remaining - m
+    month = month + 1
+  }
+  (year, month, remaining + 1)
+}
+
+///|
+fn is_leap_year(year : Int) -> Bool {
+  (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+}
+
+///|
+fn int_width(n : Int) -> Int {
+  if n == 0 {
+    return 1
+  }
+  let mut width = 0
+  let mut val = n
+  while val > 0 {
+    width = width + 1
+    val = val / 10
+  }
+  width
+}
+
+///|
+fn pad_left(s : String, width : Int) -> String {
+  if s.length() >= width {
+    return s
+  }
+  let padding = width - s.length()
+  let mut result = ""
+  for _ in 0..<padding {
+    result = result + " "
+  }
+  result + s
+}
+
+///|
+fn pad_right(s : String, width : Int) -> String {
+  if s.length() >= width {
+    return s
+  }
+  let padding = width - s.length()
+  let mut result = s
+  for _ in 0..<padding {
+    result = result + " "
   }
   result
 }

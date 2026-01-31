@@ -388,11 +388,18 @@ async fn handle_log(args : Array[String]) -> Unit raise Error {
   let root = get_work_root()
   let git_dir = root + "/.git"
   let fs = OsFs::new()
+  let rfs : &@git.RepoFileSystem = fs
   let mut oneline = false
+  let mut graph = false
+  let mut all_refs = false
+  let mut decorate = false
   let mut max_count = 10
   for arg in args {
     match arg {
       "--oneline" => oneline = true
+      "--graph" => graph = true
+      "--all" => all_refs = true
+      "--decorate" => decorate = true
       _ if arg.has_prefix("-n") => {
         let num_str = (try! arg[2:]).to_string()
         max_count = @strconv.parse_int(num_str)
@@ -404,7 +411,9 @@ async fn handle_log(args : Array[String]) -> Unit raise Error {
       _ => ()
     }
   }
-  if oneline {
+  if graph {
+    log_with_graph(rfs, git_dir, max_count, oneline, all_refs, decorate)
+  } else if oneline {
     let lines = @gitlib.log_head_oneline(fs, git_dir, max_count~)
     for line in lines {
       print_line(line)
@@ -419,6 +428,230 @@ async fn handle_log(args : Array[String]) -> Unit raise Error {
       print_line("")
     }
   }
+}
+
+///|
+async fn log_with_graph(
+  rfs : &@git.RepoFileSystem,
+  git_dir : String,
+  max_count : Int,
+  oneline : Bool,
+  all_refs : Bool,
+  decorate : Bool,
+) -> Unit raise Error {
+  let db = @gitlib.ObjectDb::load(rfs, git_dir)
+  // Collect starting points
+  let starts : Array[@git.ObjectId] = []
+  let ref_names : Map[String, Array[String]] = {} // commit hex -> ref names
+  if all_refs {
+    // Add all branches
+    let heads_dir = git_dir + "/refs/heads"
+    if rfs.is_dir(heads_dir) {
+      let branches = rfs.readdir(heads_dir) catch { _ => [] }
+      for branch in branches {
+        let ref_path = heads_dir + "/" + branch
+        if rfs.is_file(ref_path) {
+          let hex = trim_string(decode_bytes(rfs.read_file(ref_path)))
+          let id = @git.ObjectId::from_hex(hex)
+          starts.push(id)
+          match ref_names.get(hex) {
+            Some(arr) => arr.push(branch)
+            None => ref_names[hex] = [branch]
+          }
+        }
+      }
+    }
+  } else {
+    let head = @gitlib.rev_parse(rfs, git_dir, "HEAD")
+    match head {
+      Some(h) => {
+        starts.push(h)
+        if decorate {
+          // Get current branch name
+          let head_path = git_dir + "/HEAD"
+          if rfs.is_file(head_path) {
+            let content = trim_string(decode_bytes(rfs.read_file(head_path)))
+            if content.has_prefix("ref: refs/heads/") {
+              let branch = String::unsafe_substring(
+                content,
+                start=16,
+                end=content.length(),
+              )
+              ref_names[h.to_hex()] = ["HEAD -> " + branch]
+            } else {
+              ref_names[h.to_hex()] = ["HEAD"]
+            }
+          }
+        }
+      }
+      None => return
+    }
+  }
+  // BFS to collect commits with graph structure
+  let commits : Array[(@git.ObjectId, Array[@git.ObjectId], Int)] = [] // (id, parents, column)
+  let visited : Map[String, Bool] = {}
+  let active_columns : Array[@git.ObjectId?] = [] // Track which columns are active
+  let queue : Array[(@git.ObjectId, Int)] = [] // (commit, column)
+  // Initialize queue
+  for i, start in starts {
+    queue.push((start, i))
+    while active_columns.length() <= i {
+      active_columns.push(None)
+    }
+    active_columns[i] = Some(start)
+  }
+  let mut count = 0
+  while queue.length() > 0 && count < max_count {
+    // Sort queue by column to process in order
+    queue.sort_by(fn(a, b) { a.1.compare(b.1) })
+    let (current, col) = queue[0]
+    // Remove first element
+    let new_queue : Array[(@git.ObjectId, Int)] = []
+    for i in 1..<queue.length() {
+      new_queue.push(queue[i])
+    }
+    while queue.length() > 0 {
+      ignore(queue.pop())
+    }
+    for item in new_queue {
+      queue.push(item)
+    }
+    let hex = current.to_hex()
+    if visited.get(hex).unwrap_or(false) {
+      continue
+    }
+    visited[hex] = true
+    count += 1
+    let obj = db.get(rfs, current)
+    match obj {
+      Some(o) => {
+        let info = @git.parse_commit(o.data)
+        commits.push((current, info.parents, col))
+        // Add parents to queue
+        for i, parent in info.parents {
+          let parent_col = if i == 0 {
+            col
+          } else {
+            find_free_column(active_columns, col)
+          }
+          queue.push((parent, parent_col))
+          if parent_col < active_columns.length() {
+            active_columns[parent_col] = Some(parent)
+          }
+        }
+        // Clear this column if no more commits
+        if info.parents.length() == 0 && col < active_columns.length() {
+          active_columns[col] = None
+        }
+      }
+      None => ()
+    }
+  }
+  // Output with graph
+  let max_col = get_max_column(commits)
+  for entry in commits {
+    let commit_id = entry.0
+    let parents = entry.1
+    let col = entry.2
+    let hex = commit_id.to_hex()
+    let short_hex = String::unsafe_substring(hex, start=0, end=7)
+    // Build graph line
+    let graph_line = build_graph_line(col, max_col, parents.length() > 1)
+    // Get decorations
+    let decorations = match ref_names.get(hex) {
+      Some(names) => " (" + names.join(", ") + ")"
+      None => ""
+    }
+    if oneline {
+      print_line(
+        graph_line +
+        "* " +
+        short_hex +
+        decorations +
+        " " +
+        get_commit_subject(db, rfs, commit_id),
+      )
+    } else {
+      print_line(graph_line + "* commit " + hex + decorations)
+      let obj = db.get(rfs, commit_id)
+      match obj {
+        Some(o) => {
+          let author_line = extract_author_line_from_bytes(o.data)
+          print_line(graph_line + "| Author: " + author_line)
+          print_line(graph_line + "|")
+          let msg = get_commit_subject(db, rfs, commit_id)
+          print_line(graph_line + "|     " + msg)
+          print_line(graph_line + "|")
+        }
+        None => ()
+      }
+    }
+  }
+}
+
+///|
+fn find_free_column(columns : Array[@git.ObjectId?], start : Int) -> Int {
+  for i in (start + 1)..<columns.length() {
+    if columns[i] is None {
+      return i
+    }
+  }
+  columns.length()
+}
+
+///|
+fn get_max_column(
+  commits : Array[(@git.ObjectId, Array[@git.ObjectId], Int)],
+) -> Int {
+  let mut max = 0
+  for entry in commits {
+    if entry.2 > max {
+      max = entry.2
+    }
+  }
+  max
+}
+
+///|
+fn build_graph_line(col : Int, max_col : Int, is_merge : Bool) -> String {
+  let sb = StringBuilder::new()
+  for _ in 0..<col {
+    sb.write_string("| ")
+  }
+  if is_merge {
+    sb.write_string("|\\ ")
+  }
+  for _ in (col + 1)..<(max_col + 1) {
+    sb.write_string("| ")
+  }
+  sb.to_string()
+}
+
+///|
+fn get_commit_subject(
+  db : @gitlib.ObjectDb,
+  rfs : &@git.RepoFileSystem,
+  commit_id : @git.ObjectId,
+) -> String raise Error {
+  let obj = db.get(rfs, commit_id)
+  guard obj is Some(o) else { return "" }
+  let msg = extract_commit_message(o.data)
+  get_first_line(msg)
+}
+
+///|
+fn extract_author_line_from_bytes(data : Bytes) -> String {
+  let text = decode_bytes(data)
+  for line_view in text.split("\n") {
+    let line = line_view.to_string()
+    if line.has_prefix("author ") {
+      return String::unsafe_substring(line, start=7, end=line.length())
+    }
+    if line.length() == 0 {
+      break
+    }
+  }
+  "unknown"
 }
 
 ///|

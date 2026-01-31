@@ -22,8 +22,8 @@ mv|partial|<source>,<destination>|--force,-f,--dry-run,-n,--verbose,-v|
 branch|partial|--list,-l,--delete,-d,-D,--force,-f,--verbose,-v,--all,-a,--remotes,-r|--move,-m,--copy,-c,--set-upstream-to,-u,--unset-upstream|
 checkout|partial|<branch>,<commit>,-b,--detach|--patch,-p,--ours,--theirs,--merge,-m|
 switch|partial|<branch>,-c,--create|--detach,-d,--discard-changes|
-merge|partial|<branch>|--no-ff,--ff-only,--squash,--abort,--continue|Fast-forward only
-log|partial|--oneline,-n,--max-count|--graph,--all,--decorate,--stat,--patch,-p,--author,--since,--until|
+merge|partial|<branch>,--no-ff,--ff-only,--squash,--abort,--continue||
+log|partial|--oneline,-n,--max-count,--graph,--all,--decorate|--stat,--patch,-p,--author,--since,--until|
 stash|partial|push,pop,apply,drop,list|show,branch,clear,create,store|
 tag|partial|--list,-l,--delete,-d,-a,--annotate,-m,--message|--force,-f,--sign,-s,--verify,-v|
 worktree|partial|list,add,remove,prune,lock,unlock,move,repair|--porcelain (partial),-z|
@@ -40,7 +40,7 @@ show-ref|full|--head,--heads,--tags||
 
 # Patching
 cherry-pick|partial|<commit>|--continue,--abort,--skip,--no-commit,-n|
-rebase|partial|<branch>,--continue,--abort,--skip|--interactive,-i,--onto,--root|
+rebase|partial|<branch>,--continue,--abort,--skip,-i,--interactive,--onto|--root,--autosquash|
 
 # Plumbing Commands
 cat-file|partial|-t,-s,-p,--batch,--batch-check|--batch-all-objects|
@@ -61,13 +61,13 @@ upload-pack|full|||Protocol v1/v2
 
 # Not Implemented (fallback to system git)
 bisect|partial|start,bad,good,skip,reset,log|visualize,view,replay,run,terms|
-blame|none|||
+blame|partial|-l,--porcelain,-p,-L,--incremental,-w,-M,-C|--line-porcelain,--root,--show-stats|
 clean|partial|-f,--force,-n,--dry-run,-d,-q,--quiet|-x,-X,--exclude|
 describe|partial|--tags,--always,--long,--abbrev,--dirty|--all,--candidates,--exact-match,--first-parent,--match,--exclude|
-format-patch|none|||
+format-patch|partial|-o,--output-directory,--start-number,-n,--numbered,--stdout,--cover-letter|--subject-prefix,--in-reply-to,--attach|
 gc|partial|--prune,-q,--quiet|--aggressive,--auto,--keep-largest-pack|Repack + prune unreachable
 grep|partial|<pattern>,-n,--line-number,-i,--ignore-case,-l,--files-with-matches,-c,--count,-v,--invert-match|-E,-P,--extended-regexp,--perl-regexp,-w,--word-regexp|
 notes|partial|list,show,add,remove,prune,-m,-f|append,copy,edit,merge,get-ref|
 revert|partial|<commit>,-n,--no-commit,-m,--continue,--abort,--skip||
-shortlog|none|||
+shortlog|partial|-n,--numbered,-s,--summary,-e,--email|--group,--committer|
 submodule|partial|status,init,update,deinit,sync,--init,--recursive|add,foreach,absorbgitdirs|
