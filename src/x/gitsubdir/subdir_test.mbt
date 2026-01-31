@@ -394,3 +394,244 @@ test "subdir: generate_shell_rc contains git wrapper" {
   assert_true(rc.contains("status)"))
   assert_true(rc.contains("diff)"))
 }
+
+///|
+test "subdir: init creates wrapper script with correct content" {
+  let fs = @git.TestFs::new()
+  @lib.init_repo(fs, "/repo") catch { _ => () }
+  fs.mkdir_p("/repo/src/lib")
+  // ラッパー付きで初期化
+  let config = SubdirInitConfig::new(create_wrapper=true)
+  let _ = init_subdir(fs, "/repo/.git", "/repo", "src/lib", config) catch {
+    _ => return ()
+  }
+  // ラッパースクリプトが作成されている
+  assert_true(fs.is_file("/repo/src/lib/git-subdir"))
+  // 内容を確認
+  let content = fs.read_file("/repo/src/lib/git-subdir") catch { _ => return () }
+  let content_str = bytes_to_string_test(content)
+  // シェバンがある
+  assert_true(content_str.has_prefix("#!/bin/sh"))
+  // log/status/diff がスコープされている
+  assert_true(content_str.contains("log|status|diff)"))
+  assert_true(content_str.contains("git \"$cmd\" \"$@\" -- ."))
+}
+
+///|
+test "subdir: config file contains correct settings" {
+  let fs = @git.TestFs::new()
+  @lib.init_repo(fs, "/repo") catch { _ => () }
+  fs.mkdir_p("/repo/src/lib")
+  let config = SubdirInitConfig::new(create_wrapper=false)
+  let _ = init_subdir(fs, "/repo/.git", "/repo", "src/lib", config) catch {
+    _ => return ()
+  }
+  // 設定ファイルの内容を確認
+  let content = fs.read_file("/repo/.git/subdir/src_lib/config") catch {
+    _ => return ()
+  }
+  let content_str = bytes_to_string_test(content)
+  assert_true(content_str.contains("[subdir]"))
+  assert_true(content_str.contains("path = src/lib"))
+  assert_true(content_str.contains("repoRoot = /repo"))
+  assert_true(content_str.contains("initialized = true"))
+}
+
+///|
+test "subdir: marker file contains path info" {
+  let fs = @git.TestFs::new()
+  @lib.init_repo(fs, "/repo") catch { _ => () }
+  fs.mkdir_p("/repo/src/lib")
+  let config = SubdirInitConfig::new(verbose_marker=true)
+  let _ = init_subdir(fs, "/repo/.git", "/repo", "src/lib", config) catch {
+    _ => return ()
+  }
+  // マーカーファイルの内容を確認
+  let content = fs.read_file("/repo/src/lib/.gitsubdir") catch { _ => return () }
+  let content_str = bytes_to_string_test(content)
+  assert_true(content_str.contains("path = src/lib"))
+  assert_true(content_str.contains("gitdir = /repo/.git"))
+}
+
+///|
+test "subdir: get_subdir_info returns info for initialized subdir" {
+  let fs = @git.TestFs::new()
+  @lib.init_repo(fs, "/repo") catch { _ => () }
+  fs.mkdir_p("/repo/src/lib")
+  // 初期化前は None
+  let info_before = get_subdir_info(fs, "/repo/.git", "/repo", "src/lib")
+  assert_true(info_before is None)
+  // 初期化
+  let config = SubdirInitConfig::default()
+  let _ = init_subdir(fs, "/repo/.git", "/repo", "src/lib", config) catch {
+    _ => return ()
+  }
+  // 初期化後は Some
+  let info_after = get_subdir_info(fs, "/repo/.git", "/repo", "src/lib")
+  match info_after {
+    Some(info) => {
+      assert_eq(info.path, "src/lib")
+      assert_eq(info.git_dir, "/repo/.git")
+      assert_true(info.initialized)
+    }
+    None => assert_true(false)
+  }
+}
+
+///|
+test "subdir: full workflow init -> check -> deinit" {
+  let fs = @git.TestFs::new()
+  @lib.init_repo(fs, "/repo") catch { _ => () }
+  // 複数のサブディレクトリを作成
+  fs.mkdir_p("/repo/src/lib")
+  fs.mkdir_p("/repo/src/cli")
+  fs.write_file("/repo/src/lib/foo.mbt", b"lib content")
+  fs.write_file("/repo/src/cli/main.mbt", b"cli content")
+  // 両方を初期化
+  let config = SubdirInitConfig::default()
+  let _ = init_subdir(fs, "/repo/.git", "/repo", "src/lib", config) catch {
+    _ => return ()
+  }
+  let _ = init_subdir(fs, "/repo/.git", "/repo", "src/cli", config) catch {
+    _ => return ()
+  }
+  // 両方が初期化されている
+  assert_true(is_subdir_initialized(fs, "/repo/.git", "src/lib"))
+  assert_true(is_subdir_initialized(fs, "/repo/.git", "src/cli"))
+  // lib だけ解除
+  deinit_subdir(fs, fs, "/repo/.git", "/repo", "src/lib") catch { _ => () }
+  // lib は解除され、cli はまだ初期化されている
+  assert_false(is_subdir_initialized(fs, "/repo/.git", "src/lib"))
+  assert_true(is_subdir_initialized(fs, "/repo/.git", "src/cli"))
+  // ファイルが削除されている
+  assert_false(fs.is_file("/repo/src/lib/.gitsubdir"))
+  assert_false(fs.is_file("/repo/src/lib/git-subdir"))
+  // cli のファイルはまだ存在
+  assert_true(fs.is_file("/repo/src/cli/.gitsubdir"))
+}
+
+///|
+test "subdir: nested path initialization" {
+  let fs = @git.TestFs::new()
+  @lib.init_repo(fs, "/repo") catch { _ => () }
+  // 深いネストのディレクトリ
+  fs.mkdir_p("/repo/src/packages/core/lib")
+  fs.write_file("/repo/src/packages/core/lib/index.mbt", b"content")
+  let config = SubdirInitConfig::default()
+  let info = init_subdir(
+    fs,
+    "/repo/.git",
+    "/repo",
+    "src/packages/core/lib",
+    config,
+  ) catch {
+    _ => return ()
+  }
+  // パスが正規化されている
+  assert_eq(info.path, "src/packages/core/lib")
+  // 設定ディレクトリ名が正しい（/ が _ に変換）
+  assert_true(fs.is_file("/repo/.git/subdir/src_packages_core_lib/config"))
+}
+
+///|
+test "subdir: shell rc script has correct structure" {
+  let rc = generate_shell_rc("src/lib")
+  // ヘッダーコメント
+  assert_true(rc.contains("# Moongit subdir shell for: src/lib"))
+  // git 関数定義
+  assert_true(rc.contains("git() {"))
+  // case 文
+  assert_true(rc.contains("case \"$cmd\" in"))
+  // log コマンドのスコープ
+  assert_true(rc.contains("log)"))
+  assert_true(rc.contains("command git log \"$@\" -- ."))
+  // status コマンドのスコープ
+  assert_true(rc.contains("status)"))
+  assert_true(rc.contains("command git status \"$@\" -- ."))
+  // diff コマンドのスコープ
+  assert_true(rc.contains("diff)"))
+  assert_true(rc.contains("command git diff \"$@\" -- ."))
+  // add コマンド
+  assert_true(rc.contains("add)"))
+  assert_true(rc.contains("command git add ."))
+  // プロンプト設定
+  assert_true(rc.contains("PS1=\"[subdir:src/lib]"))
+  // 説明メッセージ
+  assert_true(rc.contains("Entered subdir shell for: src/lib"))
+}
+
+///|
+test "subdir: env vars have correct values" {
+  let env = generate_shell_env("/home/user/repo/.git", "/home/user/repo", "packages/core")
+  // 各環境変数を確認
+  let mut found_subdir = false
+  let mut found_git_dir = false
+  let mut found_root = false
+  let mut found_prefix = false
+  for pair in env {
+    match pair.0 {
+      "MOONGIT_SUBDIR" => {
+        assert_eq(pair.1, "packages/core")
+        found_subdir = true
+      }
+      "MOONGIT_GIT_DIR" => {
+        assert_eq(pair.1, "/home/user/repo/.git")
+        found_git_dir = true
+      }
+      "MOONGIT_REPO_ROOT" => {
+        assert_eq(pair.1, "/home/user/repo")
+        found_root = true
+      }
+      "GIT_PREFIX" => {
+        assert_eq(pair.1, "packages/core/")
+        found_prefix = true
+      }
+      _ => ()
+    }
+  }
+  assert_true(found_subdir)
+  assert_true(found_git_dir)
+  assert_true(found_root)
+  assert_true(found_prefix)
+}
+
+///|
+test "subdir: init with SubdirRepo integration" {
+  let fs = @git.TestFs::new()
+  @lib.init_repo(fs, "/repo") catch { _ => () }
+  // ディレクトリとファイルを作成してコミット
+  fs.mkdir_p("/repo/src/lib")
+  fs.write_file("/repo/src/lib/foo.mbt", b"original content")
+  fs.write_file("/repo/README.md", b"readme")
+  let commit_id = @lib.commit(
+    fs,
+    fs,
+    "/repo",
+    "Initial commit",
+    "test <test@test.com>",
+    1000L,
+  ) catch {
+    _ => return ()
+  }
+  // init_subdir を実行
+  let config = SubdirInitConfig::default()
+  let _ = init_subdir(fs, "/repo/.git", "/repo", "src/lib", config) catch {
+    _ => return ()
+  }
+  // SubdirRepo も正常に作成できる
+  let subdir = SubdirRepo::from_commit(fs, "/repo/.git", commit_id, "src/lib") catch {
+    _ => return ()
+  }
+  // ファイルが読める
+  let content = subdir.fs().read_file(fs, "/foo.mbt") catch { _ => return () }
+  assert_eq(content, b"original content")
+}
+
+///|
+fn bytes_to_string_test(bytes : Bytes) -> String {
+  let result = StringBuilder::new()
+  for i = 0; i < bytes.length(); i = i + 1 {
+    result.write_char(bytes[i].to_int().unsafe_to_char())
+  }
+  result.to_string()
+}
