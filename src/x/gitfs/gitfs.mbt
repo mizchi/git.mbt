@@ -135,7 +135,7 @@ pub fn GitFs::get_promisor_db(
       let db = @lib.PromisorDb::new(
         backing_fs,
         self.git_dir,
-        lazy=self.lazy_mode,
+        lazy_load=self.lazy_mode,
       )
       self.cached_promisor_db = Some(db)
       Some(db)

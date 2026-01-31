@@ -301,7 +301,7 @@ fn remove_hook_section(content : String, marker : String) -> String {
 
 ///|
 /// Filter driver を設定して git add をブロック
-fn setup_filter_driver(
+fn _setup_filter_driver(
   fs : &@git.FileSystem,
   rfs : &@git.RepoFileSystem,
   git_dir : String,
@@ -599,7 +599,7 @@ fn resolve_head_commit_for_module(
 
 ///|
 /// .gitmodules にサブモジュールエントリを追加
-fn add_to_gitmodules(
+fn _add_to_gitmodules(
   fs : &@git.FileSystem,
   rfs : &@git.RepoFileSystem,
   repo_root : String,
@@ -636,7 +636,7 @@ fn add_to_gitmodules(
 
 ///|
 /// .gitmodules からサブモジュールエントリを削除
-fn remove_from_gitmodules(
+fn _remove_from_gitmodules(
   fs : &@git.FileSystem,
   rfs : &@git.RepoFileSystem,
   repo_root : String,
@@ -705,7 +705,7 @@ fn remove_gitmodules_section(content : String, subdir_path : String) -> String {
 
 ///|
 /// index に gitlink エントリを追加
-fn add_gitlink_to_index(
+fn _add_gitlink_to_index(
   fs : &@git.FileSystem,
   rfs : &@git.RepoFileSystem,
   git_dir : String,
@@ -735,7 +735,7 @@ fn add_gitlink_to_index(
 
 ///|
 /// index から gitlink エントリを削除し、サブディレクトリのファイルを復元
-fn remove_gitlink_from_index(
+fn _remove_gitlink_from_index(
   fs : &@git.FileSystem,
   rfs : &@git.RepoFileSystem,
   git_dir : String,
@@ -909,7 +909,7 @@ fn count_path_depth(path : String) -> Int {
 
 ///|
 /// 相対パスを構築（../ を depth 回）
-fn build_relative_path(depth : Int, subdir_path : String) -> String {
+fn _build_relative_path(depth : Int, subdir_path : String) -> String {
   let result = StringBuilder::new()
   for i = 0; i < depth; i = i + 1 {
     result.write_string("../")

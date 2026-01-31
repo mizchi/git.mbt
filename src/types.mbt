@@ -19,7 +19,7 @@ pub fn ObjectId::zero() -> ObjectId {
 ///|
 /// Convert ObjectId to Bytes (20 bytes) - zero-copy when possible
 pub fn ObjectId::to_bytes(self : ObjectId) -> Bytes {
-  Bytes::from_fixedarray(self.bytes)
+  Bytes::from_array(self.bytes.iter().collect())
 }
 
 ///|

@@ -2,12 +2,12 @@
 
 ///|
 pub struct OsFs {
-  priv dummy : Int
+  priv _dummy : Int
 }
 
 ///|
 pub fn OsFs::new() -> OsFs {
-  { dummy: 0 }
+  { _dummy: 0 }
 }
 
 ///|

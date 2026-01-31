@@ -32,7 +32,7 @@ fn object_id_to_bytes(id : @git.ObjectId) -> Bytes {
 
 ///|
 /// Deserialize bytes to ObjectId - now uses direct byte access
-fn bytes_to_object_id(bytes : Bytes, offset : Int) -> @git.ObjectId {
+fn _bytes_to_object_id(bytes : Bytes, offset : Int) -> @git.ObjectId {
   @git.ObjectId::from_bytes_at(bytes, offset)
 }
 
@@ -47,7 +47,7 @@ fn object_type_to_int(t : @git.ObjectType) -> Int {
 }
 
 ///|
-fn int_to_object_type(n : Int) -> @git.ObjectType {
+fn _int_to_object_type(n : Int) -> @git.ObjectType {
   match n {
     1 => @git.ObjectType::Commit
     2 => @git.ObjectType::Tree

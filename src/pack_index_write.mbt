@@ -189,7 +189,7 @@ fn build_pack_index_v1_from_objects(
 }
 
 ///|
-fn scan_pack_entry_offsets(
+fn _scan_pack_entry_offsets(
   data : Bytes,
 ) -> (Array[Int], Array[Int]) raise GitError {
   if data.length() < 32 {

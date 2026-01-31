@@ -41,9 +41,9 @@ pub struct PromisorDb {
 pub fn PromisorDb::new(
   fs : &@git.RepoFileSystem,
   git_dir : String,
-  lazy? : Bool = true,
+  lazy_load? : Bool = true,
 ) -> PromisorDb raise @git.GitError {
-  let db = if lazy {
+  let db = if lazy_load {
     ObjectDb::load_lazy(fs, git_dir)
   } else {
     ObjectDb::load(fs, git_dir)
@@ -144,9 +144,9 @@ pub async fn PromisorDb::get_or_fetch(
   id : @git.ObjectId,
 ) -> @git.PackObject? raise @git.GitError {
   // First try local
-  let local = self.db.get(read_fs, id)
-  if local is Some(_) {
-    return local
+  let result = self.db.get(read_fs, id)
+  if result is Some(_) {
+    return result
   }
   // If not found and we have a promisor remote, fetch it
   if self.promisor_remote is None {

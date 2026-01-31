@@ -680,11 +680,11 @@ async fn handle_fsck(args : Array[String]) -> Unit raise Error {
   let fs = OsFs::new()
   let git_dir = find_git_dir(fs)
   let mut verbose = false
-  let mut unreachable = false
+  let mut _unreachable = false
   for arg in args {
     match arg {
       "-v" | "--verbose" => verbose = true
-      "--unreachable" => unreachable = true
+      "--unreachable" => _unreachable = true
       _ => ()
     }
   }
@@ -719,7 +719,6 @@ async fn handle_fsck(args : Array[String]) -> Unit raise Error {
     print_line("Checking \{object_count} loose objects")
     print_line("Checking \{pack_count} pack files")
   }
-  ignore(unreachable)
   // Simple implementation - just report counts
   if verbose {
     print_line("Checking connectivity...")
