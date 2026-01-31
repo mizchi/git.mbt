@@ -46,6 +46,9 @@ async fn show_help() -> Unit {
     #|work with multiple working trees
     #|   worktree    Manage multiple working trees
     #|
+    #|experimental
+    #|   subdir      Work with subdirectory as independent repository
+    #|
     #|low-level / plumbing
     #|   bundle          Create, verify, list-heads, and unbundle Git bundles
     #|   cat-file        Provide content or type info for repository objects
@@ -310,6 +313,10 @@ async fn dispatch_command(cmd : String, rest : Array[String]) -> Unit {
     "config" =>
       handle_config(rest) catch {
         err => exit_with_error("config", err)
+      }
+    "subdir" =>
+      handle_subdir(rest) catch {
+        err => exit_with_error("subdir", err)
       }
     "sparse-checkout" =>
       handle_sparse_checkout(rest) catch {

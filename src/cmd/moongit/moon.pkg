@@ -1,6 +1,8 @@
 import {
   "mizchi/git" as @git,
   "mizchi/git/lib" as @gitlib,
+  "mizchi/git/x/gitfs" as @gitfs,
+  "mizchi/git/x/gitsubdir" as @gitsubdir,
   "moonbitlang/async" as @async,
   "moonbitlang/async/process" as @process,
   "moonbitlang/async/stdio" as @stdio,
@@ -21,6 +23,7 @@ options(
     "handlers_pack.mbt": [ "native" ],
     "handlers_plumbing.mbt": [ "native" ],
     "handlers_remote.mbt": [ "native" ],
+    "handlers_subdir.mbt": [ "native" ],
     "handlers_worktree.mbt": [ "native" ],
     "helpers.mbt": [ "native" ],
     "index_pack.mbt": [ "native" ],
