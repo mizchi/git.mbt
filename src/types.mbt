@@ -17,6 +17,35 @@ pub fn ObjectId::zero() -> ObjectId {
 }
 
 ///|
+/// Convert ObjectId to Bytes (20 bytes) - zero-copy when possible
+pub fn ObjectId::to_bytes(self : ObjectId) -> Bytes {
+  Bytes::from_fixedarray(self.bytes)
+}
+
+///|
+/// Create ObjectId from Bytes (must be exactly 20 bytes)
+pub fn ObjectId::from_bytes(data : Bytes) -> ObjectId raise GitError {
+  if data.length() != 20 {
+    raise GitError::InvalidObject("Invalid ObjectId length: \{data.length()}")
+  }
+  let bytes = FixedArray::make(20, b'\x00')
+  for i = 0; i < 20; i = i + 1 {
+    bytes[i] = data[i]
+  }
+  { bytes, }
+}
+
+///|
+/// Create ObjectId from Bytes at offset (for parsing packed data)
+pub fn ObjectId::from_bytes_at(data : Bytes, offset : Int) -> ObjectId {
+  let bytes = FixedArray::make(20, b'\x00')
+  for i = 0; i < 20; i = i + 1 {
+    bytes[i] = data[offset + i]
+  }
+  { bytes, }
+}
+
+///|
 pub fn ObjectId::from_hex(hex : String) -> ObjectId raise GitError {
   if hex.length() != 40 {
     raise GitError::InvalidObject("Invalid hex length: \{hex.length()}")

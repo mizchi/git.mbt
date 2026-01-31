@@ -22,53 +22,15 @@ pub(all) struct SerializedObject {
 }
 
 ///|
-/// Serialize ObjectId to bytes
+/// Serialize ObjectId to bytes - now uses direct byte access
 fn object_id_to_bytes(id : @git.ObjectId) -> Bytes {
-  let hex = id.to_hex()
-  let hex_chars = hex.to_array()
-  let result : Array[Byte] = []
-  for i = 0; i < 20; i = i + 1 {
-    let hi = hex_char_to_int(hex_chars[i * 2])
-    let lo = hex_char_to_int(hex_chars[i * 2 + 1])
-    result.push(((hi << 4) | lo).to_byte())
-  }
-  Bytes::from_array(result)
+  id.to_bytes()
 }
 
 ///|
-fn hex_char_to_int(c : Char) -> Int {
-  let code = c.to_int()
-  if code >= 48 && code <= 57 {
-    code - 48 // '0'-'9'
-  } else if code >= 97 && code <= 102 {
-    code - 87 // 'a'-'f'
-  } else if code >= 65 && code <= 70 {
-    code - 55 // 'A'-'F'
-  } else {
-    0
-  }
-}
-
-///|
-/// Deserialize bytes to ObjectId
-fn bytes_to_object_id(bytes : Bytes) -> @git.ObjectId {
-  let hex_chars : Array[Char] = []
-  for i = 0; i < 20; i = i + 1 {
-    let b = bytes[i].to_int()
-    hex_chars.push(int_to_hex_char((b >> 4) & 0xF))
-    hex_chars.push(int_to_hex_char(b & 0xF))
-  }
-  let hex = String::from_array(hex_chars)
-  @git.ObjectId::from_hex(hex) catch { _ => @git.ObjectId::zero() }
-}
-
-///|
-fn int_to_hex_char(n : Int) -> Char {
-  if n < 10 {
-    (48 + n).unsafe_to_char()
-  } else {
-    (87 + n).unsafe_to_char() // 'a' - 10 + n
-  }
+/// Deserialize bytes to ObjectId - now uses direct byte access
+fn bytes_to_object_id(bytes : Bytes, offset : Int) -> @git.ObjectId {
+  @git.ObjectId::from_bytes_at(bytes, offset)
 }
 
 ///|
@@ -225,7 +187,7 @@ pub fn SerializedSnapshot::to_bytes(self : SerializedSnapshot) -> Bytes {
 }
 
 ///|
-/// Deserialize snapshot from bytes
+/// Deserialize snapshot from bytes - optimized with slice operations
 pub fn SerializedSnapshot::from_bytes(data : Bytes) -> SerializedSnapshot {
   let mut pos = 0
   // Version
@@ -234,12 +196,8 @@ pub fn SerializedSnapshot::from_bytes(data : Bytes) -> SerializedSnapshot {
   // Node ID
   let (node_id, new_pos) = read_string(data, pos)
   pos = new_pos
-  // Head
-  let head_arr : Array[Byte] = []
-  for i = 0; i < 20; i = i + 1 {
-    head_arr.push(data[pos + i])
-  }
-  let head = Bytes::from_array(head_arr)
+  // Head - use slice instead of loop copy
+  let head = data[pos:pos + 20].to_bytes()
   pos += 20
   // Clock entries
   let clock_count = read_u32_le(data, pos)
@@ -257,21 +215,15 @@ pub fn SerializedSnapshot::from_bytes(data : Bytes) -> SerializedSnapshot {
   pos += 4
   let objects : Array[SerializedObject] = []
   for _ in 0..<object_count {
-    let id_arr : Array[Byte] = []
-    for i = 0; i < 20; i = i + 1 {
-      id_arr.push(data[pos + i])
-    }
-    let id = Bytes::from_array(id_arr)
+    // Use slice for id bytes
+    let id = data[pos:pos + 20].to_bytes()
     pos += 20
     let obj_type = data[pos].to_int()
     pos += 1
     let data_len = read_u32_le(data, pos)
     pos += 4
-    let obj_data_arr : Array[Byte] = []
-    for i = 0; i < data_len; i = i + 1 {
-      obj_data_arr.push(data[pos + i])
-    }
-    let obj_data = Bytes::from_array(obj_data_arr)
+    // Use slice for object data
+    let obj_data = data[pos:pos + data_len].to_bytes()
     pos += data_len
     objects.push({ id, obj_type, data: obj_data })
   }

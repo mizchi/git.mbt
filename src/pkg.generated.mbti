@@ -261,8 +261,11 @@ pub fn NativeHttpClient::new() -> Self
 pub struct ObjectId {
   bytes : FixedArray[Byte]
 }
+pub fn ObjectId::from_bytes(Bytes) -> Self raise GitError
+pub fn ObjectId::from_bytes_at(Bytes, Int) -> Self
 pub fn ObjectId::from_hex(String) -> Self raise GitError
 pub fn ObjectId::new(FixedArray[Byte]) -> Self
+pub fn ObjectId::to_bytes(Self) -> Bytes
 pub fn ObjectId::to_hex(Self) -> String
 pub fn ObjectId::zero() -> Self
 pub impl Eq for ObjectId
