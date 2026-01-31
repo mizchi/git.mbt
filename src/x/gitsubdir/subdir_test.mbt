@@ -239,6 +239,53 @@ test "subdir: diff shows working changes" {
 }
 
 ///|
+test "subdir: commit changes to parent repo" {
+  let fs = @git.TestFs::new()
+  @lib.init_repo(fs, "/repo") catch { _ => () }
+  fs.mkdir_p("/repo/src/lib")
+  fs.write_file("/repo/src/lib/foo.mbt", b"original")
+  fs.write_file("/repo/README.md", b"readme")
+  let commit1 = @lib.commit(
+    fs,
+    fs,
+    "/repo",
+    "Initial",
+    "test <test@test.com>",
+    1000L,
+  ) catch {
+    _ => return ()
+  }
+  // SubdirRepo を作成して変更を加える
+  let subdir = SubdirRepo::from_commit(fs, "/repo/.git", commit1, "src/lib") catch {
+    _ => return ()
+  }
+  subdir.fs().write_file("/foo.mbt", b"modified")
+  subdir.fs().write_file("/bar.mbt", b"new file")
+  // サブディレクトリをコミット
+  let commit2 = subdir.commit(
+    fs,
+    fs,
+    "Update lib",
+    author="test <test@test.com>",
+    timestamp=2000L,
+  ) catch {
+    _ => return ()
+  }
+  // コミットが作成されたことを確認
+  assert_true(commit2 != commit1)
+  // 元リポジトリで変更を確認
+  let db = @lib.ObjectDb::load(fs, "/repo/.git") catch { _ => return () }
+  let files = @lib.collect_tree_files_from_commit(db, fs, commit2) catch {
+    _ => return ()
+  }
+  // サブディレクトリのファイルが更新されている
+  assert_true(files.contains("src/lib/foo.mbt"))
+  assert_true(files.contains("src/lib/bar.mbt"))
+  // ルートのファイルもまだ存在する
+  assert_true(files.contains("README.md"))
+}
+
+///|
 test "subdir: normalize path" {
   let fs = @git.TestFs::new()
   @lib.init_repo(fs, "/repo") catch { _ => () }

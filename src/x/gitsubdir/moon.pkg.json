@@ -2,6 +2,7 @@
   "import": [
     "mizchi/git",
     "mizchi/git/lib",
-    "mizchi/git/x/gitfs"
+    "mizchi/git/x/gitfs",
+    "mizchi/zlib"
   ]
 }
