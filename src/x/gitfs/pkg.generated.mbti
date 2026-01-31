@@ -71,13 +71,27 @@ pub(all) struct Layer {
   name : String
 }
 
+pub struct LruCache[V] {
+  mut hot : Map[String, V]
+  mut cold : Map[String, V]
+  mut hot_bytes : Int
+  mut cold_bytes : Int
+  max_bytes : Int
+  size_fn : (V) -> Int
+}
+pub fn[V] LruCache::clear(Self[V]) -> Unit
+pub fn[V] LruCache::contains(Self[V], String) -> Bool
+pub fn[V] LruCache::get(Self[V], String) -> V?
+pub fn[V] LruCache::length(Self[V]) -> Int
+pub fn[V] LruCache::new(Int, (V) -> Int) -> Self[V]
+pub fn[V] LruCache::remove(Self[V], String) -> Unit
+pub fn[V] LruCache::set(Self[V], String, V) -> Unit
+pub fn[V] LruCache::total_bytes(Self[V]) -> Int
+
 pub(all) struct ObjectCache {
-  blobs : Map[String, Bytes]
+  blob_cache : LruCache[Bytes]
   trees : Map[@git.ObjectId, Array[@git.TreeEntry]]
   path_cache : Map[String, @git.ObjectId?]
-  max_blob_bytes : Int
-  mut blob_bytes : Int
-  blob_order : Array[String]
 }
 pub fn ObjectCache::clear(Self) -> Unit
 pub fn ObjectCache::get_blob(Self, String) -> Bytes?

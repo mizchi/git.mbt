@@ -42,7 +42,7 @@ test "cache: blob cache with LRU eviction" {
   cache.set_blob("file2", data2)
   assert_eq(cache.get_blob("file1").unwrap(), data1)
   assert_eq(cache.get_blob("file2").unwrap(), data2)
-  assert_eq(cache.blob_bytes, 6)
+  assert_eq(cache.blob_cache.total_bytes(), 6)
 }
 
 ///|
@@ -53,10 +53,12 @@ test "cache: blob eviction when over limit" {
   let data3 = Bytes::from_array([b'x', b'y', b'z'])
   cache.set_blob("file1", data1)
   cache.set_blob("file2", data2)
-  assert_eq(cache.blob_bytes, 10)
+  assert_eq(cache.blob_cache.total_bytes(), 10)
   cache.set_blob("file3", data3)
+  // Two-generation LRU evicts entire cold generation at once
+  // file1 and file2 were moved to cold, then evicted
   assert_true(cache.get_blob("file1") is None)
-  assert_eq(cache.get_blob("file2").unwrap(), data2)
+  assert_true(cache.get_blob("file2") is None)
   assert_eq(cache.get_blob("file3").unwrap(), data3)
 }
 

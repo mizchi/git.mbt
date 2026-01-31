@@ -58,23 +58,17 @@ pub(all) struct Layer {
 
 ///|
 pub(all) struct ObjectCache {
-  blobs : Map[String, Bytes]
+  blob_cache : LruCache[Bytes] // Two-generation LRU for blobs
   trees : Map[@git.ObjectId, Array[@git.TreeEntry]] // ObjectId as key (no hex conversion)
   path_cache : Map[String, @git.ObjectId?]
-  max_blob_bytes : Int
-  mut blob_bytes : Int
-  blob_order : Array[String]
 }
 
 ///|
 pub fn ObjectCache::new(max_bytes : Int) -> ObjectCache {
   {
-    blobs: {},
+    blob_cache: LruCache::new(max_bytes, fn(b : Bytes) { b.length() }),
     trees: {},
     path_cache: {},
-    max_blob_bytes: max_bytes,
-    blob_bytes: 0,
-    blob_order: [],
   }
 }
 
