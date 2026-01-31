@@ -12,6 +12,7 @@ async fn handle_subdir(args : Array[String]) -> Unit raise Error {
   match subcommand {
     "clone" => handle_subdir_clone(rest) catch { e => raise e }
     "status" => handle_subdir_status(rest) catch { e => raise e }
+    "rebase" => handle_subdir_rebase(rest) catch { e => raise e }
     "init" => handle_subdir_init(rest) catch { e => raise e }
     "deinit" => handle_subdir_deinit(rest) catch { e => raise e }
     "list" => handle_subdir_list(rest) catch { e => raise e }
@@ -184,6 +185,409 @@ fn scan_worktree_files(
     }
   }
   files
+}
+
+///|
+/// Rebase a subdir clone onto upstream changes
+/// Only applies changes that affect the original subdirectory path
+async fn handle_subdir_rebase(args : Array[String]) -> Unit raise Error {
+  // Parse arguments: [path] [upstream]
+  let target_dir = if args.length() > 0 && not(args[0].has_prefix("-")) {
+    args[0]
+  } else {
+    "."
+  }
+  let upstream = if args.length() > 1 {
+    args[1]
+  } else {
+    "origin/main"
+  }
+  let git_dir = target_dir + "/.git"
+  let fs = OsFs::new()
+  // Check if this is a valid git repository
+  if not(fs.is_dir(git_dir)) {
+    print_line("Error: not a git repository: " + target_dir)
+    print_line("Hint: use absolute path or run from within the repository")
+    return
+  }
+  // Check if this is a subdir clone
+  let info_path = git_dir + "/subdir-clone-info"
+  if not(fs.is_file(info_path)) {
+    print_line("Error: not a subdir clone. Use regular 'git rebase' instead.")
+    return
+  }
+  // Read subdir clone metadata
+  let info = fs.read_file(info_path) catch {
+    _ => raise @git.GitError::IoError("Failed to read subdir-clone-info")
+  }
+  let info_text = bytes_to_string_handler(info)
+  let mut remote_url = ""
+  let mut subdir_path = ""
+  let mut base_commit = ""
+  for line in info_text.split("\n") {
+    let l = line.to_string()
+    if l.has_prefix("remote=") {
+      remote_url = String::unsafe_substring(l, start=7, end=l.length())
+    } else if l.has_prefix("path=") {
+      subdir_path = String::unsafe_substring(l, start=5, end=l.length())
+    } else if l.has_prefix("commit=") {
+      base_commit = String::unsafe_substring(l, start=7, end=l.length())
+    }
+  }
+  if subdir_path.length() == 0 || base_commit.length() == 0 {
+    print_line("Error: invalid subdir-clone-info")
+    return
+  }
+  print_line("Rebasing subdir clone onto \{upstream}...")
+  print_line("  Subdirectory: \{subdir_path}")
+  print_line("  Base commit: \{base_commit}")
+  // Step 1: Fetch from origin
+  print_line("  Fetching from origin...")
+  let fetch_result = @process.run("git", ["-C", target_dir, "fetch", "origin"])
+  if fetch_result != 0 {
+    print_line("Warning: fetch may have failed")
+  }
+  // Step 2: Resolve upstream ref
+  let upstream_commit_bytes = fs.read_file(
+    git_dir + "/refs/remotes/" + upstream,
+  ) catch {
+    _ => {
+      print_line("Error: cannot resolve upstream ref: \{upstream}")
+      print_line("Make sure the ref exists (e.g., origin/main)")
+      return
+    }
+  }
+  let upstream_hex = bytes_to_string_handler(upstream_commit_bytes)
+    .trim(chars=" \n\t")
+    .to_string()
+  print_line("  Upstream: \{upstream_hex}")
+  // Step 3: Find commits between base and upstream that affect the subdirectory
+  print_line("  Finding changes to \{subdir_path}...")
+  let db = @gitlib.ObjectDb::load_lazy(fs, git_dir)
+  // Get list of commits from base to upstream
+  let commits_affecting_subdir = find_subdir_commits(
+    db,
+    fs,
+    base_commit,
+    upstream_hex,
+    subdir_path,
+  ) catch { err => raise err }
+  if commits_affecting_subdir.length() == 0 {
+    print_line("Already up to date. No changes to \{subdir_path}.")
+    // Update base commit to upstream
+    update_subdir_clone_info(fs, git_dir, remote_url, subdir_path, upstream_hex)
+    return
+  }
+  print_line("  Found \{commits_affecting_subdir.length()} commits affecting \{subdir_path}")
+  // Step 4: For each commit, apply the subdirectory changes
+  for commit_info in commits_affecting_subdir {
+    print_line("  Applying: \{commit_info.message}")
+    apply_subdir_commit(
+      fs, db, target_dir, git_dir, commit_info, subdir_path,
+    ) catch { err => raise err }
+  }
+  // Step 5: Update metadata
+  update_subdir_clone_info(fs, git_dir, remote_url, subdir_path, upstream_hex)
+  // Step 6: Reset index to sync with HEAD
+  let _ = @process.run("git", ["-C", target_dir, "reset", "HEAD"])
+  print_line("done.")
+  print_line("")
+  print_line("Successfully rebased onto \{upstream}")
+}
+
+///|
+struct SubdirCommitInfo {
+  id : @git.ObjectId
+  tree : @git.ObjectId
+  subdir_tree : @git.ObjectId
+  message : String
+  author : String
+  timestamp : Int64
+}
+
+///|
+/// Parse full commit data including message and author
+fn parse_full_commit(content : Bytes) -> (
+  @git.ObjectId,
+  Array[@git.ObjectId],
+  String,
+  Int64,
+  String,
+) raise @git.GitError {
+  let text = @utf8.decode_lossy(content[:])
+  let mut tree_id : @git.ObjectId? = None
+  let parents : Array[@git.ObjectId] = []
+  let mut author = ""
+  let mut author_time : Int64 = 0L
+  let mut in_message = false
+  let message = StringBuilder::new()
+  for line_view in text.split("\n") {
+    let line = line_view.to_string()
+    if in_message {
+      message.write_string(line)
+      message.write_char('\n')
+      continue
+    }
+    if line.length() == 0 {
+      in_message = true
+      continue
+    }
+    if line.has_prefix("tree ") {
+      let hex = String::unsafe_substring(line, start=5, end=line.length())
+      tree_id = Some(@git.ObjectId::from_hex(hex) catch {
+        _ => raise @git.GitError::InvalidObject("Invalid tree id")
+      })
+    } else if line.has_prefix("parent ") {
+      let hex = String::unsafe_substring(line, start=7, end=line.length())
+      parents.push(@git.ObjectId::from_hex(hex) catch {
+        _ => raise @git.GitError::InvalidObject("Invalid parent id")
+      })
+    } else if line.has_prefix("author ") {
+      // Format: "author Name <email> timestamp timezone"
+      let rest = String::unsafe_substring(line, start=7, end=line.length())
+      // Find last space-separated parts for timestamp
+      match rest.rev_find(" ") {
+        Some(tz_idx) => {
+          let before_tz = String::unsafe_substring(rest, start=0, end=tz_idx)
+          match before_tz.rev_find(" ") {
+            Some(ts_idx) => {
+              author = String::unsafe_substring(before_tz, start=0, end=ts_idx)
+              let ts_str = String::unsafe_substring(
+                before_tz,
+                start=ts_idx + 1,
+                end=before_tz.length(),
+              )
+              author_time = @strconv.parse_int64(ts_str) catch { _ => 0L }
+            }
+            None => author = rest
+          }
+        }
+        None => author = rest
+      }
+    }
+  }
+  match tree_id {
+    Some(tree) => (tree, parents, author, author_time, message.to_string())
+    None => raise @git.GitError::InvalidObject("Missing tree in commit")
+  }
+}
+
+///|
+/// Find commits between base and target that modify the subdirectory
+fn find_subdir_commits(
+  db : @gitlib.ObjectDb,
+  fs : OsFs,
+  base_hex : String,
+  target_hex : String,
+  subdir_path : String,
+) -> Array[SubdirCommitInfo] raise @git.GitError {
+  let result : Array[SubdirCommitInfo] = []
+  // Walk from target back to base, collecting commits that change subdir
+  let base_id = @git.ObjectId::from_hex(base_hex) catch {
+    _ => raise @git.GitError::InvalidObject("Invalid base commit: " + base_hex)
+  }
+  let target_id = @git.ObjectId::from_hex(target_hex) catch {
+    _ =>
+      raise @git.GitError::InvalidObject("Invalid target commit: " + target_hex)
+  }
+  // Get base subdir tree for comparison
+  let base_subdir_tree = get_subdir_tree(db, fs, base_id, subdir_path) catch {
+    err => raise err
+  }
+  // Walk commits from target towards base
+  let mut current_id = target_id
+  let mut prev_subdir_tree = base_subdir_tree
+  let commits_to_check : Array[@git.ObjectId] = []
+  // First, collect all commits from target to base
+  let visited : Map[String, Bool] = {}
+  while true {
+    let hex = current_id.to_hex()
+    if visited.contains(hex) || hex == base_hex {
+      break
+    }
+    visited[hex] = true
+    commits_to_check.push(current_id)
+    // Get commit and move to parent
+    let commit_obj = db.get(fs, current_id)
+    guard commit_obj is Some(obj) else { break }
+    let commit_info = @git.parse_commit(obj.data) catch { err => raise err }
+    if commit_info.parents.length() == 0 {
+      break
+    }
+    current_id = commit_info.parents[0]
+  }
+  // Now process in reverse order (oldest first)
+  let mut i = commits_to_check.length() - 1
+  while i >= 0 {
+    let commit_id = commits_to_check[i]
+    let commit_obj = db.get(fs, commit_id)
+    guard commit_obj is Some(obj) else {
+      i -= 1
+      continue
+    }
+    let (tree, _parents, author, author_time, message) = parse_full_commit(
+      obj.data,
+    ) catch { err => raise err }
+    // Get subdir tree for this commit
+    let current_subdir_tree = get_subdir_tree(
+      db, fs, commit_id, subdir_path,
+    ) catch { _ => { i -= 1; continue } }
+    // Check if subdir changed from previous
+    match (prev_subdir_tree, current_subdir_tree) {
+      (Some(prev), Some(curr)) =>
+        if prev.to_hex() != curr.to_hex() {
+          // Subdir changed - include this commit
+          result.push({
+            id: commit_id,
+            tree,
+            subdir_tree: curr,
+            message: message.trim(chars=" \n\t").to_string(),
+            author,
+            timestamp: author_time,
+          })
+          prev_subdir_tree = Some(curr)
+        }
+      (None, Some(curr)) => {
+        // Subdir was added
+        result.push({
+          id: commit_id,
+          tree,
+          subdir_tree: curr,
+          message: message.trim(chars=" \n\t").to_string(),
+          author,
+          timestamp: author_time,
+        })
+        prev_subdir_tree = Some(curr)
+      }
+      _ => ()
+    }
+    i -= 1
+  }
+  result
+}
+
+///|
+/// Get the tree ID for a subdirectory within a commit
+fn get_subdir_tree(
+  db : @gitlib.ObjectDb,
+  fs : OsFs,
+  commit_id : @git.ObjectId,
+  subdir_path : String,
+) -> @git.ObjectId? raise @git.GitError {
+  let commit_obj = db.get(fs, commit_id)
+  guard commit_obj is Some(obj) else {
+    return None
+  }
+  let commit_info = @git.parse_commit(obj.data) catch { err => raise err }
+  find_subtree_clone(db, fs, commit_info.tree, subdir_path) catch {
+    err => raise err
+  }
+}
+
+///|
+/// Apply a commit's subdirectory changes to the worktree
+fn apply_subdir_commit(
+  fs : OsFs,
+  db : @gitlib.ObjectDb,
+  worktree : String,
+  git_dir : String,
+  commit_info : SubdirCommitInfo,
+  _subdir_path : String,
+) -> Unit raise @git.GitError {
+  // Write the new subdirectory tree to worktree
+  // First, clear existing files (keep .git)
+  let entries = fs.readdir(worktree) catch { _ => [] }
+  for entry in entries {
+    if entry == ".git" {
+      continue
+    }
+    let path = worktree + "/" + entry
+    if fs.is_dir(path) {
+      subdir_remove_dir_recursive(fs, path)
+    } else {
+      fs.remove_file(path) catch { _ => () }
+    }
+  }
+  // Write new tree contents
+  write_tree_to_worktree_clone(db, fs, commit_info.subdir_tree, worktree) catch {
+    err => raise err
+  }
+  // Create a commit with the new state
+  let timestamp = get_current_timestamp()
+  let author = commit_info.author
+  let message = commit_info.message + "\n\n(rebased from " +
+    commit_info.id.to_hex() +
+    ")\n"
+  // Read current HEAD
+  let head_content = fs.read_file(git_dir + "/HEAD") catch {
+    _ => raise @git.GitError::IoError("Failed to read HEAD")
+  }
+  let head_text = bytes_to_string_handler(head_content).trim(chars=" \n\t").to_string()
+  let parent_id = if head_text.has_prefix("ref: ") {
+    let ref_name = String::unsafe_substring(head_text, start=5, end=head_text.length())
+    let ref_path = git_dir + "/" + ref_name
+    let ref_content = fs.read_file(ref_path) catch {
+      _ => raise @git.GitError::IoError("Failed to read ref")
+    }
+    let ref_hex = bytes_to_string_handler(ref_content).trim(chars=" \n\t").to_string()
+    @git.ObjectId::from_hex(ref_hex) catch {
+      _ => raise @git.GitError::InvalidObject("Invalid ref")
+    }
+  } else {
+    @git.ObjectId::from_hex(head_text) catch {
+      _ => raise @git.GitError::InvalidObject("Invalid HEAD")
+    }
+  }
+  // Create new commit
+  let parents : Array[@git.ObjectId] = [parent_id]
+  let commit = @git.Commit::new(
+    commit_info.subdir_tree,
+    parents,
+    author,
+    timestamp,
+    "+0000",
+    author,
+    timestamp,
+    "+0000",
+    message,
+  )
+  let (new_commit_id, commit_bytes) = @git.create_commit(commit)
+  @gitlib.write_object_bytes(fs, git_dir, new_commit_id, commit_bytes) catch {
+    _ => raise @git.GitError::IoError("Failed to write commit")
+  }
+  // Update HEAD
+  let ref_path = git_dir + "/refs/heads/main"
+  fs.write_file(ref_path, string_to_bytes_subdir(new_commit_id.to_hex() + "\n")) catch {
+    _ => ()
+  }
+  // Clear index to force re-sync on next git command
+  let index_path = git_dir + "/index"
+  fs.remove_file(index_path) catch { _ => () }
+}
+
+///|
+/// Update subdir-clone-info with new base commit
+fn update_subdir_clone_info(
+  fs : OsFs,
+  git_dir : String,
+  remote_url : String,
+  subdir_path : String,
+  new_commit_hex : String,
+) -> Unit {
+  let info = StringBuilder::new()
+  info.write_string("remote=")
+  info.write_string(remote_url)
+  info.write_string("\n")
+  info.write_string("path=")
+  info.write_string(subdir_path)
+  info.write_string("\n")
+  info.write_string("commit=")
+  info.write_string(new_commit_hex)
+  info.write_string("\n")
+  let info_path = git_dir + "/subdir-clone-info"
+  fs.write_file(info_path, string_to_bytes_subdir(info.to_string())) catch {
+    _ => ()
+  }
 }
 
 ///|
