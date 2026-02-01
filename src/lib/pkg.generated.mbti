@@ -60,6 +60,8 @@ pub fn delete_reflog(&@bit.FileSystem, &@bit.RepoFileSystem, String, String) -> 
 
 pub fn delete_tag(&@bit.FileSystem, String, String) -> Unit raise @bit.GitError
 
+pub fn detect_protocol_version(Bytes) -> Int
+
 pub fn diff_index(&@bit.RepoFileSystem, String) -> Array[DiffFile] raise @bit.GitError
 
 pub fn diff_stat(Array[DiffFile]) -> Array[String]
@@ -127,6 +129,8 @@ pub fn mv_path(&@bit.FileSystem, &@bit.RepoFileSystem, String, String, String, f
 pub fn parse_receive_pack_request(Bytes) -> ReceivePackRequest raise @bit.GitError
 
 pub fn parse_upload_pack_request(Bytes) -> UploadPackRequest raise @bit.GitError
+
+pub fn parse_upload_pack_request_v2(Bytes) -> UploadPackRequestV2 raise @bit.GitError
 
 pub fn prune_repo(&@bit.FileSystem, &@bit.RepoFileSystem, String) -> PruneResult raise @bit.GitError
 
@@ -225,6 +229,8 @@ pub fn unlock_worktree(&@bit.FileSystem, &@bit.RepoFileSystem, String, String) -
 pub fn update_head_ref(&@bit.FileSystem, &@bit.RepoFileSystem, String, @bit.ObjectId) -> Unit raise @bit.GitError
 
 pub fn upload_pack(&@bit.RepoFileSystem, String, UploadPackRequest) -> Bytes raise @bit.GitError
+
+pub fn upload_pack_v2(&@bit.RepoFileSystem, String, UploadPackRequestV2, UploadPackConfig) -> Bytes raise @bit.GitError
 
 pub fn write_index_entries(&@bit.FileSystem, String, Array[IndexEntry]) -> Unit raise @bit.GitError
 
@@ -453,11 +459,28 @@ pub struct TreeFileEntry {
   mode : Int
 }
 
+pub(all) struct UploadPackConfig {
+  allow_filter : Bool
+  blob_packfile_uri : String?
+}
+pub fn UploadPackConfig::default() -> Self
+pub fn UploadPackConfig::new(Bool, String?) -> Self
+
 pub struct UploadPackRequest {
   wants : Array[@bit.ObjectId]
   haves : Array[@bit.ObjectId]
   capabilities : Array[String]
   done : Bool
+}
+
+pub struct UploadPackRequestV2 {
+  command : String
+  capabilities : Array[String]
+  wants : Array[@bit.ObjectId]
+  haves : Array[@bit.ObjectId]
+  done : Bool
+  filter : String?
+  packfile_uris : String?
 }
 
 pub(all) struct WorktreeInfo {

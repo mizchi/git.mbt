@@ -332,7 +332,8 @@ async fn handle_commit(args : Array[String]) -> Unit raise Error {
   let git_dir = root + "/.git"
   // Show subdir-clone context if applicable
   match get_subdir_info(fs, git_dir) {
-    Some((_, path, _)) => print_line("[" + short_id + " (subdir: " + path + ")] " + first_line)
+    Some((_, path, _)) =>
+      print_line("[" + short_id + " (subdir: " + path + ")] " + first_line)
     None => print_line("[" + short_id + "] " + first_line)
   }
 }

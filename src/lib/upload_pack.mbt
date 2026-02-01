@@ -9,6 +9,138 @@ pub struct UploadPackRequest {
 }
 
 ///|
+/// Protocol v2 upload-pack request
+pub struct UploadPackRequestV2 {
+  command : String // "fetch", "ls-refs", etc.
+  capabilities : Array[String]
+  wants : Array[@git.ObjectId]
+  haves : Array[@git.ObjectId]
+  done : Bool
+  // v2-specific capabilities
+  filter : String? // e.g., "blob:none"
+  packfile_uris : String? // e.g., "https"
+}
+
+///|
+/// Detect protocol version from request bytes
+/// Returns 1 for v1 (want lines), 2 for v2 (command=...)
+pub fn detect_protocol_version(data : Bytes) -> Int {
+  if data.length() < 8 {
+    return 1
+  }
+  // Parse first pktline length
+  let len = upload_parse_pkt_len_safe(data, 0)
+  if len < 4 {
+    return 1
+  }
+  // Check if first line starts with "command="
+  let end = if len > data.length() { data.length() } else { len }
+  let line = upload_bytes_to_string_range(data, 4, end)
+  if line.has_prefix("command=") {
+    2
+  } else {
+    1
+  }
+}
+
+///|
+fn upload_parse_pkt_len_safe(data : Bytes, start : Int) -> Int {
+  if start + 4 > data.length() {
+    return 0
+  }
+  let mut v = 0
+  for i in 0..<4 {
+    let c = data[start + i].to_int()
+    let digit = if c >= 0x30 && c <= 0x39 {
+      // '0'-'9'
+      c - 0x30
+    } else if c >= 0x61 && c <= 0x66 {
+      // 'a'-'f'
+      10 + (c - 0x61)
+    } else if c >= 0x41 && c <= 0x46 {
+      // 'A'-'F'
+      10 + (c - 0x41)
+    } else {
+      return 0
+    }
+    v = v * 16 + digit
+  }
+  v
+}
+
+///|
+/// Parse protocol v2 upload-pack request
+pub fn parse_upload_pack_request_v2(
+  data : Bytes,
+) -> UploadPackRequestV2 raise @git.GitError {
+  let mut command = ""
+  let capabilities : Array[String] = []
+  let wants : Array[@git.ObjectId] = []
+  let haves : Array[@git.ObjectId] = []
+  let mut done = false
+  let mut filter : String? = None
+  let mut packfile_uris : String? = None
+  let mut i = 0
+  let mut in_args = false // After delimiter (0001)
+  while i + 4 <= data.length() {
+    let len = upload_parse_pkt_len_safe(data, i)
+
+    // 0000 = flush
+    if len == 0 {
+      i += 4
+      continue
+    }
+
+    // 0001 = delimiter (switch from command section to arguments)
+    if len == 1 {
+      in_args = true
+      i += 4
+      continue
+    }
+    if len < 4 || i + len > data.length() {
+      raise @git.GitError::ProtocolError("Invalid pkt-line length in v2")
+    }
+    let line = upload_bytes_to_string_range(data, i + 4, i + len)
+    let line = upload_trim_line(line)
+    i += len
+    if not(in_args) {
+      // Command section
+      if line.has_prefix("command=") {
+        command = String::unsafe_substring(line, start=8, end=line.length())
+      } else if line.has_prefix("object-format=") {
+        // Ignore for now, assume sha1
+      } else if line.length() > 0 {
+        capabilities.push(line)
+      }
+      // Arguments section
+    } else if line.has_prefix("want ") {
+      let hex = String::unsafe_substring(line, start=5, end=line.length())
+      let hex = upload_trim_line(hex)
+      if hex.length() >= 40 {
+        let hex40 = String::unsafe_substring(hex, start=0, end=40)
+        wants.push(@git.ObjectId::from_hex(hex40))
+      }
+    } else if line.has_prefix("have ") {
+      let hex = String::unsafe_substring(line, start=5, end=line.length())
+      let hex = upload_trim_line(hex)
+      if hex.length() >= 40 {
+        let hex40 = String::unsafe_substring(hex, start=0, end=40)
+        haves.push(@git.ObjectId::from_hex(hex40))
+      }
+    } else if line == "done" {
+      done = true
+    } else if line.has_prefix("filter ") {
+      filter = Some(String::unsafe_substring(line, start=7, end=line.length()))
+    } else if line.has_prefix("packfile-uris ") {
+      packfile_uris = Some(
+        String::unsafe_substring(line, start=14, end=line.length()),
+      )
+    }
+  }
+  { command, capabilities, wants, haves, done, filter, packfile_uris }
+}
+
+///|
 /// Build upload-pack advertisement (info/refs payload).
 pub fn build_upload_pack_advertisement(
   fs : &@git.RepoFileSystem,
@@ -317,4 +449,187 @@ fn upload_push_bytes(out : Array[Byte], data : Bytes) -> Unit {
   for b in data {
     out.push(b)
   }
+}
+
+///|
+/// Upload-pack configuration for v2 protocol
+pub(all) struct UploadPackConfig {
+  allow_filter : Bool
+  blob_packfile_uri : String? // If set, packfile-uris is allowed
+}
+
+///|
+pub fn UploadPackConfig::new(
+  allow_filter : Bool,
+  blob_packfile_uri : String?,
+) -> UploadPackConfig {
+  { allow_filter, blob_packfile_uri }
+}
+
+///|
+pub fn UploadPackConfig::default() -> UploadPackConfig {
+  { allow_filter: true, blob_packfile_uri: None }
+}
+
+///|
+/// Handle protocol v2 upload-pack request
+pub fn upload_pack_v2(
+  fs : &@git.RepoFileSystem,
+  root : String,
+  req : UploadPackRequestV2,
+  config : UploadPackConfig,
+) -> Bytes raise @git.GitError {
+  // Validate request against config
+  if req.filter is Some(_) && not(config.allow_filter) {
+    raise @git.GitError::ProtocolError(
+      "unexpected line: 'filter " + req.filter.unwrap() + "'",
+    )
+  }
+  if req.packfile_uris is Some(_) && config.blob_packfile_uri is None {
+    raise @git.GitError::ProtocolError(
+      "unexpected line: 'packfile-uris " + req.packfile_uris.unwrap() + "'",
+    )
+  }
+
+  // Process the fetch command
+  if req.command != "fetch" {
+    raise @git.GitError::ProtocolError(
+      "unsupported command: '" + req.command + "'",
+    )
+  }
+  let git_dir = join_path(root, ".git")
+  let db = ObjectDb::load(fs, git_dir)
+
+  // Collect objects reachable from wants
+  let objects = collect_reachable_objects_from_commits(db, fs, req.wants)
+
+  // Apply partial clone filter (blob:none, blob:limit, tree:depth)
+  let filter_spec = match req.filter {
+    Some(f) => parse_filter_spec(f)
+    None => @git.FilterSpec::NoFilter
+  }
+  let objects = apply_filter_spec(objects, filter_spec)
+
+  // If client has some objects, filter them out
+  let filtered_objects = if req.haves.length() > 0 {
+    let have_set : Map[String, Bool] = {}
+    let have_objects = collect_reachable_objects_from_commits(db, fs, req.haves)
+    for obj in have_objects {
+      let id = @git.hash_object_content(obj.obj_type, obj.data)
+      have_set[id.to_hex()] = true
+    }
+    let filtered : Array[@git.PackObject] = []
+    for obj in objects {
+      let id = @git.hash_object_content(obj.obj_type, obj.data)
+      if not(have_set.contains(id.to_hex())) {
+        filtered.push(obj)
+      }
+    }
+    filtered
+  } else {
+    objects
+  }
+
+  // Build v2 response
+  build_upload_pack_response_v2(filtered_objects)
+}
+
+///|
+/// Parse filter specification string (e.g., "blob:none", "blob:limit=1000")
+fn parse_filter_spec(spec : String) -> @git.FilterSpec {
+  if spec == "blob:none" {
+    @git.FilterSpec::BlobNone
+  } else if spec.has_prefix("blob:limit=") {
+    let limit_str = String::unsafe_substring(spec, start=11, end=spec.length())
+    let limit = @strconv.parse_int64(limit_str) catch { _ => 0L }
+    @git.FilterSpec::BlobLimit(limit)
+  } else if spec.has_prefix("tree:") {
+    let depth_str = String::unsafe_substring(spec, start=5, end=spec.length())
+    let depth = @strconv.parse_int(depth_str) catch { _ => 0 }
+    @git.FilterSpec::TreeDepth(depth)
+  } else {
+    @git.FilterSpec::NoFilter
+  }
+}
+
+///|
+/// Apply filter specification to objects
+fn apply_filter_spec(
+  objects : Array[@git.PackObject],
+  filter : @git.FilterSpec,
+) -> Array[@git.PackObject] {
+  match filter {
+    NoFilter => objects
+    BlobNone => {
+      // Exclude all blobs
+      let result : Array[@git.PackObject] = []
+      for obj in objects {
+        if obj.obj_type != @git.ObjectType::Blob {
+          result.push(obj)
+        }
+      }
+      result
+    }
+    BlobLimit(max_size) => {
+      // Exclude blobs larger than max_size
+      let result : Array[@git.PackObject] = []
+      for obj in objects {
+        if obj.obj_type != @git.ObjectType::Blob ||
+          obj.data.length().to_int64() <= max_size {
+          result.push(obj)
+        }
+      }
+      result
+    }
+    TreeDepth(_depth) =>
+      // Tree depth filtering is complex, not implemented yet
+      // For now, return all objects
+      objects
+  }
+}
+
+///|
+fn build_upload_pack_response_v2(objects : Array[@git.PackObject]) -> Bytes {
+  let out : Array[Byte] = []
+
+  // Send acknowledgments section (simplified - just packfile for now)
+  // Format: 0001 (delimiter), then packfile section, then 0000 (flush)
+
+  // Delimiter to signal start of packfile section
+  out.push(b'0')
+  out.push(b'0')
+  out.push(b'0')
+  out.push(b'1')
+
+  // Create packfile
+  let pack = @git.create_packfile(objects)
+
+  // Send packfile-section header
+  upload_push_bytes(out, @git.pktline_encode("packfile\n"))
+
+  // Send packfile via side-band-64k (band 1)
+  let chunk_size = 65515 // 65520 - 4 (pkt-line header) - 1 (band byte)
+  let mut offset = 0
+  while offset < pack.length() {
+    let end = if offset + chunk_size > pack.length() {
+      pack.length()
+    } else {
+      offset + chunk_size
+    }
+    let data_len = end - offset
+    let pkt_len = data_len + 5 // 4 (header) + 1 (band byte)
+    let len_hex = upload_int_to_hex4(pkt_len)
+    for c in len_hex {
+      out.push(c.to_int().to_byte())
+    }
+    out.push(b'\x01') // band 1 = packfile data
+    for i in offset..<end {
+      out.push(pack[i])
+    }
+    offset = end
+  }
+
+  // Flush packet to end
+  upload_push_bytes(out, @git.pktline_flush())
+  Bytes::from_array(FixedArray::makei(out.length(), fn(i) { out[i] }))
 }

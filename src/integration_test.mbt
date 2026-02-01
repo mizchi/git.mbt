@@ -78,9 +78,7 @@ test "integration: blob hash matches git hash-object" {
 ///|
 test "integration: tree format is correct" {
   // Tree entry format: {mode} {name}\0{20-byte sha}
-  let blob_id = ObjectId::from_hex(
-    "ce013625030ba8dba906f756967f9e9ca394464a",
-  )
+  let blob_id = ObjectId::from_hex("ce013625030ba8dba906f756967f9e9ca394464a")
   let entry = TreeEntry::new("100644", "hello.txt", blob_id)
   let (tree_id, compressed) = create_tree([entry])
 
@@ -100,9 +98,7 @@ test "integration: tree format is correct" {
 
 ///|
 test "integration: commit format is correct" {
-  let tree_id = ObjectId::from_hex(
-    "aaa96ced2d9a1c8e72c56b253a0e2fe78393feb7",
-  )
+  let tree_id = ObjectId::from_hex("aaa96ced2d9a1c8e72c56b253a0e2fe78393feb7")
   let commit = Commit::new(
     tree_id,
     [],
@@ -198,9 +194,7 @@ test "integration: multi-object packfile" {
 ///|
 test "integration: pktline ref update format" {
   let old_id = ObjectId::zero()
-  let new_id = ObjectId::from_hex(
-    "ce013625030ba8dba906f756967f9e9ca394464a",
-  )
+  let new_id = ObjectId::from_hex("ce013625030ba8dba906f756967f9e9ca394464a")
   let cmd = build_ref_update_simple(old_id, new_id, "refs/heads/main")
 
   // Format: "{old} {new} {ref}\n"
@@ -213,9 +207,7 @@ test "integration: pktline ref update format" {
 ///|
 test "integration: pktline with capabilities" {
   let old_id = ObjectId::zero()
-  let new_id = ObjectId::from_hex(
-    "ce013625030ba8dba906f756967f9e9ca394464a",
-  )
+  let new_id = ObjectId::from_hex("ce013625030ba8dba906f756967f9e9ca394464a")
   let cmd = build_ref_update(old_id, new_id, "refs/heads/main", "report-status")
 
   // Should contain null byte before capabilities
@@ -226,9 +218,7 @@ test "integration: pktline with capabilities" {
 ///|
 test "integration: receive-pack body format" {
   let old_id = ObjectId::zero()
-  let new_id = ObjectId::from_hex(
-    "ce013625030ba8dba906f756967f9e9ca394464a",
-  )
+  let new_id = ObjectId::from_hex("ce013625030ba8dba906f756967f9e9ca394464a")
   let packfile = Bytes::from_array([
     b'P', b'A', b'C', b'K', b'\x00', b'\x00', b'\x00', b'\x02',
   ])

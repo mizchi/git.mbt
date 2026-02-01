@@ -7,7 +7,9 @@ test "subdir: write and read attributes" {
   let test_dir = "/tmp/bit-test-subdir-" + get_current_timestamp().to_string()
   fs.mkdir_p(test_dir + "/.git/info")
   // Write attributes
-  let commit_id = @git.ObjectId::from_hex("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2") catch {
+  let commit_id = @git.ObjectId::from_hex(
+    "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+  ) catch {
     _ => return ()
   }
   write_subdir_attributes(
@@ -28,10 +30,18 @@ test "subdir: write and read attributes" {
     None => assert_true(false)
   }
   // Cleanup
-  fs.remove_file(test_dir + "/.git/info/attributes") catch { _ => () }
-  fs.remove_dir(test_dir + "/.git/info") catch { _ => () }
-  fs.remove_dir(test_dir + "/.git") catch { _ => () }
-  fs.remove_dir(test_dir) catch { _ => () }
+  fs.remove_file(test_dir + "/.git/info/attributes") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir + "/.git/info") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir + "/.git") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir) catch {
+    _ => ()
+  }
 }
 
 ///|
@@ -42,7 +52,9 @@ test "subdir: is_subdir_clone detection" {
   // Initially not a subdir-clone
   assert_false(is_subdir_clone(fs, test_dir + "/.git"))
   // Write attributes
-  let commit_id = @git.ObjectId::from_hex("b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3") catch {
+  let commit_id = @git.ObjectId::from_hex(
+    "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3",
+  ) catch {
     _ => return ()
   }
   write_subdir_attributes(
@@ -55,10 +67,18 @@ test "subdir: is_subdir_clone detection" {
   // Now it's a subdir-clone
   assert_true(is_subdir_clone(fs, test_dir + "/.git"))
   // Cleanup
-  fs.remove_file(test_dir + "/.git/info/attributes") catch { _ => () }
-  fs.remove_dir(test_dir + "/.git/info") catch { _ => () }
-  fs.remove_dir(test_dir + "/.git") catch { _ => () }
-  fs.remove_dir(test_dir) catch { _ => () }
+  fs.remove_file(test_dir + "/.git/info/attributes") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir + "/.git/info") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir + "/.git") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir) catch {
+    _ => ()
+  }
 }
 
 ///|
@@ -67,7 +87,9 @@ test "subdir: get_subdir_info returns metadata" {
   let test_dir = "/tmp/bit-test-subdir3-" + get_current_timestamp().to_string()
   fs.mkdir_p(test_dir + "/.git/info")
   // Write attributes
-  let commit_id = @git.ObjectId::from_hex("c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4") catch {
+  let commit_id = @git.ObjectId::from_hex(
+    "c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+  ) catch {
     _ => return ()
   }
   write_subdir_attributes(
@@ -88,10 +110,18 @@ test "subdir: get_subdir_info returns metadata" {
     None => assert_true(false)
   }
   // Cleanup
-  fs.remove_file(test_dir + "/.git/info/attributes") catch { _ => () }
-  fs.remove_dir(test_dir + "/.git/info") catch { _ => () }
-  fs.remove_dir(test_dir + "/.git") catch { _ => () }
-  fs.remove_dir(test_dir) catch { _ => () }
+  fs.remove_file(test_dir + "/.git/info/attributes") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir + "/.git/info") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir + "/.git") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir) catch {
+    _ => ()
+  }
 }
 
 ///|
@@ -100,7 +130,9 @@ test "subdir: update_subdir_base updates base commit" {
   let test_dir = "/tmp/bit-test-subdir4-" + get_current_timestamp().to_string()
   fs.mkdir_p(test_dir + "/.git/info")
   // Write initial attributes
-  let commit_id = @git.ObjectId::from_hex("d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5") catch {
+  let commit_id = @git.ObjectId::from_hex(
+    "d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5",
+  ) catch {
     _ => return ()
   }
   write_subdir_attributes(
@@ -111,20 +143,31 @@ test "subdir: update_subdir_base updates base commit" {
     commit_id,
   )
   // Update base
-  update_subdir_base(fs, test_dir + "/.git", "e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6")
+  update_subdir_base(
+    fs,
+    test_dir + "/.git",
+    "e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6",
+  )
   // Read back
   let info = read_subdir_attributes(fs, test_dir + "/.git")
   match info {
-    Some((_, _, base)) => {
+    Some((_, _, base)) =>
       assert_eq(base, "e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6")
-    }
     None => assert_true(false)
   }
   // Cleanup
-  fs.remove_file(test_dir + "/.git/info/attributes") catch { _ => () }
-  fs.remove_dir(test_dir + "/.git/info") catch { _ => () }
-  fs.remove_dir(test_dir + "/.git") catch { _ => () }
-  fs.remove_dir(test_dir) catch { _ => () }
+  fs.remove_file(test_dir + "/.git/info/attributes") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir + "/.git/info") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir + "/.git") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir) catch {
+    _ => ()
+  }
 }
 
 ///|
@@ -133,12 +176,15 @@ test "subdir: get_effective_remote_url prefers subdir remote" {
   let test_dir = "/tmp/bit-test-subdir5-" + get_current_timestamp().to_string()
   fs.mkdir_p(test_dir + "/.git/info")
   // Write config with origin remote
-  let config = #|[remote "origin"]
+  let config =
+    #|[remote "origin"]
     #|  url = https://github.com/other/repo
     #|  fetch = +refs/heads/*:refs/remotes/origin/*
   fs.write_file(test_dir + "/.git/config", string_to_bytes(config))
   // Write subdir attributes
-  let commit_id = @git.ObjectId::from_hex("f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1") catch {
+  let commit_id = @git.ObjectId::from_hex(
+    "f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1",
+  ) catch {
     _ => return ()
   }
   write_subdir_attributes(
@@ -155,11 +201,21 @@ test "subdir: get_effective_remote_url prefers subdir remote" {
     None => assert_true(false)
   }
   // Cleanup
-  fs.remove_file(test_dir + "/.git/config") catch { _ => () }
-  fs.remove_file(test_dir + "/.git/info/attributes") catch { _ => () }
-  fs.remove_dir(test_dir + "/.git/info") catch { _ => () }
-  fs.remove_dir(test_dir + "/.git") catch { _ => () }
-  fs.remove_dir(test_dir) catch { _ => () }
+  fs.remove_file(test_dir + "/.git/config") catch {
+    _ => ()
+  }
+  fs.remove_file(test_dir + "/.git/info/attributes") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir + "/.git/info") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir + "/.git") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir) catch {
+    _ => ()
+  }
 }
 
 ///|
@@ -168,7 +224,8 @@ test "subdir: get_effective_remote_url falls back to config" {
   let test_dir = "/tmp/bit-test-subdir6-" + get_current_timestamp().to_string()
   fs.mkdir_p(test_dir + "/.git/info")
   // Write config with origin remote (no subdir attributes)
-  let config = #|[remote "origin"]
+  let config =
+    #|[remote "origin"]
     #|	url = https://github.com/other/repo
     #|	fetch = +refs/heads/*:refs/remotes/origin/*
   fs.write_file(test_dir + "/.git/config", string_to_bytes(config))
@@ -179,10 +236,18 @@ test "subdir: get_effective_remote_url falls back to config" {
     None => assert_true(false)
   }
   // Cleanup
-  fs.remove_file(test_dir + "/.git/config") catch { _ => () }
-  fs.remove_dir(test_dir + "/.git/info") catch { _ => () }
-  fs.remove_dir(test_dir + "/.git") catch { _ => () }
-  fs.remove_dir(test_dir) catch { _ => () }
+  fs.remove_file(test_dir + "/.git/config") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir + "/.git/info") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir + "/.git") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir) catch {
+    _ => ()
+  }
 }
 
 ///|
@@ -191,7 +256,9 @@ test "subdir: attributes file format" {
   let test_dir = "/tmp/bit-test-subdir7-" + get_current_timestamp().to_string()
   fs.mkdir_p(test_dir + "/.git/info")
   // Write attributes
-  let commit_id = @git.ObjectId::from_hex("1234567890abcdef1234567890abcdef12345678") catch {
+  let commit_id = @git.ObjectId::from_hex(
+    "1234567890abcdef1234567890abcdef12345678",
+  ) catch {
     _ => return ()
   }
   write_subdir_attributes(
@@ -210,12 +277,22 @@ test "subdir: attributes file format" {
   assert_true(text.contains("# subdir-clone metadata"))
   assert_true(text.contains("* subdir-remote=https://github.com/test/repo"))
   assert_true(text.contains("* subdir-path=pkg/lib"))
-  assert_true(text.contains("* subdir-base=1234567890abcdef1234567890abcdef12345678"))
+  assert_true(
+    text.contains("* subdir-base=1234567890abcdef1234567890abcdef12345678"),
+  )
   // Cleanup
-  fs.remove_file(test_dir + "/.git/info/attributes") catch { _ => () }
-  fs.remove_dir(test_dir + "/.git/info") catch { _ => () }
-  fs.remove_dir(test_dir + "/.git") catch { _ => () }
-  fs.remove_dir(test_dir) catch { _ => () }
+  fs.remove_file(test_dir + "/.git/info/attributes") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir + "/.git/info") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir + "/.git") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir) catch {
+    _ => ()
+  }
 }
 
 ///|
@@ -241,13 +318,27 @@ test "subdir: resolve_ref_for_subdir with direct ref" {
     None => assert_true(false)
   }
   // Cleanup
-  fs.remove_file(test_dir + "/.git/HEAD") catch { _ => () }
-  fs.remove_file(test_dir + "/.git/refs/heads/main") catch { _ => () }
-  fs.remove_dir(test_dir + "/.git/refs/heads") catch { _ => () }
-  fs.remove_dir(test_dir + "/.git/refs") catch { _ => () }
-  fs.remove_dir(test_dir + "/.git/objects") catch { _ => () }
-  fs.remove_dir(test_dir + "/.git") catch { _ => () }
-  fs.remove_dir(test_dir) catch { _ => () }
+  fs.remove_file(test_dir + "/.git/HEAD") catch {
+    _ => ()
+  }
+  fs.remove_file(test_dir + "/.git/refs/heads/main") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir + "/.git/refs/heads") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir + "/.git/refs") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir + "/.git/objects") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir + "/.git") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir) catch {
+    _ => ()
+  }
 }
 
 ///|
@@ -269,13 +360,27 @@ test "subdir: resolve_ref_for_subdir with remote ref" {
     None => assert_true(false)
   }
   // Cleanup
-  fs.remove_file(test_dir + "/.git/refs/remotes/origin/main") catch { _ => () }
-  fs.remove_dir(test_dir + "/.git/refs/remotes/origin") catch { _ => () }
-  fs.remove_dir(test_dir + "/.git/refs/remotes") catch { _ => () }
-  fs.remove_dir(test_dir + "/.git/refs") catch { _ => () }
-  fs.remove_dir(test_dir + "/.git/objects") catch { _ => () }
-  fs.remove_dir(test_dir + "/.git") catch { _ => () }
-  fs.remove_dir(test_dir) catch { _ => () }
+  fs.remove_file(test_dir + "/.git/refs/remotes/origin/main") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir + "/.git/refs/remotes/origin") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir + "/.git/refs/remotes") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir + "/.git/refs") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir + "/.git/objects") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir + "/.git") catch {
+    _ => ()
+  }
+  fs.remove_dir(test_dir) catch {
+    _ => ()
+  }
 }
 
 ///|

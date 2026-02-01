@@ -1,0 +1,20 @@
+import {
+  "mizchi/bit" as @git,
+  "mizchi/bit/lib",
+  "mizchi/bit/x/fs",
+  "mizchi/zlib",
+}
+
+options(
+  targets: {
+    "commit.mbt": [ "native" ],
+    "history.mbt": [ "native" ],
+    "init.mbt": [ "native" ],
+    "module.mbt": [ "native" ],
+    "sparse.mbt": [ "native" ],
+    "subdir.mbt": [ "native" ],
+    "subdir_test.mbt": [ "native" ],
+    "types.mbt": [ "native" ],
+  },
+  "warn-list": "-unused_constructor-29",
+)

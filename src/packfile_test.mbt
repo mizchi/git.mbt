@@ -69,14 +69,8 @@ test "packfile trailer is 20 bytes" {
 
 ///|
 test "packfile multiple objects" {
-  let obj1 = PackObject::new(
-    ObjectType::Blob,
-    Bytes::from_array([b'a']),
-  )
-  let obj2 = PackObject::new(
-    ObjectType::Blob,
-    Bytes::from_array([b'b']),
-  )
+  let obj1 = PackObject::new(ObjectType::Blob, Bytes::from_array([b'a']))
+  let obj2 = PackObject::new(ObjectType::Blob, Bytes::from_array([b'b']))
   let packfile = create_packfile([obj1, obj2])
 
   // Check object count: 2

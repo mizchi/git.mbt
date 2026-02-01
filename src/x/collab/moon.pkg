@@ -1,0 +1,25 @@
+import {
+  "mizchi/bit" as @git,
+  "mizchi/bit/lib" as @lib,
+  "moonbitlang/core/encoding/utf8" as @utf8,
+}
+
+import "test" {
+  "mizchi/bit/lib" as @lib,
+}
+
+options(
+  targets: {
+    "collab.mbt": [ "native" ],
+    "collab_test.mbt": [ "native" ],
+    "comment.mbt": [ "native" ],
+    "format.mbt": [ "native" ],
+    "issue.mbt": [ "native" ],
+    "merge.mbt": [ "native" ],
+    "notes.mbt": [ "native" ],
+    "review.mbt": [ "native" ],
+    "sync.mbt": [ "native" ],
+    "types.mbt": [ "native" ],
+  },
+  "warn-list": "-29",
+)

@@ -8,7 +8,7 @@ pub fn hq_root(config : HqConfig) -> String {
 /// Get all configured roots (for ghq compatibility)
 pub fn hq_roots(
   env_get : (String) -> String?,
-  git_config_get_all : (String) -> Array[String]
+  git_config_get_all : (String) -> Array[String],
 ) -> Array[String] {
   let roots : Array[String] = []
   // Check BHQ_ROOT first

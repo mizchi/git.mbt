@@ -1,0 +1,9 @@
+import {
+  "mizchi/bit" as @git,
+  "moonbitlang/x/fs",
+}
+
+options(
+  targets: { "osfs.mbt": [ "native" ] },
+  "warn-list": "-29",
+)

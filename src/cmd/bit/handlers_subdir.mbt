@@ -5,12 +5,16 @@
 fn print_subdir_clone_usage() -> Unit {
   println("Usage: bit subdir-clone <url> <path> [<dest>]")
   println("")
-  println("Clone a subdirectory from a remote repository as an independent git repo.")
+  println(
+    "Clone a subdirectory from a remote repository as an independent git repo.",
+  )
   println("")
   println("Arguments:")
   println("  <url>         Remote repository URL")
   println("  <path>        Path within the remote repo (e.g., src/lib)")
-  println("  <dest>        Local directory name (default: last component of path)")
+  println(
+    "  <dest>        Local directory name (default: last component of path)",
+  )
   println("")
   println("Examples:")
   println("  bit subdir-clone https://github.com/user/repo src")
@@ -57,13 +61,16 @@ async fn handle_subdir_clone(args : Array[String]) -> Unit raise Error {
   // Derive destination from subdir or explicit dest
   let relative_target = match dest {
     Some(d) => d
-    None => {
+    None =>
       match subdir_path.rev_find("/") {
         Some(idx) =>
-          String::unsafe_substring(subdir_path, start=idx + 1, end=subdir_path.length())
+          String::unsafe_substring(
+            subdir_path,
+            start=idx + 1,
+            end=subdir_path.length(),
+          )
         None => subdir_path
       }
-    }
   }
   let root = get_work_root()
   let target = if relative_target.has_prefix("/") {
@@ -98,14 +105,22 @@ async fn handle_subdir_clone(args : Array[String]) -> Unit raise Error {
   let head_ref = fs.read_file(temp_git_dir + "/HEAD") catch {
     _ => raise @git.GitError::IoError("Failed to read HEAD")
   }
-  let head_text = @utf8.decode_lossy(head_ref[:]).trim(chars=" \n\r\t").to_string()
+  let head_text = @utf8.decode_lossy(head_ref[:])
+    .trim(chars=" \n\r\t")
+    .to_string()
   let commit_id = if head_text.has_prefix("ref: ") {
-    let ref_name = String::unsafe_substring(head_text, start=5, end=head_text.length())
+    let ref_name = String::unsafe_substring(
+      head_text,
+      start=5,
+      end=head_text.length(),
+    )
     let ref_path = temp_git_dir + "/" + ref_name
     let ref_content = fs.read_file(ref_path) catch {
       _ => raise @git.GitError::IoError("Failed to read ref: " + ref_name)
     }
-    let ref_text = @utf8.decode_lossy(ref_content[:]).trim(chars=" \n\r\t").to_string()
+    let ref_text = @utf8.decode_lossy(ref_content[:])
+      .trim(chars=" \n\r\t")
+      .to_string()
     @git.ObjectId::from_hex(ref_text) catch {
       _ => raise @git.GitError::InvalidObject("Invalid commit ID in ref")
     }
@@ -126,9 +141,7 @@ async fn handle_subdir_clone(args : Array[String]) -> Unit raise Error {
   let subdir_tree_id = find_subtree(db, fs, commit_info.tree, subdir_path)
   guard subdir_tree_id is Some(tree_id) else {
     subdir_remove_dir(fs, temp_clone)
-    raise @git.GitError::InvalidObject(
-      "Subdirectory not found: " + subdir_path,
-    )
+    raise @git.GitError::InvalidObject("Subdirectory not found: " + subdir_path)
   }
   // Fetch blobs for the subdirectory
   print_line("  Fetching files...")
@@ -163,15 +176,7 @@ async fn handle_subdir_clone(args : Array[String]) -> Unit raise Error {
   let message = "Initial commit (cloned from " + subdir_path + ")\n"
   let parents : Array[@git.ObjectId] = []
   let commit = @git.Commit::new(
-    tree_id,
-    parents,
-    author,
-    timestamp,
-    "+0000",
-    author,
-    timestamp,
-    "+0000",
-    message,
+    tree_id, parents, author, timestamp, "+0000", author, timestamp, "+0000", message,
   )
   let (new_commit_id, commit_bytes) = @git.create_commit(commit)
   @gitlib.write_object_bytes(fs, git_dir, new_commit_id, commit_bytes) catch {
@@ -183,7 +188,9 @@ async fn handle_subdir_clone(args : Array[String]) -> Unit raise Error {
     _ => ()
   }
   let ref_path = git_dir + "/refs/heads/main"
-  fs.mkdir_p(git_dir + "/refs/heads") catch { _ => () }
+  fs.mkdir_p(git_dir + "/refs/heads") catch {
+    _ => ()
+  }
   fs.write_file(ref_path, string_to_bytes(new_commit_id.to_hex() + "\n")) catch {
     _ => ()
   }
@@ -211,7 +218,9 @@ fn write_subdir_attributes(
   base_commit : @git.ObjectId,
 ) -> Unit {
   let info_dir = git_dir + "/info"
-  fs.mkdir_p(info_dir) catch { _ => () }
+  fs.mkdir_p(info_dir) catch {
+    _ => ()
+  }
   let content = StringBuilder::new()
   content.write_string("# subdir-clone metadata\n")
   content.write_string("* subdir-remote=")
@@ -224,7 +233,9 @@ fn write_subdir_attributes(
   content.write_string(base_commit.to_hex())
   content.write_string("\n")
   let attr_path = info_dir + "/attributes"
-  fs.write_file(attr_path, string_to_bytes(content.to_string())) catch { _ => () }
+  fs.write_file(attr_path, string_to_bytes(content.to_string())) catch {
+    _ => ()
+  }
 }
 
 ///|
@@ -270,7 +281,9 @@ pub fn update_subdir_base(
         git_dir,
         remote,
         path,
-        @git.ObjectId::from_hex(new_base) catch { _ => return },
+        @git.ObjectId::from_hex(new_base) catch {
+          _ => return
+        },
       )
     None => ()
   }
@@ -294,7 +307,10 @@ pub fn get_effective_remote_url(fs : OsFs, git_dir : String) -> String? {
 
 ///|
 /// Get subdir info for display (remote, path, base)
-pub fn get_subdir_info(fs : OsFs, git_dir : String) -> (String, String, String)? {
+pub fn get_subdir_info(
+  fs : OsFs,
+  git_dir : String,
+) -> (String, String, String)? {
   read_subdir_attributes(fs, git_dir)
 }
 
@@ -309,7 +325,9 @@ pub fn get_subdir_tree_from_commit(
   let obj = db.get(fs, commit_id)
   guard obj is Some(o) else { return None }
   let info = @git.parse_commit(o.data) catch { err => raise err }
-  find_subtree(db, fs, info.tree, subdir_path) catch { err => raise err }
+  find_subtree(db, fs, info.tree, subdir_path) catch {
+    err => raise err
+  }
 }
 
 ///|
@@ -380,7 +398,9 @@ fn collect_tree_blobs(
   let entries = @git.parse_tree(tree_obj.data) catch { err => raise err }
   for entry in entries {
     if entry.mode == "40000" || entry.mode == "040000" {
-      let sub_blobs = collect_tree_blobs(db, rfs, entry.id) catch { err => raise err }
+      let sub_blobs = collect_tree_blobs(db, rfs, entry.id) catch {
+        err => raise err
+      }
       for b in sub_blobs {
         blobs.push(b)
       }
@@ -404,19 +424,27 @@ fn write_tree_to_worktree(
   for entry in entries {
     let path = dir + "/" + entry.name
     if entry.mode == "40000" || entry.mode == "040000" {
-      fs.mkdir_p(path) catch { _ => () }
-      write_tree_to_worktree(db, fs, entry.id, path) catch { err => raise err }
+      fs.mkdir_p(path) catch {
+        _ => ()
+      }
+      write_tree_to_worktree(db, fs, entry.id, path) catch {
+        err => raise err
+      }
     } else {
       let blob_obj = db.get(fs, entry.id)
       guard blob_obj is Some(blob) else { continue }
-      fs.write_file(path, blob.data) catch { _ => () }
+      fs.write_file(path, blob.data) catch {
+        _ => ()
+      }
     }
   }
 }
 
 ///|
 fn move_directory(fs : OsFs, src : String, dst : String) -> Unit {
-  fs.mkdir_p(dst) catch { _ => () }
+  fs.mkdir_p(dst) catch {
+    _ => ()
+  }
   let entries = fs.readdir(src) catch { _ => return }
   for entry in entries {
     let src_path = src + "/" + entry
@@ -425,7 +453,9 @@ fn move_directory(fs : OsFs, src : String, dst : String) -> Unit {
       move_directory(fs, src_path, dst_path)
     } else {
       let content = fs.read_file(src_path) catch { _ => continue }
-      fs.write_file(dst_path, content) catch { _ => () }
+      fs.write_file(dst_path, content) catch {
+        _ => ()
+      }
     }
   }
 }
@@ -438,10 +468,14 @@ fn subdir_remove_dir(fs : OsFs, path : String) -> Unit {
     if fs.is_dir(child_path) {
       subdir_remove_dir(fs, child_path)
     } else {
-      fs.remove_file(child_path) catch { _ => () }
+      fs.remove_file(child_path) catch {
+        _ => ()
+      }
     }
   }
-  fs.remove_dir(path) catch { _ => () }
+  fs.remove_dir(path) catch {
+    _ => ()
+  }
 }
 
 ///|

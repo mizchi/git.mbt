@@ -50,7 +50,8 @@ async fn handle_rev_list(args : Array[String]) -> Unit raise Error {
         let val = String::unsafe_substring(arg, start=12, end=arg.length())
         max_count = Some(@strconv.parse_int(val) catch { _ => 0 })
       }
-      _ if arg.has_prefix("^") => excludes.push(String::unsafe_substring(arg, start=1, end=arg.length()))
+      _ if arg.has_prefix("^") =>
+        excludes.push(String::unsafe_substring(arg, start=1, end=arg.length()))
       _ if not(arg.has_prefix("-")) => refs.push(arg)
       _ => () // Ignore unknown options
     }
@@ -63,7 +64,9 @@ async fn handle_rev_list(args : Array[String]) -> Unit raise Error {
       let line = trim_string(line_view.to_string())
       if line.length() > 0 && not(line.has_prefix("#")) {
         if line.has_prefix("^") {
-          excludes.push(String::unsafe_substring(line, start=1, end=line.length()))
+          excludes.push(
+            String::unsafe_substring(line, start=1, end=line.length()),
+          )
         } else {
           refs.push(line)
         }
@@ -424,7 +427,8 @@ async fn handle_bundle_create(args : Array[String]) -> Unit raise Error {
     let arg = args[i]
     match arg {
       "--all" => all = true
-      _ if arg.has_prefix("^") => excludes.push(String::unsafe_substring(arg, start=1, end=arg.length()))
+      _ if arg.has_prefix("^") =>
+        excludes.push(String::unsafe_substring(arg, start=1, end=arg.length()))
       _ if not(arg.has_prefix("-")) =>
         if bundle_file is None {
           bundle_file = Some(arg)
@@ -559,7 +563,11 @@ fn collect_bundle_objects(
             for line_view in text.split("\n") {
               let line = line_view.to_string()
               if line.has_prefix("object ") {
-                let target_hex = String::unsafe_substring(line, start=7, end=line.length())
+                let target_hex = String::unsafe_substring(
+                  line,
+                  start=7,
+                  end=line.length(),
+                )
                 let target = @git.ObjectId::from_hex(target_hex)
                 if not(visited.contains(target_hex)) {
                   queue.push(target)
@@ -709,7 +717,11 @@ fn parse_bundle_file(
       match line.find(" ") {
         Some(idx) => {
           let id = String::unsafe_substring(line, start=0, end=idx)
-          let name = String::unsafe_substring(line, start=idx + 1, end=line.length())
+          let name = String::unsafe_substring(
+            line,
+            start=idx + 1,
+            end=line.length(),
+          )
           refs.push((id, name))
         }
         None => ()

@@ -29,9 +29,7 @@ test "Remote receive_pack_url" {
 ///|
 test "build_receive_pack_body" {
   let old_id = ObjectId::zero()
-  let new_id = ObjectId::from_hex(
-    "ce013625030ba8dba906f756967f9e9ca394464a",
-  )
+  let new_id = ObjectId::from_hex("ce013625030ba8dba906f756967f9e9ca394464a")
   let packfile = Bytes::from_array([b'P', b'A', b'C', b'K'])
   let req = PushRequest::new(old_id, new_id, "refs/heads/main", packfile)
   let body = build_receive_pack_body(req)

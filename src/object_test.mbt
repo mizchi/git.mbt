@@ -29,9 +29,7 @@ test "create blob world" {
 ///|
 test "create tree single entry" {
   // Tree with single blob entry
-  let blob_id = ObjectId::from_hex(
-    "ce013625030ba8dba906f756967f9e9ca394464a",
-  )
+  let blob_id = ObjectId::from_hex("ce013625030ba8dba906f756967f9e9ca394464a")
   let entry = TreeEntry::new("100644", "hello.txt", blob_id)
   let (tree_id, _) = create_tree([entry])
 
@@ -43,12 +41,8 @@ test "create tree single entry" {
 ///|
 test "create tree multiple entries" {
   // Tree with multiple entries (must be sorted by name)
-  let hello_id = ObjectId::from_hex(
-    "ce013625030ba8dba906f756967f9e9ca394464a",
-  )
-  let world_id = ObjectId::from_hex(
-    "cc628ccd10742baea8241c5924df992b5c019f71",
-  )
+  let hello_id = ObjectId::from_hex("ce013625030ba8dba906f756967f9e9ca394464a")
+  let world_id = ObjectId::from_hex("cc628ccd10742baea8241c5924df992b5c019f71")
   let entries = [
     TreeEntry::new("100644", "hello.txt", hello_id),
     TreeEntry::new("100644", "world.txt", world_id),
@@ -64,9 +58,7 @@ test "create tree multiple entries" {
 
 ///|
 test "create commit" {
-  let tree_id = ObjectId::from_hex(
-    "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
-  )
+  let tree_id = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904")
   let commit = Commit::new(
     tree_id,
     [], // no parents
@@ -89,12 +81,8 @@ test "create commit" {
 
 ///|
 test "create commit with parent" {
-  let tree_id = ObjectId::from_hex(
-    "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
-  )
-  let parent_id = ObjectId::from_hex(
-    "0000000000000000000000000000000000000001",
-  )
+  let tree_id = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904")
+  let parent_id = ObjectId::from_hex("0000000000000000000000000000000000000001")
   let commit = Commit::new(
     tree_id,
     [parent_id],

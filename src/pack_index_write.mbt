@@ -17,20 +17,27 @@ pub fn build_pack_index(pack : Bytes) -> Bytes raise GitError {
 ///|
 /// Build a pack index (v2) from packfile bytes and parsed objects.
 /// Uses cached metadata (id, offset, crc32) from PackObject when available.
+/// Falls back to re-parsing the pack if metadata is missing.
 pub fn build_pack_index_from_objects(
   pack : Bytes,
   objects : Array[PackObject],
 ) -> Bytes raise GitError {
+  // Check if any objects are missing metadata (offset < 0 means not from parsed pack)
+  let mut needs_parse = false
+  for obj in objects {
+    if obj.offset < 0 {
+      needs_parse = true
+      break
+    }
+  }
+
+  // If objects are missing metadata, re-parse the pack to get correct values
+  if needs_parse {
+    return build_pack_index(pack)
+  }
   let entries : Array[PackIndexEntry] = []
   for obj in objects {
-    // Use cached metadata if available (offset >= 0 means parsed from pack)
-    if obj.offset >= 0 {
-      entries.push({ id: obj.id, offset: obj.offset, crc: obj.crc32 })
-    } else {
-      // Fallback: compute values (shouldn't happen for parsed pack objects)
-      let id = hash_object_content(obj.obj_type, obj.data)
-      entries.push({ id, offset: 0, crc: 0U })
-    }
+    entries.push({ id: obj.id, offset: obj.offset, crc: obj.crc32 })
   }
   entries.sort_by(fn(a, b) { compare_object_id(a.id, b.id) })
   let counts : Array[Int] = Array::make(256, 0)
@@ -134,18 +141,28 @@ pub fn write_pack_index_from_objects_versioned(
 
 ///|
 /// Build a pack index (v1) from packfile bytes and parsed objects.
+/// Falls back to re-parsing the pack if metadata is missing.
 fn build_pack_index_v1_from_objects(
   pack : Bytes,
   objects : Array[PackObject],
 ) -> Bytes raise GitError {
+  // Check if any objects are missing metadata
+  let mut needs_parse = false
+  for obj in objects {
+    if obj.offset < 0 {
+      needs_parse = true
+      break
+    }
+  }
+
+  // If objects are missing metadata, re-parse the pack to get correct values
+  if needs_parse {
+    let parsed = parse_packfile(pack)
+    return build_pack_index_v1_from_objects(pack, parsed)
+  }
   let entries : Array[PackIndexEntry] = []
   for obj in objects {
-    if obj.offset >= 0 {
-      entries.push({ id: obj.id, offset: obj.offset, crc: obj.crc32 })
-    } else {
-      let id = hash_object_content(obj.obj_type, obj.data)
-      entries.push({ id, offset: 0, crc: 0U })
-    }
+    entries.push({ id: obj.id, offset: obj.offset, crc: obj.crc32 })
   }
   entries.sort_by(fn(a, b) { compare_object_id(a.id, b.id) })
 

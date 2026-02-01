@@ -16,7 +16,14 @@ pub fn parse_packfile_with_bases(
   let by_id : Map[String, PackObject] = {}
   for obj in bases {
     let id = hash_object_content(obj.obj_type, obj.data)
-    by_id[id.to_hex()] = obj
+    let base_obj = PackObject::with_metadata(
+      obj.obj_type,
+      obj.data,
+      id,
+      obj.offset,
+      obj.crc32,
+    )
+    insert_pack_object_by_id(by_id, base_obj)
   }
   parse_packfile_internal(data, by_offset, by_id)
 }
@@ -41,9 +48,33 @@ pub fn parse_packfile_stream_with_bases(
   let by_id : Map[String, PackObject] = {}
   for obj in bases {
     let id = hash_object_content(obj.obj_type, obj.data)
-    by_id[id.to_hex()] = obj
+    let base_obj = PackObject::with_metadata(
+      obj.obj_type,
+      obj.data,
+      id,
+      obj.offset,
+      obj.crc32,
+    )
+    insert_pack_object_by_id(by_id, base_obj)
   }
   parse_packfile_stream_internal(data, by_offset, by_id, emit)
+}
+
+///|
+fn insert_pack_object_by_id(
+  by_id : Map[String, PackObject],
+  obj : PackObject,
+) -> Unit raise GitError {
+  let key = obj.id.to_hex()
+  match by_id.get(key) {
+    Some(existing) =>
+      if existing.obj_type != obj.obj_type ||
+        not(Bytes::equal(existing.data, obj.data)) {
+        raise GitError::PackfileError("SHA1 COLLISION FOUND")
+      }
+    None => ()
+  }
+  by_id[key] = obj
 }
 
 ///|
@@ -154,7 +185,7 @@ fn parse_packfile_internal(
               )
               objects[idx] = obj
               resolved[idx] = true
-              by_id[obj_id.to_hex()] = obj
+              insert_pack_object_by_id(by_id, obj)
             } else {
               pending.push({
                 index: idx,
@@ -205,7 +236,7 @@ fn parse_packfile_internal(
             )
             objects[idx] = obj
             resolved[idx] = true
-            by_id[obj_id.to_hex()] = obj
+            insert_pack_object_by_id(by_id, obj)
           }
           None =>
             pending.push({ index: idx, base: DeltaBaseRef::Ref(base_id), delta })
@@ -230,7 +261,7 @@ fn parse_packfile_internal(
       obj_offsets.push(obj_offset)
       obj_ends.push(after)
       by_offset[obj_offset] = objects.length() - 1
-      by_id[obj_id.to_hex()] = obj
+      insert_pack_object_by_id(by_id, obj)
     }
   }
   let mut progress = true
@@ -258,7 +289,7 @@ fn parse_packfile_internal(
             )
             objects[p.index] = obj
             resolved[p.index] = true
-            by_id[obj_id.to_hex()] = obj
+            insert_pack_object_by_id(by_id, obj)
             progress = true
           } else {
             next_pending.push(p)
@@ -279,7 +310,7 @@ fn parse_packfile_internal(
               )
               objects[p.index] = obj
               resolved[p.index] = true
-              by_id[obj_id.to_hex()] = obj
+              insert_pack_object_by_id(by_id, obj)
               progress = true
             }
             None => next_pending.push(p)
@@ -342,8 +373,7 @@ fn parse_packfile_stream_internal(
         }
         let obj = PackObject::new(obj_type, content)
         by_offset[obj_offset] = obj
-        let obj_id = hash_object_content(obj.obj_type, obj.data)
-        by_id[obj_id.to_hex()] = obj
+        insert_pack_object_by_id(by_id, obj)
         emit(obj)
         offset = after
       }
@@ -366,8 +396,7 @@ fn parse_packfile_stream_internal(
             let content = apply_delta(base.data, delta)
             let obj = PackObject::new(base.obj_type, content)
             by_offset[obj_offset] = obj
-            let obj_id = hash_object_content(obj.obj_type, obj.data)
-            by_id[obj_id.to_hex()] = obj
+            insert_pack_object_by_id(by_id, obj)
             emit(obj)
           }
           None =>
@@ -394,8 +423,7 @@ fn parse_packfile_stream_internal(
             let content = apply_delta(base.data, delta)
             let obj = PackObject::new(base.obj_type, content)
             by_offset[obj_offset] = obj
-            let obj_id = hash_object_content(obj.obj_type, obj.data)
-            by_id[obj_id.to_hex()] = obj
+            insert_pack_object_by_id(by_id, obj)
             emit(obj)
           }
           None =>
@@ -425,8 +453,7 @@ fn parse_packfile_stream_internal(
               let content = apply_delta(base.data, p.delta)
               let obj = PackObject::new(base.obj_type, content)
               by_offset[p.offset] = obj
-              let obj_id = hash_object_content(obj.obj_type, obj.data)
-              by_id[obj_id.to_hex()] = obj
+              insert_pack_object_by_id(by_id, obj)
               emit(obj)
               progress = true
             }
@@ -438,8 +465,7 @@ fn parse_packfile_stream_internal(
               let content = apply_delta(base.data, p.delta)
               let obj = PackObject::new(base.obj_type, content)
               by_offset[p.offset] = obj
-              let obj_id = hash_object_content(obj.obj_type, obj.data)
-              by_id[obj_id.to_hex()] = obj
+              insert_pack_object_by_id(by_id, obj)
               emit(obj)
               progress = true
             }

@@ -105,10 +105,7 @@ async fn handle_hq_get(args : Array[String]) -> Unit {
           branch = Some(args[i])
         }
       _ if arg.has_prefix("-") => ()
-      _ =>
-        if url is None {
-          url = Some(arg)
-        }
+      _ => if url is None { url = Some(arg) }
     }
     i += 1
   }
@@ -147,10 +144,14 @@ async fn handle_hq_get(args : Array[String]) -> Unit {
     return
   }
   // Clone
-  print_line("Cloning \{r.clone_url(ssh=ssh)} to \{contract_path_hq(local_path)}...")
+  print_line(
+    "Cloning \{r.clone_url(ssh=ssh)} to \{contract_path_hq(local_path)}...",
+  )
   // Create parent directories
   let parent = get_parent_dir(local_path)
-  fs.mkdir_p(parent) catch { _ => () }
+  fs.mkdir_p(parent) catch {
+    _ => ()
+  }
   let clone_args : Array[String] = ["clone"]
   if options.shallow {
     clone_args.push("--depth=1")
@@ -166,7 +167,7 @@ async fn handle_hq_get(args : Array[String]) -> Unit {
     }
     None => ()
   }
-  clone_args.push(r.clone_url(ssh=ssh))
+  clone_args.push(r.clone_url(ssh~))
   clone_args.push(local_path)
   let code = @process.run("git", clone_args)
   if code != 0 {
@@ -176,9 +177,14 @@ async fn handle_hq_get(args : Array[String]) -> Unit {
   // Handle sparse checkout
   if r.needs_sparse() {
     let subdir = r.subdir.unwrap_or("")
-    let _ = @process.run("git", ["-C", local_path, "sparse-checkout", "init", "--cone"])
-    let _ = @process.run("git", ["-C", local_path, "sparse-checkout", "set", subdir])
+    let _ = @process.run("git", [
+      "-C", local_path, "sparse-checkout", "init", "--cone",
+    ])
+    let _ = @process.run("git", [
+      "-C", local_path, "sparse-checkout", "set", subdir,
+    ])
     let _ = @process.run("git", ["-C", local_path, "checkout"])
+
   }
   print_line("Cloned to \{contract_path_hq(local_path)}")
 }
@@ -205,7 +211,7 @@ fn list_repos_recursive(
   fs : OsFs,
   root : String,
   rel_path : String,
-  query : String?
+  query : String?,
 ) -> Array[String] {
   let repos : Array[String] = []
   let current = if rel_path.is_empty() { root } else { root + "/" + rel_path }
@@ -226,7 +232,11 @@ fn list_repos_recursive(
     }
     let child_path = current + "/" + entry
     if fs.is_dir(child_path) {
-      let new_rel = if rel_path.is_empty() { entry } else { rel_path + "/" + entry }
+      let new_rel = if rel_path.is_empty() {
+        entry
+      } else {
+        rel_path + "/" + entry
+      }
       let sub_repos = list_repos_recursive(fs, root, new_rel, query)
       for r in sub_repos {
         repos.push(r)
