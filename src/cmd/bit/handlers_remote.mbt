@@ -7,20 +7,30 @@ pub(all) enum GitHubShorthand {
   Repo(String) // github_url
   /// Subdir clone: @user/repo/path → https://github.com/user/repo, path
   Subdir(String, String) // github_url, subdir_path
+  /// Single file fetch: raw URL, filename
+  File(String, String) // raw_url, filename
 } derive(Eq, Show)
 
 ///|
-/// Parse GitHub shorthand: @user/repo or @user/repo/path/to/subdir
-/// Returns None if not a GitHub shorthand (doesn't start with @)
+/// Parse GitHub shorthand or GitHub browser URL
+///
+/// Supports:
+/// 1. @user/repo → Repo clone
+/// 2. @user/repo/path → Subdir clone
+/// 3. https://github.com/user/repo/tree/branch/path → Subdir clone
+/// 4. https://github.com/user/repo/blob/branch/path → Single file fetch
 ///
 /// Examples:
 /// - "@user/repo" → Repo("https://github.com/user/repo")
 /// - "@user/repo/src" → Subdir("https://github.com/user/repo", "src")
-/// - "@user/repo/src/lib" → Subdir("https://github.com/user/repo", "src/lib")
-/// - "https://..." → None (full URL)
-/// - "user/repo" → None (no @ prefix)
+/// - "https://github.com/user/repo/tree/main/src" → Subdir(url, "src")
+/// - "https://github.com/user/repo/blob/main/README.md" → File(raw_url, "README.md")
 pub fn parse_github_shorthand(url : String) -> GitHubShorthand? {
-  // Must start with @
+  // Check for GitHub browser URL first
+  if url.has_prefix("https://github.com/") {
+    return parse_github_browser_url(url)
+  }
+  // Must start with @ for shorthand
   if not(url.has_prefix("@")) {
     return None
   }
@@ -51,6 +61,70 @@ pub fn parse_github_shorthand(url : String) -> GitHubShorthand? {
     let subdir = subdir_parts.join("/")
     Some(Subdir(github_url, subdir))
   }
+}
+
+///|
+/// Parse GitHub browser URL (tree/blob)
+/// https://github.com/user/repo/tree/branch/path → Subdir
+/// https://github.com/user/repo/blob/branch/path → File
+fn parse_github_browser_url(url : String) -> GitHubShorthand? {
+  // Remove https://github.com/
+  let path = String::unsafe_substring(url, start=19, end=url.length())
+  let parts : Array[String] = path
+    .split("/")
+    .filter(fn(s) { s.length() > 0 })
+    .map(fn(s) { s.to_string() })
+    .collect()
+  // Need at least: user/repo/tree|blob/branch/path
+  // parts[0] = user, parts[1] = repo, parts[2] = tree|blob, parts[3] = branch, parts[4+] = path
+  if parts.length() < 5 {
+    return None
+  }
+  let owner = parts[0]
+  let repo = parts[1]
+  let kind = parts[2] // "tree" or "blob"
+  let branch = parts[3]
+  // Build path from remaining parts
+  let path_parts : Array[String] = []
+  for i = 4; i < parts.length(); i = i + 1 {
+    path_parts.push(parts[i])
+  }
+  let subpath = path_parts.join("/")
+  let github_url = "https://github.com/\{owner}/\{repo}"
+  if kind == "tree" {
+    // Directory → subdir clone
+    Some(Subdir(github_url, subpath))
+  } else if kind == "blob" {
+    // File → raw fetch
+    let raw_url = "https://raw.githubusercontent.com/\{owner}/\{repo}/\{branch}/\{subpath}"
+    let filename = parts[parts.length() - 1]
+    Some(File(raw_url, filename))
+  } else {
+    None
+  }
+}
+
+///|
+/// Fetch a raw file from URL and save to local path
+async fn fetch_raw_file(url : String, target : String) -> Unit raise Error {
+  let root = get_work_root()
+  let target_path = if target.has_prefix("/") {
+    target
+  } else {
+    root + "/" + target
+  }
+  // Use HTTP fetch
+  let headers : Map[String, String] = {}
+  let (response, content) = @git.native_http_get(url, headers)
+  if response.code != 200 {
+    raise @git.GitError::InvalidObject(
+      "HTTP \{response.code}: failed to fetch \{url}",
+    )
+  }
+  // Write to file
+  let fs = OsFs::new()
+  fs.write_file(target_path, content)
+  print_line("Saved to '\{target}'")
 }
 
 ///|
@@ -487,7 +561,7 @@ async fn handle_clone(args : Array[String]) -> Unit raise Error {
   guard url is Some(remote_url) else {
     raise @git.GitError::InvalidObject("repository URL required")
   }
-  // Check for GitHub shorthand (@user/repo or @user/repo/path)
+  // Check for GitHub shorthand (@user/repo, @user/repo/path, or browser URL)
   match parse_github_shorthand(remote_url) {
     Some(Repo(github_url)) => {
       // @user/repo → normal clone from GitHub
@@ -495,14 +569,23 @@ async fn handle_clone(args : Array[String]) -> Unit raise Error {
       url = Some(github_url)
     }
     Some(Subdir(github_url, subdir)) => {
-      // @user/repo/path → subdir clone
+      // @user/repo/path or /tree/ URL → subdir clone
       let subdir_args : Array[String] = [github_url, subdir]
       match dest {
         Some(d) => subdir_args.push(d)
         None => ()
       }
-      print_line("GitHub subdir shorthand: \{github_url} → \{subdir}")
+      print_line("GitHub subdir: \{github_url} → \{subdir}")
       return handle_subdir_clone(subdir_args)
+    }
+    Some(File(raw_url, filename)) => {
+      // /blob/ URL → single file fetch
+      let target_file = match dest {
+        Some(d) => d
+        None => filename
+      }
+      print_line("Fetching file: \{raw_url}")
+      return fetch_raw_file(raw_url, target_file)
     }
     None => ()
   }

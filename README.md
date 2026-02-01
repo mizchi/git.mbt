@@ -59,7 +59,7 @@ bit push origin feature
 
 ### 4. GitHub Shorthand
 
-Clone from GitHub using `@user/repo` shorthand:
+Clone from GitHub using `@user/repo` shorthand or paste browser URLs directly:
 
 ```bash
 # Clone full repository
@@ -68,11 +68,17 @@ bit clone @mizchi/bit
 # Clone subdirectory only
 bit clone @mizchi/bit/src/x/bitfs
 
+# Paste GitHub browser URL directly (directory)
+bit clone https://github.com/mizchi/crater/tree/main/js
+
+# Paste GitHub browser URL (single file → downloads raw file)
+bit clone https://github.com/mizchi/crater/blob/main/README.md
+
 # With custom destination
 bit clone @mizchi/bit/src/x/bitfs mybitfs
 ```
 
-The `@` prefix distinguishes GitHub shorthand from local paths.
+The `@` prefix distinguishes shorthand from local paths. Browser URLs with `/tree/` clone subdirectories, `/blob/` downloads single files.
 
 ### 5. Subdir - Work with Subdirectories as Independent Repos
 

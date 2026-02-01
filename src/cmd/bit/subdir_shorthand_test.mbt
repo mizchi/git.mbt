@@ -1,5 +1,74 @@
-///| Tests for GitHub shorthand parsing (@user/repo and @user/repo/path)
-///| Verifies that the shorthand doesn't conflict with existing git URL patterns
+///| Tests for GitHub shorthand parsing
+///| Supports: @user/repo, @user/repo/path, and GitHub browser URLs
+
+// ============================================================================
+// Tests for GitHub browser URLs (tree/blob)
+// ============================================================================
+
+///|
+test "github URL: /tree/ directory" {
+  let result = parse_github_shorthand(
+    "https://github.com/mizchi/crater/tree/main/js",
+  )
+  assert_eq(result, Some(Subdir("https://github.com/mizchi/crater", "js")))
+}
+
+///|
+test "github URL: /tree/ nested directory" {
+  let result = parse_github_shorthand(
+    "https://github.com/user/repo/tree/main/src/lib/core",
+  )
+  assert_eq(result, Some(Subdir("https://github.com/user/repo", "src/lib/core")))
+}
+
+///|
+test "github URL: /tree/ with branch name" {
+  let result = parse_github_shorthand(
+    "https://github.com/user/repo/tree/feature/auth/src",
+  )
+  // branch is "feature", path starts from "auth/src" - this is a limitation
+  // For now, we treat everything after tree/X as path where X is branch
+  assert_eq(result, Some(Subdir("https://github.com/user/repo", "auth/src")))
+}
+
+///|
+test "github URL: /blob/ file" {
+  let result = parse_github_shorthand(
+    "https://github.com/mizchi/crater/blob/main/README.md",
+  )
+  assert_eq(
+    result,
+    Some(
+      File(
+        "https://raw.githubusercontent.com/mizchi/crater/main/README.md",
+        "README.md",
+      ),
+    ),
+  )
+}
+
+///|
+test "github URL: /blob/ nested file" {
+  let result = parse_github_shorthand(
+    "https://github.com/user/repo/blob/main/src/lib/index.ts",
+  )
+  assert_eq(
+    result,
+    Some(
+      File(
+        "https://raw.githubusercontent.com/user/repo/main/src/lib/index.ts",
+        "index.ts",
+      ),
+    ),
+  )
+}
+
+///|
+test "github URL: repo root (no tree/blob)" {
+  // https://github.com/user/repo without tree/blob should not match
+  let result = parse_github_shorthand("https://github.com/user/repo")
+  assert_eq(result, None)
+}
 
 // ============================================================================
 // Tests for @user/repo (full repo clone)
