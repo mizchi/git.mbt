@@ -3,9 +3,9 @@
 ///
 /// Supported formats:
 /// - user/repo
-/// - user/repo/path/to/subdir
+/// - user/repo:path/to/subdir (colon separator for subdir)
 /// - github.com/user/repo
-/// - github.com/user/repo/path/to/subdir
+/// - github.com/user/repo:path/to/subdir
 /// - gitlab.com/user/repo
 /// - https://github.com/user/repo
 /// - https://github.com/user/repo/tree/main/path/to/subdir
@@ -110,10 +110,20 @@ fn parse_https_url(input : String) -> RepoPath? {
 ///|
 fn parse_shorthand(input : String) -> RepoPath? {
   // user/repo
-  // user/repo/path/to/subdir
+  // user/repo:path/to/subdir (colon separator for subdir)
   // github.com/user/repo
-  // gitlab.com/user/repo/path
-  let parts = input.split("/").collect()
+  // gitlab.com/user/repo:path
+
+  // Check for subdir separator ':'
+  let (repo_part, subdir) = match find_char(input, ':') {
+    Some(idx) => {
+      let rp = slice_to(input, idx)
+      let sd = slice_from(input, idx + 1)
+      (rp, if sd.is_empty() { None } else { Some(sd) })
+    }
+    None => (input, None)
+  }
+  let parts = repo_part.split("/").collect()
   if parts.length() < 2 {
     return None
   }
@@ -127,11 +137,6 @@ fn parse_shorthand(input : String) -> RepoPath? {
     let host = first
     let user = parts[1].to_string()
     let repo = parts[2].to_string()
-    let subdir : String? = if parts.length() > 3 {
-      Some(join_parts(parts, 3, parts.length()))
-    } else {
-      None
-    }
     // Normalize github.com
     let normalized_host : String? = if host == "github.com" {
       None
@@ -143,11 +148,6 @@ fn parse_shorthand(input : String) -> RepoPath? {
     // user/repo format (github.com implicit)
     let user = parts[0].to_string()
     let repo = parts[1].to_string()
-    let subdir : String? = if parts.length() > 2 {
-      Some(join_parts(parts, 2, parts.length()))
-    } else {
-      None
-    }
     Some(RepoPath::new(user, repo, subdir~))
   }
 }

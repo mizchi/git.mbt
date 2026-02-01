@@ -7,8 +7,8 @@ test "RepoPath::parse: user/repo shorthand" {
 }
 
 ///|
-test "RepoPath::parse: user/repo/subdir shorthand" {
-  let result = parse_repo_url("mizchi/monorepo/packages/core")
+test "RepoPath::parse: user/repo:subdir shorthand" {
+  let result = parse_repo_url("mizchi/monorepo:packages/core")
   let expected =
     #|Some({host: None, user: "mizchi", repo: "monorepo", subdir: Some("packages/core")})
   inspect(result, content=expected)
@@ -93,13 +93,19 @@ test "RepoPath::clone_url: other host" {
 ///|
 test "RepoPath::local_path: github.com normalized" {
   let repo = RepoPath::new("mizchi", "git")
-  inspect(repo.local_path("/home/user/bhq"), content="/home/user/bhq/mizchi/git")
+  inspect(
+    repo.local_path("/home/user/bhq"),
+    content="/home/user/bhq/mizchi/git",
+  )
 }
 
 ///|
 test "RepoPath::local_path: explicit github.com also normalized" {
   let repo = parse_repo_url("github.com/mizchi/git").unwrap()
-  inspect(repo.local_path("/home/user/bhq"), content="/home/user/bhq/mizchi/git")
+  inspect(
+    repo.local_path("/home/user/bhq"),
+    content="/home/user/bhq/mizchi/git",
+  )
 }
 
 ///|

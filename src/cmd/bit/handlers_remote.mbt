@@ -1,66 +1,123 @@
 ///| Remote operation handlers: remote, upload-pack, receive-pack, fetch, pull, push, clone
 
 ///|
-/// GitHub shorthand result
+/// Clone target result
 pub(all) enum GitHubShorthand {
-  /// Full repo clone: @user/repo → https://github.com/user/repo
+  /// Full repo clone: user/repo → https://github.com/user/repo
   Repo(String) // github_url
-  /// Subdir clone: @user/repo/path → https://github.com/user/repo, path
+  /// Subdir clone: user/repo:path → https://github.com/user/repo, path
   Subdir(String, String) // github_url, subdir_path
   /// Single file fetch: raw URL, filename
   File(String, String) // raw_url, filename
 } derive(Eq, Show)
 
 ///|
-/// Parse GitHub shorthand or GitHub browser URL
+/// Parse clone shorthand or GitHub browser URL
 ///
 /// Supports:
-/// 1. @user/repo → Repo clone
-/// 2. @user/repo/path → Subdir clone
-/// 3. https://github.com/user/repo/tree/branch/path → Subdir clone
-/// 4. https://github.com/user/repo/blob/branch/path → Single file fetch
+/// 1. user/repo → Repo clone (GitHub)
+/// 2. user/repo:path → Subdir clone with sparse checkout
+/// 3. gitlab.com/user/repo → Repo clone (other hosts)
+/// 4. gitlab.com/user/repo:path → Subdir clone (other hosts)
+/// 5. https://github.com/user/repo/tree/branch/path → Subdir clone
+/// 6. https://github.com/user/repo/blob/branch/path → Single file fetch
 ///
 /// Examples:
-/// - "@user/repo" → Repo("https://github.com/user/repo")
-/// - "@user/repo/src" → Subdir("https://github.com/user/repo", "src")
+/// - "user/repo" → Repo("https://github.com/user/repo")
+/// - "user/repo:src" → Subdir("https://github.com/user/repo", "src")
+/// - "gitlab.com/user/repo" → Repo("https://gitlab.com/user/repo")
 /// - "https://github.com/user/repo/tree/main/src" → Subdir(url, "src")
-/// - "https://github.com/user/repo/blob/main/README.md" → File(raw_url, "README.md")
 pub fn parse_github_shorthand(url : String) -> GitHubShorthand? {
   // Check for GitHub browser URL first
   if url.has_prefix("https://github.com/") {
     return parse_github_browser_url(url)
   }
-  // Must start with @ for shorthand
-  if not(url.has_prefix("@")) {
+  // Skip if it looks like a local path or full URL
+  if url.has_prefix("./") ||
+    url.has_prefix("/") ||
+    url.has_prefix("../") ||
+    url.has_prefix("https://") ||
+    url.has_prefix("http://") ||
+    url.has_prefix("git@") ||
+    url.has_suffix(".git") {
     return None
   }
-  // Remove @ prefix
-  let path = String::unsafe_substring(url, start=1, end=url.length())
-  // Split into parts
-  let parts : Array[String] = path
+  // Check for subdir separator ':'
+  let (repo_part, subdir) = match url.find(":") {
+    Some(idx) => {
+      let rp = String::unsafe_substring(url, start=0, end=idx)
+      let sd = String::unsafe_substring(url, start=idx + 1, end=url.length())
+      (rp, if sd.is_empty() { None } else { Some(sd) })
+    }
+    None => (url, None)
+  }
+  // Split repo part by /
+  let parts : Array[String] = repo_part
     .split("/")
     .filter(fn(s) { s.length() > 0 })
     .map(fn(s) { s.to_string() })
     .collect()
-  // Need at least 2 components: user/repo
-  if parts.length() < 2 {
+  // Determine host and user/repo
+  let (host, owner, repo) = if parts.length() == 2 {
+    // user/repo → GitHub
+    ("github.com", parts[0], parts[1])
+  } else if parts.length() == 3 && parts[0].contains(".") {
+    // host.com/user/repo
+    (parts[0], parts[1], parts[2])
+  } else {
     return None
   }
-  let owner = parts[0]
-  let repo = parts[1]
-  let github_url = "https://github.com/\{owner}/\{repo}"
-  if parts.length() == 2 {
-    // Just @user/repo → full repo clone
-    Some(Repo(github_url))
-  } else {
-    // @user/repo/path → subdir clone
-    let subdir_parts : Array[String] = []
-    for j = 2; j < parts.length(); j = j + 1 {
-      subdir_parts.push(parts[j])
-    }
-    let subdir = subdir_parts.join("/")
-    Some(Subdir(github_url, subdir))
+  let clone_url = "https://\{host}/\{owner}/\{repo}"
+  match subdir {
+    Some(sd) => Some(Subdir(clone_url, sd))
+    None => Some(Repo(clone_url))
   }
+}
+
+///|
+/// Check if shorthand conflicts with local directory
+/// Returns the conflicting path if ambiguous
+pub fn check_shorthand_ambiguity(
+  url : String,
+  dir_exists : (String) -> Bool,
+) -> String? {
+  // Only check for shorthand patterns (not full URLs)
+  if url.has_prefix("https://") ||
+    url.has_prefix("http://") ||
+    url.has_prefix("git@") ||
+    url.has_prefix("./") ||
+    url.has_prefix("/") ||
+    url.has_prefix("../") ||
+    url.has_suffix(".git") {
+    return None
+  }
+  // Extract repo part (before ':' if present)
+  let repo_part = match url.find(":") {
+    Some(idx) => String::unsafe_substring(url, start=0, end=idx)
+    None => url
+  }
+  // Check first component
+  let first_slash = repo_part.find("/")
+  let first_part = match first_slash {
+    Some(idx) => String::unsafe_substring(repo_part, start=0, end=idx)
+    None => repo_part
+  }
+  if dir_exists(first_part) {
+    return Some(first_part)
+  }
+  // Check full repo path (user/repo part)
+  let parts : Array[String] = repo_part
+    .split("/")
+    .filter(fn(s) { s.length() > 0 })
+    .map(fn(s) { s.to_string() })
+    .collect()
+  if parts.length() >= 2 {
+    let two_parts = parts[0] + "/" + parts[1]
+    if dir_exists(two_parts) {
+      return Some(two_parts)
+    }
+  }
+  None
 }
 
 ///|
@@ -561,21 +618,30 @@ async fn handle_clone(args : Array[String]) -> Unit raise Error {
   guard url is Some(remote_url) else {
     raise @git.GitError::InvalidObject("repository URL required")
   }
-  // Check for GitHub shorthand (@user/repo, @user/repo/path, or browser URL)
+  // Check for ambiguity with local directories
+  let fs = OsFs::new()
+  match check_shorthand_ambiguity(remote_url, fn(p) { fs.is_dir(p) }) {
+    Some(conflict_path) =>
+      raise @git.GitError::InvalidObject(
+        "Ambiguous: '\{conflict_path}' exists locally. Use full URL or ./\{remote_url} for local path.",
+      )
+    None => ()
+  }
+  // Check for shorthand (user/repo, user/repo:path, or browser URL)
   match parse_github_shorthand(remote_url) {
     Some(Repo(github_url)) => {
-      // @user/repo → normal clone from GitHub
-      print_line("GitHub shorthand: \{github_url}")
+      // user/repo → normal clone from GitHub
+      print_line("Shorthand: \{github_url}")
       url = Some(github_url)
     }
     Some(Subdir(github_url, subdir)) => {
-      // @user/repo/path or /tree/ URL → subdir clone
+      // user/repo:path or /tree/ URL → subdir clone
       let subdir_args : Array[String] = [github_url, subdir]
       match dest {
         Some(d) => subdir_args.push(d)
         None => ()
       }
-      print_line("GitHub subdir: \{github_url} → \{subdir}")
+      print_line("Subdir clone: \{github_url} → \{subdir}")
       return handle_subdir_clone(subdir_args)
     }
     Some(File(raw_url, filename)) => {
@@ -795,7 +861,9 @@ async fn handle_push(args : Array[String]) -> Unit raise Error {
       print_line("  Subdirectory: \{subdir_path}")
       handle_subdir_push(
         fs, root, git_dir, remote_url, subdir_path, base_hex, refname, force,
-      ) catch { err => raise err }
+      ) catch {
+        err => raise err
+      }
     }
     None => {
       print_line("Pushing to \{url}...")
@@ -839,7 +907,9 @@ async fn handle_subdir_push(
   // Step 3: Collect local commits since initial
   let local_commits = collect_commits_since(
     fs, git_dir, initial_commit, local_head,
-  ) catch { err => raise err }
+  ) catch {
+    err => raise err
+  }
   if local_commits.length() == 0 {
     print_line("Nothing to push.")
     return
@@ -862,7 +932,9 @@ async fn handle_subdir_push(
   for commit_id in local_commits {
     let new_commit = transform_subdir_commit(
       fs, db, git_dir, commit_id, parent, subdir_path,
-    ) catch { err => raise err }
+    ) catch {
+      err => raise err
+    }
     print_line("  Transformed: \{commit_id.to_hex()} -> \{new_commit.to_hex()}")
     parent = new_commit
   }
@@ -896,9 +968,7 @@ fn find_initial_subdir_commit(
   let mut prev : @git.ObjectId = current
   while true {
     let obj = db.get(fs, current)
-    guard obj is Some(o) else {
-      break
-    }
+    guard obj is Some(o) else { break }
     let info = @git.parse_commit(o.data) catch { _ => break }
     if info.parents.length() == 0 {
       // Found root commit
@@ -968,8 +1038,15 @@ fn transform_subdir_commit(
   let new_subdir_tree = local_info.tree
   // Replace the subdirectory in the upstream tree
   let new_root_tree = replace_tree_at_path(
-    fs, db, git_dir, upstream_info.tree, subdir_path, new_subdir_tree,
-  ) catch { err => raise err }
+    fs,
+    db,
+    git_dir,
+    upstream_info.tree,
+    subdir_path,
+    new_subdir_tree,
+  ) catch {
+    err => raise err
+  }
   // Create new commit with the transformed tree
   let timestamp = get_current_timestamp()
   let new_commit = @subdir.create_commit_in_repo(
@@ -1031,8 +1108,16 @@ fn replace_tree_recursive_push(
       } else {
         // Recurse
         let new_child = replace_tree_recursive_push(
-          fs, db, git_dir, entry.id, path_parts, depth + 1, new_leaf,
-        ) catch { err => raise err }
+          fs,
+          db,
+          git_dir,
+          entry.id,
+          path_parts,
+          depth + 1,
+          new_leaf,
+        ) catch {
+          err => raise err
+        }
         new_entries.push(@git.TreeEntry::new(entry.mode, entry.name, new_child))
       }
     } else {
@@ -1061,7 +1146,9 @@ fn write_object_to_repo(
   let dir_path = git_dir + "/objects/" + dir_name
   let file_path = dir_path + "/" + file_name
   // Create directory if needed
-  fs.mkdir_p(dir_path) catch { _ => () }
+  fs.mkdir_p(dir_path) catch {
+    _ => ()
+  }
   // Write already-compressed data
   fs.write_file(file_path, compressed_data) catch {
     _ => raise @git.GitError::IoError("Cannot write object")

@@ -6,6 +6,8 @@ import {
 }
 
 // Values
+pub fn check_shorthand_ambiguity(String, (String) -> Bool) -> String?
+
 pub fn get_current_timestamp() -> Int64
 
 pub fn get_effective_remote_url(OsFs, String) -> String?

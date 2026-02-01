@@ -8,6 +8,8 @@ pub fn contract_home(String, String) -> String
 
 pub fn expand_home(String) -> String
 
+pub fn expand_home_with(String, String) -> String
+
 pub fn hq_get(RepoPath, HqConfig, HqGetOptions, (String) -> (Int, String, String), (String) -> Bool) -> HqGetResult
 
 pub fn hq_list(HqConfig, String?, (String) -> Array[(String, Bool)], (String) -> Bool) -> Array[String]

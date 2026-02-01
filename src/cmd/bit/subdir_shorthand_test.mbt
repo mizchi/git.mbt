@@ -1,5 +1,6 @@
-///| Tests for GitHub shorthand parsing
-///| Supports: @user/repo, @user/repo/path, and GitHub browser URLs
+///| Tests for clone shorthand parsing
+
+///| Supports: user/repo, user/repo:path, host/user/repo, and GitHub browser URLs
 
 // ============================================================================
 // Tests for GitHub browser URLs (tree/blob)
@@ -18,7 +19,10 @@ test "github URL: /tree/ nested directory" {
   let result = parse_github_shorthand(
     "https://github.com/user/repo/tree/main/src/lib/core",
   )
-  assert_eq(result, Some(Subdir("https://github.com/user/repo", "src/lib/core")))
+  assert_eq(
+    result,
+    Some(Subdir("https://github.com/user/repo", "src/lib/core")),
+  )
 }
 
 ///|
@@ -40,8 +44,7 @@ test "github URL: /blob/ file" {
     result,
     Some(
       File(
-        "https://raw.githubusercontent.com/mizchi/crater/main/README.md",
-        "README.md",
+        "https://raw.githubusercontent.com/mizchi/crater/main/README.md", "README.md",
       ),
     ),
   )
@@ -56,8 +59,7 @@ test "github URL: /blob/ nested file" {
     result,
     Some(
       File(
-        "https://raw.githubusercontent.com/user/repo/main/src/lib/index.ts",
-        "index.ts",
+        "https://raw.githubusercontent.com/user/repo/main/src/lib/index.ts", "index.ts",
       ),
     ),
   )
@@ -71,41 +73,69 @@ test "github URL: repo root (no tree/blob)" {
 }
 
 // ============================================================================
-// Tests for @user/repo (full repo clone)
+// Tests for user/repo (full repo clone)
 // ============================================================================
 
 ///|
-test "github shorthand: @user/repo" {
-  let result = parse_github_shorthand("@user/repo")
+test "shorthand: user/repo" {
+  let result = parse_github_shorthand("user/repo")
   assert_eq(result, Some(Repo("https://github.com/user/repo")))
 }
 
 ///|
-test "github shorthand: @mizchi/bit" {
-  let result = parse_github_shorthand("@mizchi/bit")
+test "shorthand: mizchi/bit" {
+  let result = parse_github_shorthand("mizchi/bit")
   assert_eq(result, Some(Repo("https://github.com/mizchi/bit")))
 }
 
 // ============================================================================
-// Tests for @user/repo/path (subdir clone)
+// Tests for user/repo:path (subdir clone with colon separator)
 // ============================================================================
 
 ///|
-test "github shorthand: @user/repo/src" {
-  let result = parse_github_shorthand("@user/repo/src")
+test "shorthand: user/repo:src" {
+  let result = parse_github_shorthand("user/repo:src")
   assert_eq(result, Some(Subdir("https://github.com/user/repo", "src")))
 }
 
 ///|
-test "github shorthand: @user/repo/src/lib/core (deep path)" {
-  let result = parse_github_shorthand("@user/repo/src/lib/core")
-  assert_eq(result, Some(Subdir("https://github.com/user/repo", "src/lib/core")))
+test "shorthand: user/repo:src/lib/core (deep path)" {
+  let result = parse_github_shorthand("user/repo:src/lib/core")
+  assert_eq(
+    result,
+    Some(Subdir("https://github.com/user/repo", "src/lib/core")),
+  )
 }
 
 ///|
-test "github shorthand: @mizchi/bit/src/x/bitfs" {
-  let result = parse_github_shorthand("@mizchi/bit/src/x/bitfs")
-  assert_eq(result, Some(Subdir("https://github.com/mizchi/bit", "src/x/bitfs")))
+test "shorthand: mizchi/bit:src/x/bitfs" {
+  let result = parse_github_shorthand("mizchi/bit:src/x/bitfs")
+  assert_eq(
+    result,
+    Some(Subdir("https://github.com/mizchi/bit", "src/x/bitfs")),
+  )
+}
+
+// ============================================================================
+// Tests for host/user/repo (other Git hosts)
+// ============================================================================
+
+///|
+test "shorthand: gitlab.com/user/repo" {
+  let result = parse_github_shorthand("gitlab.com/user/repo")
+  assert_eq(result, Some(Repo("https://gitlab.com/user/repo")))
+}
+
+///|
+test "shorthand: gitlab.com/user/repo:src" {
+  let result = parse_github_shorthand("gitlab.com/user/repo:src")
+  assert_eq(result, Some(Subdir("https://gitlab.com/user/repo", "src")))
+}
+
+///|
+test "shorthand: bitbucket.org/user/repo" {
+  let result = parse_github_shorthand("bitbucket.org/user/repo")
+  assert_eq(result, Some(Repo("https://bitbucket.org/user/repo")))
 }
 
 // ============================================================================
@@ -114,7 +144,7 @@ test "github shorthand: @mizchi/bit/src/x/bitfs" {
 
 ///|
 test "NOT shorthand: full HTTPS URL" {
-  let result = parse_github_shorthand("https://github.com/user/repo")
+  let result = parse_github_shorthand("https://gitlab.com/user/repo")
   assert_eq(result, None)
 }
 
@@ -125,19 +155,7 @@ test "NOT shorthand: SSH URL" {
 }
 
 ///|
-test "NOT shorthand: plain user/repo (no @ prefix)" {
-  let result = parse_github_shorthand("user/repo")
-  assert_eq(result, None)
-}
-
-///|
-test "NOT shorthand: plain user/repo/path (no @ prefix)" {
-  let result = parse_github_shorthand("user/repo/path")
-  assert_eq(result, None)
-}
-
-///|
-test "NOT shorthand: local path" {
+test "NOT shorthand: local path ./" {
   let result = parse_github_shorthand("./local/repo/path")
   assert_eq(result, None)
 }
@@ -154,36 +172,114 @@ test "NOT shorthand: URL with .git suffix" {
   assert_eq(result, None)
 }
 
+///|
+test "NOT shorthand: parent path ../" {
+  let result = parse_github_shorthand("../other/repo")
+  assert_eq(result, None)
+}
+
 // ============================================================================
 // Edge cases
 // ============================================================================
 
 ///|
-test "NOT shorthand: @ only" {
-  let result = parse_github_shorthand("@")
+test "NOT shorthand: single component" {
+  let result = parse_github_shorthand("user")
   assert_eq(result, None)
 }
 
 ///|
-test "NOT shorthand: @user only (single component)" {
-  let result = parse_github_shorthand("@user")
+test "NOT shorthand: empty string" {
+  let result = parse_github_shorthand("")
   assert_eq(result, None)
 }
 
 ///|
-test "github shorthand: trailing slash @user/repo/" {
-  let result = parse_github_shorthand("@user/repo/")
+test "shorthand: trailing slash user/repo/" {
+  let result = parse_github_shorthand("user/repo/")
+  // Trailing slash means 3 parts but third is empty, so only 2 valid parts
   assert_eq(result, Some(Repo("https://github.com/user/repo")))
 }
 
 ///|
-test "github shorthand: trailing slash @user/repo/src/" {
-  let result = parse_github_shorthand("@user/repo/src/")
-  assert_eq(result, Some(Subdir("https://github.com/user/repo", "src")))
+test "shorthand: colon with empty subdir user/repo:" {
+  let result = parse_github_shorthand("user/repo:")
+  // Empty subdir after colon → treated as full repo
+  assert_eq(result, Some(Repo("https://github.com/user/repo")))
+}
+
+// ============================================================================
+// Ambiguity check tests
+// ============================================================================
+
+///|
+test "ambiguity: no conflict" {
+  fn no_dirs(_path : String) -> Bool {
+    false
+  }
+
+  let result = check_shorthand_ambiguity("user/repo", no_dirs)
+  assert_eq(result, None)
 }
 
 ///|
-test "github shorthand: multiple slashes @user/repo//src" {
-  let result = parse_github_shorthand("@user/repo//src")
-  assert_eq(result, Some(Subdir("https://github.com/user/repo", "src")))
+test "ambiguity: first component exists" {
+  fn user_exists(path : String) -> Bool {
+    path == "user"
+  }
+
+  let result = check_shorthand_ambiguity("user/repo", user_exists)
+  assert_eq(result, Some("user"))
+}
+
+///|
+test "ambiguity: full path exists" {
+  fn path_exists(path : String) -> Bool {
+    path == "user/repo"
+  }
+
+  let result = check_shorthand_ambiguity("user/repo", path_exists)
+  assert_eq(result, Some("user/repo"))
+}
+
+///|
+test "ambiguity: not checked for full URL" {
+  fn always_exists(_path : String) -> Bool {
+    true
+  }
+
+  let result = check_shorthand_ambiguity(
+    "https://github.com/user/repo", always_exists,
+  )
+  assert_eq(result, None)
+}
+
+///|
+test "ambiguity: not checked for .git suffix" {
+  fn always_exists(_path : String) -> Bool {
+    true
+  }
+
+  let result = check_shorthand_ambiguity("user/repo.git", always_exists)
+  assert_eq(result, None)
+}
+
+///|
+test "ambiguity: checked for subdir shorthand" {
+  fn user_exists(path : String) -> Bool {
+    path == "user"
+  }
+
+  let result = check_shorthand_ambiguity("user/repo:src/lib", user_exists)
+  assert_eq(result, Some("user"))
+}
+
+///|
+test "ambiguity: not checked for local path" {
+  fn always_exists(_path : String) -> Bool {
+    true
+  }
+
+  let result = check_shorthand_ambiguity("./user/repo", always_exists)
+  assert_eq(result, None)
 }
