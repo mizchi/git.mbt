@@ -1,5 +1,12 @@
 # moonbit-git
 
+> **DEPRECATED**: This package has been renamed to [`mizchi/bit`](https://mooncakes.io/docs/#/mizchi/bit/). Please use `mizchi/bit` instead.
+>
+> ```bash
+> moon remove mizchi/git
+> moon add mizchi/bit
+> ```
+
 **Git as a library** - A Git implementation in [MoonBit](https://docs.moonbitlang.com) that you can embed, extend, and use programmatically.
 
 ## Why moonbit-git?

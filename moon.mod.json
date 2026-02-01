@@ -1,6 +1,7 @@
 {
   "name": "mizchi/git",
-  "version": "0.1.2",
+  "version": "0.2.0",
+  "deprecated": "This package has been renamed to mizchi/bit. Please use mizchi/bit instead.",
   "deps": {
     "moonbitlang/async": "0.16.2",
     "mizchi/zlib": "0.3.0",
