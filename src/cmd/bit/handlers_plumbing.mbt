@@ -1136,10 +1136,7 @@ fn midx_read_pack_index(
 }
 
 ///|
-fn midx_build(
-  pack_files : Array[String],
-  entries : Array[MidxEntry],
-) -> Bytes {
+fn midx_build(pack_files : Array[String], entries : Array[MidxEntry]) -> Bytes {
   let out : Array[Byte] = []
   // Header
   out.push(b'M')

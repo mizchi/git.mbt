@@ -12,14 +12,14 @@ let default_bhq_root : String = "~/bhq"
 pub fn load_config(
   env_get : (String) -> String?,
   git_config_get : (String) -> String?,
-  ghq_compat~ : Bool = false
+  ghq_compat? : Bool = false,
 ) -> HqConfig {
   let home = env_get("HOME").unwrap_or("/home/user")
   // Check BHQ_ROOT environment variable first
   match env_get("BHQ_ROOT") {
     Some(root) if not(root.is_empty()) =>
       HqConfig::new(expand_home_with(root, home))
-    _ => {
+    _ =>
       // If ghq_compat mode, check ghq.root
       if ghq_compat {
         match git_config_get("ghq.root") {
@@ -30,7 +30,6 @@ pub fn load_config(
       } else {
         HqConfig::new(expand_home_with(default_bhq_root, home))
       }
-    }
   }
 }
 

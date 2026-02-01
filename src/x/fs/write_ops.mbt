@@ -11,11 +11,7 @@ pub fn Fs::write_file(self : Fs, path : String, content : Bytes) -> Unit {
 }
 
 ///|
-pub fn Fs::write_string(
-  self : Fs,
-  path : String,
-  content : String,
-) -> Unit {
+pub fn Fs::write_string(self : Fs, path : String, content : String) -> Unit {
   let bytes = string_to_bytes(content)
   self.write_file(path, bytes)
 }

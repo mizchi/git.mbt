@@ -145,10 +145,7 @@ pub fn Fs::get_promisor_db(
 
 ///|
 /// Check if this Fs is backed by a partial clone with promisor remote
-pub fn Fs::has_promisor(
-  self : Fs,
-  backing_fs : &@git.RepoFileSystem,
-) -> Bool {
+pub fn Fs::has_promisor(self : Fs, backing_fs : &@git.RepoFileSystem) -> Bool {
   if not(self.config.enable_promisor) {
     return false
   }

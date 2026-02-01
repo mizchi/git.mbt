@@ -420,7 +420,9 @@ pub fn create_commit_in_repo(
   author : String,
   timestamp : Int64,
 ) -> @git.ObjectId raise SubdirError {
-  create_commit_object(fs, git_dir, tree_id, parent_id, message, author, timestamp)
+  create_commit_object(
+    fs, git_dir, tree_id, parent_id, message, author, timestamp,
+  )
 }
 
 ///|

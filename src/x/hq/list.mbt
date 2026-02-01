@@ -6,7 +6,7 @@ pub fn hq_list(
   /// List directories at path, returns (name, is_dir)
   list_dir : (String) -> Array[(String, Bool)],
   /// Check if path is a git repository
-  is_git_repo : (String) -> Bool
+  is_git_repo : (String) -> Bool,
 ) -> Array[String] {
   let repos : Array[String] = []
   scan_repos(config.root, "", list_dir, is_git_repo, repos)
@@ -23,7 +23,7 @@ fn scan_repos(
   rel_path : String,
   list_dir : (String) -> Array[(String, Bool)],
   is_git_repo : (String) -> Bool,
-  repos : Array[String]
+  repos : Array[String],
 ) -> Unit {
   let current_path = if rel_path.is_empty() {
     root
@@ -56,11 +56,11 @@ pub fn hq_list_full_paths(
   config : HqConfig,
   query : String?,
   list_dir : (String) -> Array[(String, Bool)],
-  is_git_repo : (String) -> Bool
+  is_git_repo : (String) -> Bool,
 ) -> Array[String] {
-  hq_list(config, query, list_dir, is_git_repo).map(
-    fn(rel) { "\{config.root}/\{rel}" },
-  )
+  hq_list(config, query, list_dir, is_git_repo).map(fn(rel) {
+    "\{config.root}/\{rel}"
+  })
 }
 
 ///|
@@ -76,7 +76,13 @@ pub fn parse_repo_path(rel_path : String) -> RepoPath? {
     } else {
       Some(host)
     }
-    Some(RepoPath::new(parts[1].to_string(), parts[2].to_string(), host=normalized_host))
+    Some(
+      RepoPath::new(
+        parts[1].to_string(),
+        parts[2].to_string(),
+        host=normalized_host,
+      ),
+    )
   } else if parts.length() >= 2 {
     // user/repo (github.com implicit)
     Some(RepoPath::new(parts[0].to_string(), parts[1].to_string()))

@@ -2,11 +2,7 @@
 
 ///|
 /// Create a new Kv from an existing BitFs
-pub fn Kv::new(
-  node_id : NodeId,
-  bitfs : @fs.Fs,
-  head : @git.ObjectId,
-) -> Kv {
+pub fn Kv::new(node_id : NodeId, bitfs : @fs.Fs, head : @git.ObjectId) -> Kv {
   {
     node_id,
     bitfs,

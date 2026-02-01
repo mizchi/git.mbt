@@ -65,21 +65,22 @@ async fn handle_diff(args : Array[String]) -> Unit raise Error {
       "--stat" => stat_mode = true
       "--name-only" => name_only = true
       "--name-status" => name_status = true
-      _ if not(arg.has_prefix("-")) => {
+      _ if not(arg.has_prefix("-")) =>
         // Check if it's a ref (contains / like origin/main)
         if arg.contains("/") && ref_target is None {
           ref_target = Some(arg)
         } else {
           paths.push(arg)
         }
-      }
       _ => ()
     }
   }
   // Handle subdir-clone diff with upstream ref
   match (ref_target, get_subdir_info(fs, git_dir)) {
     (Some(refspec), Some((_, subdir_path, _))) => {
-      handle_subdir_diff(fs, root, git_dir, refspec, subdir_path, stat_mode, name_only, name_status) catch {
+      handle_subdir_diff(
+        fs, root, git_dir, refspec, subdir_path, stat_mode, name_only, name_status,
+      ) catch {
         err => raise err
       }
       return
@@ -5783,7 +5784,9 @@ async fn handle_subdir_diff(
     err => raise err
   }
   guard upstream_tree is Some(utree) else {
-    raise @git.GitError::InvalidObject("Subdirectory not found in upstream: \{subdir_path}")
+    raise @git.GitError::InvalidObject(
+      "Subdirectory not found in upstream: \{subdir_path}",
+    )
   }
   // Get local tree (root is the subdir)
   let local_obj = db.get(rfs, hid)
@@ -5889,7 +5892,7 @@ fn compare_trees(
   for e in entries_b {
     let path = if prefix.length() > 0 { prefix + "/" + e.name } else { e.name }
     match map_a.get(e.name) {
-      None => {
+      None =>
         if e.mode == "40000" || e.mode == "040000" {
           // Recurse into added directory
           let sub = compare_trees_added(db, rfs, e.id, path)
@@ -5899,8 +5902,7 @@ fn compare_trees(
         } else {
           result.push({ path, kind: SubdirDiffKind::Added })
         }
-      }
-      Some(ea) => {
+      Some(ea) =>
         if e.id.to_hex() != ea.id.to_hex() {
           if (e.mode == "40000" || e.mode == "040000") &&
             (ea.mode == "40000" || ea.mode == "040000") {
@@ -5913,7 +5915,6 @@ fn compare_trees(
             result.push({ path, kind: SubdirDiffKind::Modified })
           }
         }
-      }
     }
   }
   result
@@ -5977,7 +5978,9 @@ async fn handle_subdir_merge(
 ) -> Unit raise Error {
   print_line("Merging from upstream (subdir: \{subdir_path})...")
   // Resolve upstream ref
-  let upstream_id = resolve_ref_for_subdir(fs, git_dir, refspec) catch { err => raise err }
+  let upstream_id = resolve_ref_for_subdir(fs, git_dir, refspec) catch {
+    err => raise err
+  }
   guard upstream_id is Some(uid) else {
     raise @git.GitError::InvalidObject("unknown revision: \{refspec}")
   }
@@ -5988,7 +5991,9 @@ async fn handle_subdir_merge(
     err => raise err
   }
   guard upstream_tree is Some(utree) else {
-    raise @git.GitError::InvalidObject("Subdirectory not found in upstream: \{subdir_path}")
+    raise @git.GitError::InvalidObject(
+      "Subdirectory not found in upstream: \{subdir_path}",
+    )
   }
   // Get local HEAD tree
   let rfs : &@git.RepoFileSystem = fs
@@ -6051,13 +6056,18 @@ fn write_subdir_tree_to_worktree(
   for entry in entries {
     let path = dir + "/" + entry.name
     if entry.mode == "40000" || entry.mode == "040000" {
-      fs.mkdir_p(path) catch { _ => () }
-      write_subdir_tree_to_worktree(db, fs, entry.id, path) catch { _ => () }
+      fs.mkdir_p(path) catch {
+        _ => ()
+      }
+      write_subdir_tree_to_worktree(db, fs, entry.id, path) catch {
+        _ => ()
+      }
     } else {
       let blob_obj = db.get(rfs, entry.id)
       guard blob_obj is Some(blob) else { continue }
-      fs.write_file(path, blob.data) catch { _ => () }
+      fs.write_file(path, blob.data) catch {
+        _ => ()
+      }
     }
   }
 }
-

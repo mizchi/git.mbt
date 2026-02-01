@@ -36,7 +36,9 @@ async fn handle_am(args : Array[String]) -> Unit raise Error {
         }
       }
       _ if arg.has_prefix("--directory=") =>
-        directory = Some(String::unsafe_substring(arg, start=12, end=arg.length()))
+        directory = Some(
+          String::unsafe_substring(arg, start=12, end=arg.length()),
+        )
       _ if not(arg.has_prefix("-")) => mbox_files.push(arg)
       _ => ()
     }
@@ -212,7 +214,11 @@ fn parse_mbox(input : String, keep_cr : Bool) -> Array[MboxPatch] {
         if subject.has_prefix("[PATCH") {
           match subject.find("]") {
             Some(idx) =>
-              subject = String::unsafe_substring(subject, start=idx + 1, end=subject.length())
+              subject = String::unsafe_substring(
+                  subject,
+                  start=idx + 1,
+                  end=subject.length(),
+                )
                 .trim()
                 .to_string()
             None => ()
@@ -295,7 +301,11 @@ async fn apply_remaining_patches(
         if line.has_prefix("Author: ") {
           author = String::unsafe_substring(line, start=8, end=line.length())
         } else if line.has_prefix("Date: ") {
-          author_date = String::unsafe_substring(line, start=6, end=line.length())
+          author_date = String::unsafe_substring(
+            line,
+            start=6,
+            end=line.length(),
+          )
         } else if line.has_prefix("Subject: ") {
           subject = String::unsafe_substring(line, start=9, end=line.length())
         }
@@ -307,8 +317,12 @@ async fn apply_remaining_patches(
     apply_patch_to_worktree(fs, root, patch_content, three_way)
     let commit_msg = if signoff {
       let config_path = git_dir + "/config"
-      let user = get_config_value_simple(fs, config_path, "user.name").unwrap_or("")
-      let email = get_config_value_simple(fs, config_path, "user.email").unwrap_or("")
+      let user = get_config_value_simple(fs, config_path, "user.name").unwrap_or(
+        "",
+      )
+      let email = get_config_value_simple(fs, config_path, "user.email").unwrap_or(
+        "",
+      )
       if message.length() > 0 {
         "\{subject}\n\n\{message}\n\nSigned-off-by: \{user} <\{email}>"
       } else {
@@ -341,7 +355,8 @@ async fn apply_remaining_patches(
 ///|
 fn extract_name_str(author : String) -> String {
   match author.find("<") {
-    Some(idx) => String::unsafe_substring(author, start=0, end=idx).trim().to_string()
+    Some(idx) =>
+      String::unsafe_substring(author, start=0, end=idx).trim().to_string()
     None => author.trim().to_string()
   }
 }
@@ -380,7 +395,11 @@ fn apply_patch_to_worktree(
         apply_hunks_to_file(fs, root, current_file, hunks, old_file, new_file)
         hunks.clear()
       }
-      let parts : Array[String] = String::unsafe_substring(line, start=11, end=line.length())
+      let parts : Array[String] = String::unsafe_substring(
+          line,
+          start=11,
+          end=line.length(),
+        )
         .split(" ")
         .map(fn(v) { v.to_string() })
         .collect()
@@ -388,10 +407,18 @@ fn apply_patch_to_worktree(
         old_file = parts[0]
         new_file = parts[1]
         if old_file.has_prefix("a/") {
-          old_file = String::unsafe_substring(old_file, start=2, end=old_file.length())
+          old_file = String::unsafe_substring(
+            old_file,
+            start=2,
+            end=old_file.length(),
+          )
         }
         if new_file.has_prefix("b/") {
-          new_file = String::unsafe_substring(new_file, start=2, end=new_file.length())
+          new_file = String::unsafe_substring(
+            new_file,
+            start=2,
+            end=new_file.length(),
+          )
         }
         current_file = new_file
       }
@@ -457,8 +484,12 @@ fn parse_hunk_header(line : String) -> (Int, Int, Int, Int)? {
       }
       let old_part = parts[0]
       let new_part = parts[1]
-      let (old_start, old_count) = parse_range(String::unsafe_substring(old_part, start=1, end=old_part.length()))
-      let (new_start, new_count) = parse_range(String::unsafe_substring(new_part, start=1, end=new_part.length()))
+      let (old_start, old_count) = parse_range(
+        String::unsafe_substring(old_part, start=1, end=old_part.length()),
+      )
+      let (new_start, new_count) = parse_range(
+        String::unsafe_substring(new_part, start=1, end=new_part.length()),
+      )
       Some((old_start, old_count, new_start, new_count))
     }
   }
@@ -516,14 +547,18 @@ fn apply_hunks_to_file(
     }
     for hl in hunk_lines {
       if hl.has_prefix("+") {
-        result_lines.push(String::unsafe_substring(hl, start=1, end=hl.length()))
+        result_lines.push(
+          String::unsafe_substring(hl, start=1, end=hl.length()),
+        )
       } else if hl.has_prefix("-") {
         line_idx += 1
       } else if hl.has_prefix(" ") || hl == "" {
         if line_idx < original_lines.length() {
           result_lines.push(original_lines[line_idx])
         } else {
-          result_lines.push(String::unsafe_substring(hl, start=1, end=hl.length()))
+          result_lines.push(
+            String::unsafe_substring(hl, start=1, end=hl.length()),
+          )
         }
         line_idx += 1
       }
@@ -617,13 +652,21 @@ fn reverse_patch(patch : String) -> String {
   for line_view in patch.split("\n") {
     let line = line_view.to_string()
     if line.has_prefix("+") && not(line.has_prefix("+++")) {
-      lines.push("-" + String::unsafe_substring(line, start=1, end=line.length()))
+      lines.push(
+        "-" + String::unsafe_substring(line, start=1, end=line.length()),
+      )
     } else if line.has_prefix("-") && not(line.has_prefix("---")) {
-      lines.push("+" + String::unsafe_substring(line, start=1, end=line.length()))
+      lines.push(
+        "+" + String::unsafe_substring(line, start=1, end=line.length()),
+      )
     } else if line.has_prefix("--- a/") {
-      lines.push("+++ b/" + String::unsafe_substring(line, start=6, end=line.length()))
+      lines.push(
+        "+++ b/" + String::unsafe_substring(line, start=6, end=line.length()),
+      )
     } else if line.has_prefix("+++ b/") {
-      lines.push("--- a/" + String::unsafe_substring(line, start=6, end=line.length()))
+      lines.push(
+        "--- a/" + String::unsafe_substring(line, start=6, end=line.length()),
+      )
     } else {
       lines.push(line)
     }
@@ -1045,7 +1088,11 @@ fn get_config_value_simple(
   for line_view in content.split("\n") {
     let line = trim_string(line_view.to_string())
     if line.has_prefix("[") && line.has_suffix("]") {
-      let sec_content = String::unsafe_substring(line, start=1, end=line.length() - 1)
+      let sec_content = String::unsafe_substring(
+        line,
+        start=1,
+        end=line.length() - 1,
+      )
       if sec_content == section ||
         sec_content.has_prefix(section + " ") ||
         sec_content.has_prefix(section + "\t") {
@@ -1056,8 +1103,12 @@ fn get_config_value_simple(
     } else if in_section && line.contains("=") {
       match line.find("=") {
         Some(eq_idx) => {
-          let k = trim_string(String::unsafe_substring(line, start=0, end=eq_idx))
-          let v = trim_string(String::unsafe_substring(line, start=eq_idx + 1, end=line.length()))
+          let k = trim_string(
+            String::unsafe_substring(line, start=0, end=eq_idx),
+          )
+          let v = trim_string(
+            String::unsafe_substring(line, start=eq_idx + 1, end=line.length()),
+          )
           if k == name {
             return Some(v)
           }

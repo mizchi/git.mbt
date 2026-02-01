@@ -403,9 +403,7 @@ async fn handle_index_pack(args : Array[String]) -> Unit {
         }
         // SHA256 repositories are not yet supported
         if is_sha256_repo(git_dir) {
-          @stdio.stderr.write(
-            "bit: SHA256 repositories are not supported\n",
-          )
+          @stdio.stderr.write("bit: SHA256 repositories are not supported\n")
           @sys.exit(1)
         }
         let pack_dir = git_dir + "/objects/pack"

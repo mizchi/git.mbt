@@ -15,15 +15,15 @@ pub struct RepoPath {
 pub fn RepoPath::new(
   user : String,
   repo : String,
-  host~ : String? = None,
-  subdir~ : String? = None
+  host? : String? = None,
+  subdir? : String? = None,
 ) -> RepoPath {
   { host, user, repo, subdir }
 }
 
 ///|
 /// Get the clone URL (always includes host)
-pub fn RepoPath::clone_url(self : RepoPath, ssh~ : Bool = false) -> String {
+pub fn RepoPath::clone_url(self : RepoPath, ssh? : Bool = false) -> String {
   let host = self.host.unwrap_or("github.com")
   if ssh {
     "git@\{host}:\{self.user}/\{self.repo}.git"
@@ -58,7 +58,7 @@ pub struct HqConfig {
 }
 
 ///|
-pub fn HqConfig::new(root : String, ghq_compat~ : Bool = false) -> HqConfig {
+pub fn HqConfig::new(root : String, ghq_compat? : Bool = false) -> HqConfig {
   { root, ghq_compat }
 }
 
@@ -82,10 +82,10 @@ pub fn HqGetOptions::default() -> HqGetOptions {
 
 ///|
 pub fn HqGetOptions::new(
-  update~ : Bool = false,
-  shallow~ : Bool = false,
-  ssh~ : Bool = false,
-  branch~ : String? = None
+  update? : Bool = false,
+  shallow? : Bool = false,
+  ssh? : Bool = false,
+  branch? : String? = None,
 ) -> HqGetOptions {
   { update, shallow, ssh, branch }
 }
@@ -93,8 +93,8 @@ pub fn HqGetOptions::new(
 ///|
 /// Result of hq get operation
 pub(all) enum HqGetResult {
-  Cloned(String)      // Successfully cloned to path
-  Updated(String)     // Successfully updated existing repo
-  Skipped(String)     // Already exists, no update requested
-  Error(String)       // Error message
+  Cloned(String) // Successfully cloned to path
+  Updated(String) // Successfully updated existing repo
+  Skipped(String) // Already exists, no update requested
+  Error(String) // Error message
 } derive(Show, Eq)

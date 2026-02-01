@@ -56,9 +56,7 @@ test "git compat: blob hash empty" {
 test "git compat: tree with single file" {
   // Tree containing: hello.txt -> "hello\n"
   // git write-tree after: echo "hello" > hello.txt && git add hello.txt
-  let blob_id = ObjectId::from_hex(
-    "ce013625030ba8dba906f756967f9e9ca394464a",
-  )
+  let blob_id = ObjectId::from_hex("ce013625030ba8dba906f756967f9e9ca394464a")
   let entry = TreeEntry::new("100644", "hello.txt", blob_id)
   let (tree_id, _) = create_tree([entry])
   inspect(tree_id.to_hex(), content="aaa96ced2d9a1c8e72c56b253a0e2fe78393feb7")
@@ -70,12 +68,8 @@ test "git compat: tree with two files" {
   //   hello.txt -> "hello\n"
   //   world.txt -> "world\n"
   // Entries must be sorted by name
-  let hello_id = ObjectId::from_hex(
-    "ce013625030ba8dba906f756967f9e9ca394464a",
-  )
-  let world_id = ObjectId::from_hex(
-    "cc628ccd10742baea8241c5924df992b5c019f71",
-  )
+  let hello_id = ObjectId::from_hex("ce013625030ba8dba906f756967f9e9ca394464a")
+  let world_id = ObjectId::from_hex("cc628ccd10742baea8241c5924df992b5c019f71")
   let entries = [
     TreeEntry::new("100644", "hello.txt", hello_id),
     TreeEntry::new("100644", "world.txt", world_id),
@@ -95,9 +89,7 @@ test "git compat: initial commit" {
   //   author: Test <test@example.com> 1700000000 +0000
   //   committer: Test <test@example.com> 1700000000 +0000
   //   message: Initial commit
-  let tree_id = ObjectId::from_hex(
-    "88e38705fdbd3608cddbe904b67c731f3234c45b",
-  )
+  let tree_id = ObjectId::from_hex("88e38705fdbd3608cddbe904b67c731f3234c45b")
   let commit = Commit::new(
     tree_id,
     [], // no parents
@@ -295,9 +287,7 @@ test "git compat: SHA-1 quick brown fox" {
 test "git compat: subtree with single file" {
   // Tree containing: world.txt -> "world\n"
   // This is the "subdir" tree in a nested structure
-  let world_id = ObjectId::from_hex(
-    "cc628ccd10742baea8241c5924df992b5c019f71",
-  )
+  let world_id = ObjectId::from_hex("cc628ccd10742baea8241c5924df992b5c019f71")
   let entry = TreeEntry::new("100644", "world.txt", world_id)
   let (tree_id, _) = create_tree([entry])
   inspect(tree_id.to_hex(), content="b032d4b998c65562e088abaa88fdd859476c089e")
@@ -313,12 +303,8 @@ test "git compat: nested tree with subdirectory" {
   //   ├── hello.txt
   //   └── subdir/
   //       └── world.txt
-  let hello_id = ObjectId::from_hex(
-    "ce013625030ba8dba906f756967f9e9ca394464a",
-  )
-  let subdir_id = ObjectId::from_hex(
-    "b032d4b998c65562e088abaa88fdd859476c089e",
-  )
+  let hello_id = ObjectId::from_hex("ce013625030ba8dba906f756967f9e9ca394464a")
+  let subdir_id = ObjectId::from_hex("b032d4b998c65562e088abaa88fdd859476c089e")
   let entries = [
     TreeEntry::new("100644", "hello.txt", hello_id),
     TreeEntry::new("40000", "subdir", subdir_id),
@@ -338,12 +324,8 @@ test "git compat: commit with parent" {
   // parent: 681226a87c4a64f59b7b47bd497af25e16ac4635 (initial commit)
   // author/committer: Test <test@example.com> 1700000100 +0000
   // message: Second commit
-  let tree_id = ObjectId::from_hex(
-    "88e38705fdbd3608cddbe904b67c731f3234c45b",
-  )
-  let parent_id = ObjectId::from_hex(
-    "681226a87c4a64f59b7b47bd497af25e16ac4635",
-  )
+  let tree_id = ObjectId::from_hex("88e38705fdbd3608cddbe904b67c731f3234c45b")
+  let parent_id = ObjectId::from_hex("681226a87c4a64f59b7b47bd497af25e16ac4635")
   let commit = Commit::new(
     tree_id,
     [parent_id],
@@ -611,9 +593,7 @@ test "roundtrip: binary blob create -> compress -> decompress" {
 ///|
 test "roundtrip: tree create -> compress -> decompress" {
   // Create tree
-  let blob_id = ObjectId::from_hex(
-    "ce013625030ba8dba906f756967f9e9ca394464a",
-  )
+  let blob_id = ObjectId::from_hex("ce013625030ba8dba906f756967f9e9ca394464a")
   let entries = [TreeEntry::new("100644", "test.txt", blob_id)]
   let (expected_id, compressed) = create_tree(entries)
 
@@ -644,9 +624,7 @@ test "roundtrip: tree create -> compress -> decompress" {
 
 ///|
 test "roundtrip: commit create -> compress -> decompress" {
-  let tree_id = ObjectId::from_hex(
-    "88e38705fdbd3608cddbe904b67c731f3234c45b",
-  )
+  let tree_id = ObjectId::from_hex("88e38705fdbd3608cddbe904b67c731f3234c45b")
   let commit = Commit::new(
     tree_id,
     [],
@@ -690,9 +668,7 @@ test "roundtrip: commit create -> compress -> decompress" {
 ///|
 test "git compat: parse_tree single entry" {
   // Create tree and extract content
-  let blob_id = ObjectId::from_hex(
-    "ce013625030ba8dba906f756967f9e9ca394464a",
-  )
+  let blob_id = ObjectId::from_hex("ce013625030ba8dba906f756967f9e9ca394464a")
   let entries = [TreeEntry::new("100644", "hello.txt", blob_id)]
   let (_, compressed) = create_tree(entries)
   let raw = @zlib.zlib_decompress(compressed)
@@ -714,12 +690,8 @@ test "git compat: parse_tree single entry" {
 ///|
 test "git compat: parse_tree multiple entries sorted" {
   // Create tree with multiple files
-  let hello_id = ObjectId::from_hex(
-    "ce013625030ba8dba906f756967f9e9ca394464a",
-  )
-  let world_id = ObjectId::from_hex(
-    "cc628ccd10742baea8241c5924df992b5c019f71",
-  )
+  let hello_id = ObjectId::from_hex("ce013625030ba8dba906f756967f9e9ca394464a")
+  let world_id = ObjectId::from_hex("cc628ccd10742baea8241c5924df992b5c019f71")
   let entries = [
     TreeEntry::new("100644", "hello.txt", hello_id),
     TreeEntry::new("100644", "world.txt", world_id),
@@ -743,12 +715,8 @@ test "git compat: parse_tree multiple entries sorted" {
 ///|
 test "git compat: parse_tree with directory entry" {
   // Tree with file and subdirectory
-  let blob_id = ObjectId::from_hex(
-    "ce013625030ba8dba906f756967f9e9ca394464a",
-  )
-  let tree_id = ObjectId::from_hex(
-    "b032d4b998c65562e088abaa88fdd859476c089e",
-  )
+  let blob_id = ObjectId::from_hex("ce013625030ba8dba906f756967f9e9ca394464a")
+  let tree_id = ObjectId::from_hex("b032d4b998c65562e088abaa88fdd859476c089e")
   let entries = [
     TreeEntry::new("100644", "hello.txt", blob_id),
     TreeEntry::new("40000", "subdir", tree_id),
@@ -775,9 +743,7 @@ test "git compat: parse_tree with directory entry" {
 ///|
 test "git compat: parse_tree with executable file" {
   // Tree with executable file (mode 100755)
-  let blob_id = ObjectId::from_hex(
-    "ce013625030ba8dba906f756967f9e9ca394464a",
-  )
+  let blob_id = ObjectId::from_hex("ce013625030ba8dba906f756967f9e9ca394464a")
   let entries = [TreeEntry::new("100755", "script.sh", blob_id)]
   let (_, compressed) = create_tree(entries)
   let raw = @zlib.zlib_decompress(compressed)
@@ -800,9 +766,7 @@ test "git compat: parse_tree with executable file" {
 ///|
 test "git compat: parse_commit initial commit" {
   // Create initial commit (no parents)
-  let tree_id = ObjectId::from_hex(
-    "88e38705fdbd3608cddbe904b67c731f3234c45b",
-  )
+  let tree_id = ObjectId::from_hex("88e38705fdbd3608cddbe904b67c731f3234c45b")
   let commit = Commit::new(
     tree_id,
     [],
@@ -829,12 +793,8 @@ test "git compat: parse_commit initial commit" {
 
 ///|
 test "git compat: parse_commit with one parent" {
-  let tree_id = ObjectId::from_hex(
-    "88e38705fdbd3608cddbe904b67c731f3234c45b",
-  )
-  let parent_id = ObjectId::from_hex(
-    "681226a87c4a64f59b7b47bd497af25e16ac4635",
-  )
+  let tree_id = ObjectId::from_hex("88e38705fdbd3608cddbe904b67c731f3234c45b")
+  let parent_id = ObjectId::from_hex("681226a87c4a64f59b7b47bd497af25e16ac4635")
   let commit = Commit::new(
     tree_id,
     [parent_id],
@@ -862,15 +822,9 @@ test "git compat: parse_commit with one parent" {
 
 ///|
 test "git compat: parse_commit with merge (two parents)" {
-  let tree_id = ObjectId::from_hex(
-    "88e38705fdbd3608cddbe904b67c731f3234c45b",
-  )
-  let parent1 = ObjectId::from_hex(
-    "681226a87c4a64f59b7b47bd497af25e16ac4635",
-  )
-  let parent2 = ObjectId::from_hex(
-    "2fe96b04b8c1f081765898435f0d2497cfef21ea",
-  )
+  let tree_id = ObjectId::from_hex("88e38705fdbd3608cddbe904b67c731f3234c45b")
+  let parent1 = ObjectId::from_hex("681226a87c4a64f59b7b47bd497af25e16ac4635")
+  let parent2 = ObjectId::from_hex("2fe96b04b8c1f081765898435f0d2497cfef21ea")
   let commit = Commit::new(
     tree_id,
     [parent1, parent2],
@@ -1153,12 +1107,8 @@ test "git compat: packfile with multiple objects roundtrip" {
 test "git compat: tree entry order preserved" {
   // create_tree preserves entry order (caller must sort)
   // Verify entries are written and read back in given order
-  let blob_id = ObjectId::from_hex(
-    "ce013625030ba8dba906f756967f9e9ca394464a",
-  )
-  let tree_id = ObjectId::from_hex(
-    "b032d4b998c65562e088abaa88fdd859476c089e",
-  )
+  let blob_id = ObjectId::from_hex("ce013625030ba8dba906f756967f9e9ca394464a")
+  let tree_id = ObjectId::from_hex("b032d4b998c65562e088abaa88fdd859476c089e")
 
   // Create tree with entries in specific order
   let entries = [
@@ -1186,9 +1136,7 @@ test "git compat: tree entry order preserved" {
 ///|
 test "git compat: tree special characters in filename" {
   // Test filenames with special characters
-  let blob_id = ObjectId::from_hex(
-    "ce013625030ba8dba906f756967f9e9ca394464a",
-  )
+  let blob_id = ObjectId::from_hex("ce013625030ba8dba906f756967f9e9ca394464a")
 
   // Files with special characters (but no null bytes or slashes)
   let entries = [

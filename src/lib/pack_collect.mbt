@@ -63,7 +63,7 @@ fn collect_object_ids_only(
   let obj = db.get(fs, commit_id)
   match obj {
     None => () // Object might not exist locally - that's ok
-    Some(o) => {
+    Some(o) =>
       if o.obj_type == @git.ObjectType::Commit {
         let info = @git.parse_commit(o.data)
         collect_tree_ids_only(db, fs, info.tree, seen)
@@ -71,7 +71,6 @@ fn collect_object_ids_only(
           collect_object_ids_only(db, fs, p, seen)
         }
       }
-    }
   }
 }
 
@@ -90,7 +89,7 @@ fn collect_tree_ids_only(
   let obj = db.get(fs, tree_id)
   match obj {
     None => () // Object might not exist locally
-    Some(o) => {
+    Some(o) =>
       if o.obj_type == @git.ObjectType::Tree {
         let entries = @git.parse_tree(o.data)
         for entry in entries {
@@ -101,7 +100,6 @@ fn collect_tree_ids_only(
           }
         }
       }
-    }
   }
 }
 

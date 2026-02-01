@@ -10,7 +10,7 @@ pub fn hq_get(
   /// Execute shell command and return (exit_code, stdout, stderr)
   exec : (String) -> (Int, String, String),
   /// Check if path exists
-  path_exists : (String) -> Bool
+  path_exists : (String) -> Bool,
 ) -> HqGetResult {
   let local_path = repo.local_path(config.root)
   // Check if already exists
@@ -46,7 +46,7 @@ fn clone_normal(
   repo : RepoPath,
   local_path : String,
   options : HqGetOptions,
-  exec : (String) -> (Int, String, String)
+  exec : (String) -> (Int, String, String),
 ) -> Result[Unit, String] {
   let url = repo.clone_url(ssh=options.ssh)
   let args : Array[String] = ["git", "clone"]
@@ -76,7 +76,7 @@ fn clone_sparse(
   repo : RepoPath,
   local_path : String,
   options : HqGetOptions,
-  exec : (String) -> (Int, String, String)
+  exec : (String) -> (Int, String, String),
 ) -> Result[Unit, String] {
   let url = repo.clone_url(ssh=options.ssh)
   let subdir = repo.subdir.unwrap_or("")
@@ -127,7 +127,7 @@ fn clone_sparse(
 pub fn build_clone_command(
   repo : RepoPath,
   local_path : String,
-  options : HqGetOptions
+  options : HqGetOptions,
 ) -> String {
   let url = repo.clone_url(ssh=options.ssh)
   if repo.needs_sparse() {

@@ -21,6 +21,7 @@ options(
   targets: {
     "handlers_branch.mbt": [ "native" ],
     "handlers_core.mbt": [ "native" ],
+    "handlers_hq.mbt": [ "native" ],
     "handlers_maintenance.mbt": [ "native" ],
     "handlers_misc.mbt": [ "native" ],
     "handlers_pack.mbt": [ "native" ],
@@ -29,7 +30,6 @@ options(
     "handlers_subdir.mbt": [ "native" ],
     "handlers_subdir_wbtest.mbt": [ "native" ],
     "handlers_worktree.mbt": [ "native" ],
-    "handlers_hq.mbt": [ "native" ],
     "helpers.mbt": [ "native" ],
     "index_pack.mbt": [ "native" ],
     "main.mbt": [ "native" ],
