@@ -177,8 +177,27 @@ fn find_repo_root(start : String) -> String? {
   if current.length() == 0 {
     current = "."
   }
+  let ceiling_dirs : Array[String] = []
+  match @sys.get_env_var("GIT_CEILING_DIRECTORIES") {
+    Some(raw) =>
+      for view in raw.split(":") {
+        let dir = view.to_string()
+        if dir.length() == 0 {
+          continue
+        }
+        ceiling_dirs.push(normalize_path(dir))
+      }
+    None => ()
+  }
   let mut last = ""
   while true {
+    if ceiling_dirs.length() > 0 {
+      for ceiling in ceiling_dirs {
+        if current == ceiling {
+          return None
+        }
+      }
+    }
     let git_path = if current == "/" {
       "/.git"
     } else if current == "." {
