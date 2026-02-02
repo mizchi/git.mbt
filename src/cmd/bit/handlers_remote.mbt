@@ -2076,7 +2076,6 @@ async fn fetch_from_remote(
     None => ()
   }
   // Fallback to HTTP fetch
-  print_line("Fetching from \{remote_url}...")
   let (refs, _caps, _version, symrefs) = @git.discover_upload_refs_http(
     remote_url, true,
   )
@@ -2087,9 +2086,6 @@ async fn fetch_from_remote(
       return ()
     }
     Some((refname, commit_id)) => {
-      let pack = @git.fetch_pack_http(remote_url, [commit_id], true)
-      let objects = @git.parse_packfile(pack)
-      @git.write_packfile_with_index(fs, git_dir, pack, objects)
       let remote_ref = if refname.has_prefix("refs/heads/") {
         let name = String::unsafe_substring(
           refname,
@@ -2101,6 +2097,23 @@ async fn fetch_from_remote(
         "refs/remotes/" + remote_name + "/HEAD"
       }
       let remote_path = git_dir + "/" + remote_ref
+      let mut prev_id : @git.ObjectId? = None
+      if fs.is_file(remote_path) {
+        let content = decode_bytes(
+          fs.read_file(remote_path) catch { _ => Bytes::default() },
+        )
+        let hex = trim_string(content)
+        if hex.length() > 0 {
+          prev_id = Some(@git.ObjectId::from_hex(hex)) catch { _ => None }
+        }
+      }
+      if prev_id is Some(pid) && pid == commit_id {
+        return ()
+      }
+      print_line("Fetching from \{remote_url}...")
+      let pack = @git.fetch_pack_http(remote_url, [commit_id], true)
+      let objects = @git.parse_packfile(pack)
+      @git.write_packfile_with_index(fs, git_dir, pack, objects)
       let dir = match remote_path.rev_find("/") {
         None => ""
         Some(i) => String::unsafe_substring(remote_path, start=0, end=i)
@@ -2110,7 +2123,14 @@ async fn fetch_from_remote(
       }
       fs.write_string(remote_path, commit_id.to_hex() + "\n")
       print_line("From \{remote_url}")
-      print_line(" * [new branch] \{refname} -> \{remote_ref}")
+      match prev_id {
+        None =>
+          print_line(" * [new branch] \{refname} -> \{remote_ref}")
+        Some(pid) =>
+          print_line(
+            "   \{pid.to_hex()}..\{commit_id.to_hex()}  \{refname} -> \{remote_ref}",
+          )
+      }
     }
   }
 }
