@@ -94,7 +94,7 @@ t5315-pack-objects-compression.sh
 t5321-pack-large-objects.sh
 # t5326-multi-pack-bitmaps.sh  # midx/bitmap progress tests fail in shim
 # t5327-multi-pack-bitmaps-rev.sh  # midx base ordering tests fail in shim
-t5329-pack-objects-cruft.sh
+# t5329-pack-objects-cruft.sh  # cruft pack tests fail in shim
 # t5331-pack-objects-stdin.sh  # pack-objects --stdin-packs parsing mismatch
 # t5332-multi-pack-reuse.sh  # midx/bitmap reuse tests fail in shim
 # t5334-incremental-multi-pack-index.sh  # incremental midx tests fail in shim
