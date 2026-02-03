@@ -109,6 +109,31 @@ async fn worktree_entry_meta(
   fs : &@git.RepoFileSystem,
   abs_path : String,
 ) -> WorktreeEntryMeta? noraise {
+  match try_readlink(abs_path) {
+    Some(_) => {
+      let mut mtime_sec : Int? = None
+      let mut mtime_nsec : Int? = None
+      let mtime_result : Result[(Int64, Int), Error] = try? @afs.mtime(
+        abs_path,
+        follow_symlink=false,
+      )
+      match mtime_result {
+        Ok((sec, nsec)) => {
+          mtime_sec = Some(sec.to_int())
+          mtime_nsec = Some(nsec)
+        }
+        Err(_) => ()
+      }
+      return Some({
+        kind: WorktreeKindMeta::Symlink,
+        mode: 0o120000,
+        size: None,
+        mtime_sec,
+        mtime_nsec,
+      })
+    }
+    None => ()
+  }
   let kind_result : Result[@afs.FileKind, Error] = try? @afs.kind(
     abs_path,
     follow_symlink=false,
@@ -181,7 +206,7 @@ fn try_readlink(path : String) -> String? {
       return None
     }
     if read_len < buf.length() {
-      return Some(buf.to_unchecked_string(length=read_len))
+      return Some(@utf8.decode_lossy(buf[:read_len]))
     }
     buf_len *= 2
   }
@@ -190,7 +215,7 @@ fn try_readlink(path : String) -> String? {
   if read_len < 0 {
     None
   } else {
-    Some(buf.to_unchecked_string(length=read_len))
+    Some(@utf8.decode_lossy(buf[:read_len]))
   }
 }
 
