@@ -89,6 +89,44 @@ pub struct ObjectDb {
   loose_paths : Map[String, String] // hex -> path (cache)
   packs : Array[PackIndex]
   lazy_packs : Array[LazyPackIndex] // lazily loaded pack indexes
+  pack_cache : Map[String, Bytes]
+  pack_cache_order : Array[String]
+  pack_cache_limit : Int
+}
+
+///|
+fn pack_cache_limit_from_env() -> Int {
+  match @sys.get_env_var("BIT_PACK_CACHE_LIMIT") {
+    Some(v) =>
+      try @strconv.parse_int(v) catch {
+        _ => 2
+      } noraise {
+        n => if n < 0 { 0 } else { n }
+      }
+    None => 2
+  }
+}
+
+///|
+fn touch_pack_cache(db : ObjectDb, pack_path : String) -> Unit {
+  match db.pack_cache_order.search(pack_path) {
+    Some(idx) => {
+      ignore(db.pack_cache_order.remove(idx))
+    }
+    None => ()
+  }
+  db.pack_cache_order.push(pack_path)
+}
+
+///|
+fn evict_pack_cache(db : ObjectDb) -> Unit {
+  if db.pack_cache_limit <= 0 {
+    return
+  }
+  while db.pack_cache_order.length() > db.pack_cache_limit {
+    let evict = db.pack_cache_order.remove(0)
+    db.pack_cache.remove(evict)
+  }
 }
 
 ///|
@@ -113,7 +151,8 @@ pub fn ObjectDb::load(
   } else {
     []
   }
-  { objects_dir, loose_paths, packs, lazy_packs: [] }
+  let pack_cache_limit = pack_cache_limit_from_env()
+  { objects_dir, loose_paths, packs, lazy_packs: [], pack_cache: {}, pack_cache_order: [], pack_cache_limit }
 }
 
 ///|
@@ -133,7 +172,8 @@ pub fn ObjectDb::load_lazy(
   } else {
     []
   }
-  { objects_dir, loose_paths: {}, packs: [], lazy_packs }
+  let pack_cache_limit = pack_cache_limit_from_env()
+  { objects_dir, loose_paths: {}, packs: [], lazy_packs, pack_cache: {}, pack_cache_order: [], pack_cache_limit }
 }
 
 ///|
@@ -144,6 +184,30 @@ pub fn ObjectDb::get(
 ) -> @git.PackObject? raise @git.GitError {
   let seen : Map[String, Bool] = {}
   get_by_hex(self, fs, id.to_hex(), seen)
+}
+
+///|
+fn get_pack_bytes(
+  db : ObjectDb,
+  fs : &@git.RepoFileSystem,
+  pack_path : String,
+) -> Bytes raise @git.GitError {
+  if db.pack_cache_limit == 0 {
+    return fs.read_file(pack_path)
+  }
+  match db.pack_cache.get(pack_path) {
+    Some(data) => {
+      touch_pack_cache(db, pack_path)
+      data
+    }
+    None => {
+      let data = fs.read_file(pack_path)
+      db.pack_cache[pack_path] = data
+      touch_pack_cache(db, pack_path)
+      evict_pack_cache(db)
+      data
+    }
+  }
 }
 
 ///|
@@ -197,7 +261,7 @@ fn get_by_hex(
     match PackIndex::find_offset_hex(pack, hex) {
       None => ()
       Some(offset) => {
-        let data = fs.read_file(pack.pack_path)
+        let data = get_pack_bytes(db, fs, pack.pack_path)
         let obj = read_pack_object_at(data, pack, offset, db, fs, seen)
         return Some(obj)
       }
@@ -210,7 +274,7 @@ fn get_by_hex(
         None => ()
         Some(offset) => {
           let pack = lazy_pack.get(fs) // ensure loaded
-          let data = fs.read_file(pack.pack_path)
+          let data = get_pack_bytes(db, fs, pack.pack_path)
           let obj = read_pack_object_at(data, pack, offset, db, fs, seen)
           return Some(obj)
         }

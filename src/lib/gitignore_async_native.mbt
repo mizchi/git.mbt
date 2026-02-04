@@ -81,11 +81,24 @@ async fn walk_dir_async(
     }
   }
   let entries = fs.readdir(dir)
-  if rel != "" && entries_contains(entries, ".git") {
+  let mut has_git = false
+  let mut has_gitignore = false
+  for name in entries {
+    if name == ".git" {
+      has_git = true
+    }
+    if name == ".gitignore" {
+      has_gitignore = true
+    }
+    if has_git && has_gitignore {
+      break
+    }
+  }
+  if rel != "" && has_git {
     return ()
   }
   let prev_len = matcher.len()
-  if entries_contains(entries, ".gitignore") {
+  if has_gitignore {
     let ignore_path = join_path(dir, ".gitignore")
     let content = @utf8.decode_lossy(fs.read_file(ignore_path)[:])
     matcher.add_rules(rel, content)
@@ -113,22 +126,18 @@ async fn walk_dir_async(
     }
     let child_rel = if rel == "" { name } else { rel + "/" + name }
     let child_path = join_path(root, child_rel)
-    let mut is_dir = fs.is_dir(child_path)
-    if is_dir {
-      let kind_result : Result[@afs.FileKind, Error] = try? @afs.kind(
-        child_path,
-        follow_symlink=false,
-      )
-      match kind_result {
-        Ok(@afs.FileKind::SymLink) => is_dir = false
-        Ok(@afs.FileKind::Directory) => ()
-        Ok(_) => is_dir = false
-        Err(_) => ()
-      }
+    let mut is_dir = false
+    let kind_result : Result[@afs.FileKind, Error] = try? @afs.kind(
+      child_path,
+      follow_symlink=false,
+    )
+    match kind_result {
+      Ok(@afs.FileKind::Directory) => is_dir = true
+      Ok(_) => is_dir = false
+      Err(_) => is_dir = fs.is_dir(child_path)
     }
     if matcher.is_ignored(child_rel, is_dir) {
-      // Still traverse to allow negations in nested .gitignore
-      if is_dir {
+      if is_dir && matcher.has_negation() {
         walk_dir_async(
           fs, root, child_rel, matcher, out, cache_enabled, dirs, ignores,
         )

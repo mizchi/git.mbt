@@ -20,6 +20,7 @@ pub async fn status(
   let mut t0 = profile_start(profile)
   let git_dir = join_path(root, ".git")
   let autocrlf = read_autocrlf_setting(fs, git_dir)
+  let racy_git = racy_git_enabled()
   let index_entries = read_index_entries(fs, git_dir)
   t0 = profile_lap(profile, "status read_index_entries", t0)
   let index_map : Map[String, IndexEntry] = {}
@@ -47,14 +48,16 @@ pub async fn status(
             match info.kind {
               WorktreeKindMeta::Regular => {
                 let mut stat_matches = false
+                let mut size_mismatch = false
                 match info.size {
-                  Some(sz) =>
+                  Some(sz) => {
+                    size_mismatch = sz != entry.size
                     match info.mtime_sec {
                       Some(ms) =>
                         match info.mtime_nsec {
                           Some(mn) =>
                             if entry.mtime_sec != 0 || entry.mtime_nsec != 0 {
-                              stat_matches = sz == entry.size &&
+                              stat_matches = not(size_mismatch) &&
                                 ms == entry.mtime_sec &&
                                 mn == entry.mtime_nsec
                             }
@@ -62,13 +65,25 @@ pub async fn status(
                         }
                       None => ()
                     }
+                  }
                   None => ()
                 }
-                if not(stat_matches) || info.mode != entry.mode {
+                if info.mode != entry.mode {
+                  unstaged_modified.push(path)
+                } else if size_mismatch {
+                  unstaged_modified.push(path)
+                } else if not(stat_matches) {
                   let content = fs.read_file(abs)
                   let normalized = normalize_worktree_content(content, autocrlf)
                   let id = @git.hash_blob(normalized)
-                  if id != entry.id || info.mode != entry.mode {
+                  if id != entry.id {
+                    unstaged_modified.push(path)
+                  }
+                } else if racy_git {
+                  let content = fs.read_file(abs)
+                  let normalized = normalize_worktree_content(content, autocrlf)
+                  let id = @git.hash_blob(normalized)
+                  if id != entry.id {
                     unstaged_modified.push(path)
                   }
                 }
@@ -88,11 +103,23 @@ pub async fn status(
                     }
                   None => ()
                 }
-                if mode_changed || not(stat_matches) {
+                if mode_changed {
+                  unstaged_modified.push(path)
+                } else if not(stat_matches) {
                   match read_symlink_target_path(abs) {
                     Some(target) => {
                       let id = @git.hash_blob(@utf8.encode(target))
-                      if id != entry.id || mode_changed {
+                      if id != entry.id {
+                        unstaged_modified.push(path)
+                      }
+                    }
+                    None => ()
+                  }
+                } else if racy_git {
+                  match read_symlink_target_path(abs) {
+                    Some(target) => {
+                      let id = @git.hash_blob(@utf8.encode(target))
+                      if id != entry.id {
                         unstaged_modified.push(path)
                       }
                     }
@@ -585,6 +612,14 @@ fn parse_autocrlf_value(value : String) -> AutoCrlf {
 }
 
 ///|
+fn racy_git_enabled() -> Bool {
+  match @sys.get_env_var("BIT_RACY_GIT") {
+    Some(v) => v != "" && v != "0"
+    None => false
+  }
+}
+
+///|
 fn normalize_worktree_content(content : Bytes, autocrlf : AutoCrlf) -> Bytes {
   match autocrlf {
     Off => content
@@ -874,7 +909,7 @@ fn read_head_tree_entries(
   match head {
     None => return result
     Some(commit_id) => {
-      let db = ObjectDb::load(fs, git_dir)
+      let db = ObjectDb::load_lazy(fs, git_dir)
       let commit_obj = db.get(fs, commit_id)
       match commit_obj {
         None => return result

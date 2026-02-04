@@ -37,11 +37,24 @@ fn walk_dir_async(
     }
   }
   let entries = fs.readdir(dir)
-  if rel != "" && entries_contains(entries, ".git") {
+  let mut has_git = false
+  let mut has_gitignore = false
+  for name in entries {
+    if name == ".git" {
+      has_git = true
+    }
+    if name == ".gitignore" {
+      has_gitignore = true
+    }
+    if has_git && has_gitignore {
+      break
+    }
+  }
+  if rel != "" && has_git {
     return ()
   }
   let prev_len = matcher.len()
-  if entries_contains(entries, ".gitignore") {
+  if has_gitignore {
     let ignore_path = join_path(dir, ".gitignore")
     let content = @utf8.decode_lossy(fs.read_file(ignore_path)[:])
     matcher.add_rules(rel, content)
@@ -54,8 +67,7 @@ fn walk_dir_async(
     let child_path = join_path(root, child_rel)
     let is_dir = fs.is_dir(child_path)
     if matcher.is_ignored(child_rel, is_dir) {
-      // Still traverse to allow negations in nested .gitignore
-      if is_dir {
+      if is_dir && matcher.has_negation() {
         walk_dir_async(fs, root, child_rel, matcher, out)
       }
       continue

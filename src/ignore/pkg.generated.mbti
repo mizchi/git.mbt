@@ -11,8 +11,10 @@ pub fn parse(String, String) -> Array[Rule]
 // Types and methods
 pub struct Matcher {
   rules : Array[Rule]
+  mut negation_count : Int
 }
 pub fn Matcher::add_rules(Self, String, String) -> Unit
+pub fn Matcher::has_negation(Self) -> Bool
 pub fn Matcher::is_ignored(Self, String, Bool) -> Bool
 pub fn Matcher::len(Self) -> Int
 pub fn Matcher::new() -> Self

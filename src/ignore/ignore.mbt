@@ -21,12 +21,13 @@ pub struct Rule {
 /// A collection of ignore rules that can check if paths are ignored.
 pub struct Matcher {
   rules : Array[Rule]
+  mut negation_count : Int
 }
 
 ///|
 /// Create a new empty matcher.
 pub fn Matcher::new() -> Matcher {
-  { rules: [] }
+  { rules: [], negation_count: 0 }
 }
 
 ///|
@@ -40,6 +41,9 @@ pub fn Matcher::add_rules(
   let parsed = parse(content, base)
   for rule in parsed {
     self.rules.push(rule)
+    if rule.negated {
+      self.negation_count = self.negation_count + 1
+    }
   }
 }
 
@@ -64,6 +68,14 @@ pub fn Matcher::is_ignored(
 ///|
 /// Remove rules added after a certain point (for backtracking during traversal).
 pub fn Matcher::truncate(self : Matcher, len : Int) -> Unit {
+  let mut i = len
+  let total = self.rules.length()
+  while i < total {
+    if self.rules[i].negated {
+      self.negation_count = self.negation_count - 1
+    }
+    i = i + 1
+  }
   self.rules.truncate(len)
 }
 
@@ -71,6 +83,12 @@ pub fn Matcher::truncate(self : Matcher, len : Int) -> Unit {
 /// Get current number of rules.
 pub fn Matcher::len(self : Matcher) -> Int {
   self.rules.length()
+}
+
+///|
+/// Whether any negation rules have been added.
+pub fn Matcher::has_negation(self : Matcher) -> Bool {
+  self.negation_count > 0
 }
 
 ///|

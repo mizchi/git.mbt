@@ -208,3 +208,7 @@ git-t-full test_file:
     GIT_TEST_DEFAULT_HASH=sha1 \
     CPATH="$prefix/include" LDFLAGS="-L$prefix/lib" LIBRARY_PATH="$prefix/lib" \
     make -C third_party/git test T="{{test_file}}"
+
+# Run status benchmarks
+bench-status:
+    moon bench --target native -p mizchi/bit/lib -f bench_status_test.mbt

@@ -10,6 +10,7 @@ import "test" {
   "mizchi/zlib",
   "moonbitlang/core/bench" as @bench,
   "moonbitlang/async",
+  "moonbitlang/x/sys" as @sys,
 }
 
 options(

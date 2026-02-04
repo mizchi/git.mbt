@@ -28,6 +28,7 @@ options(
   targets: {
     "bench_index_diff_test.mbt": [ "native" ],
     "bench_list_working_files_test.mbt": [ "native" ],
+    "bench_status_test.mbt": [ "native" ],
     "bench_worktree_entry_wbtest.mbt": [ "native" ],
     "gitignore_async_js.mbt": [ "js", "wasm", "wasm-gc" ],
     "gitignore_async_native.mbt": [ "native" ],

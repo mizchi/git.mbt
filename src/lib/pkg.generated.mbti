@@ -544,6 +544,9 @@ pub struct ObjectDb {
   loose_paths : Map[String, String]
   packs : Array[PackIndex]
   lazy_packs : Array[LazyPackIndex]
+  pack_cache : Map[String, Bytes]
+  pack_cache_order : Array[String]
+  pack_cache_limit : Int
 }
 pub fn ObjectDb::get(Self, &@bit.RepoFileSystem, @bit.ObjectId) -> @bit.PackObject? raise @bit.GitError
 pub fn ObjectDb::load(&@bit.RepoFileSystem, String) -> Self raise @bit.GitError
@@ -686,21 +689,25 @@ pub struct TreeFileEntry {
 pub(all) struct UploadPackConfig {
   allow_filter : Bool
   blob_packfile_uri : String?
+  allow_ref_in_want : Bool
 }
 pub fn UploadPackConfig::default() -> Self
-pub fn UploadPackConfig::new(Bool, String?) -> Self
+pub fn UploadPackConfig::new(Bool, String?, Bool) -> Self
 
 pub struct UploadPackRequest {
   wants : Array[@bit.ObjectId]
   haves : Array[@bit.ObjectId]
   capabilities : Array[String]
   done : Bool
+  shallow : Array[@bit.ObjectId]
+  deepen : Int?
 }
 
 pub struct UploadPackRequestV2 {
   command : String
   capabilities : Array[String]
   wants : Array[@bit.ObjectId]
+  want_refs : Array[String]
   haves : Array[@bit.ObjectId]
   done : Bool
   filter : String?
