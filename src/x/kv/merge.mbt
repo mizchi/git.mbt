@@ -23,8 +23,6 @@ pub(all) enum MergeResult {
 /// Perform a three-way merge
 pub fn Kv::merge(
   self : Kv,
-  write_fs : &@git.FileSystem,
-  backing_fs : &@git.RepoFileSystem,
   their_head : @git.ObjectId,
   their_clock : VectorClock,
   strategy : MergeStrategy,
@@ -38,7 +36,7 @@ pub fn Kv::merge(
   if self.head == @git.ObjectId::zero() {
     self.head = their_head
     self.clock = self.clock.merge(their_clock)
-    self.bitfs.checkout_snapshot(backing_fs, their_head)
+    self.tree.checkout(their_head)
     return FastForward(their_head)
   }
   // They have no commits
@@ -46,8 +44,8 @@ pub fn Kv::merge(
     return NoOp
   }
   // Find common ancestor
-  let db = self.bitfs.get_db(backing_fs)
-  let base = find_merge_base(db, backing_fs, self.head, their_head)
+  let store : &@lib.ObjectStore = self.store
+  let base = find_merge_base(store, self.head, their_head)
   // If their head is ancestor of ours, we're already up to date
   if base is Some(b) && b == their_head {
     return NoOp
@@ -56,13 +54,11 @@ pub fn Kv::merge(
   if base is Some(b) && b == self.head {
     self.head = their_head
     self.clock = self.clock.merge(their_clock)
-    self.bitfs.checkout_snapshot(backing_fs, their_head)
+    self.tree.checkout(their_head)
     return FastForward(their_head)
   }
   // Need to do a real merge
   let conflicts = self.do_merge(
-    write_fs,
-    backing_fs,
     base.unwrap_or(@git.ObjectId::zero()),
     their_head,
     strategy,
@@ -71,9 +67,7 @@ pub fn Kv::merge(
     match strategy {
       LastWriteWins | Custom(_) => {
         // Auto-resolved, create merge commit
-        let new_head = self.create_merge_commit(
-          write_fs, backing_fs, their_head, timestamp,
-        )
+        let new_head = self.create_merge_commit(their_head, timestamp)
         self.clock = self.clock.merge(their_clock).increment(self.node_id)
         Merged(new_head, conflicts)
       }
@@ -81,9 +75,7 @@ pub fn Kv::merge(
     }
   } else {
     // No conflicts, create merge commit
-    let new_head = self.create_merge_commit(
-      write_fs, backing_fs, their_head, timestamp,
-    )
+    let new_head = self.create_merge_commit(their_head, timestamp)
     self.clock = self.clock.merge(their_clock).increment(self.node_id)
     Merged(new_head, [])
   }
@@ -92,19 +84,17 @@ pub fn Kv::merge(
 ///|
 fn Kv::do_merge(
   self : Kv,
-  _write_fs : &@git.FileSystem,
-  backing_fs : &@git.RepoFileSystem,
   base : @git.ObjectId,
   their_head : @git.ObjectId,
   strategy : MergeStrategy,
 ) -> Array[String] {
   let conflicts : Array[String] = []
-  let db = self.bitfs.get_db(backing_fs) catch { _ => return conflicts }
+  let store : &@lib.ObjectStore = self.store
   // Get trees
   let base_tree = if base == @git.ObjectId::zero() {
     @git.ObjectId::zero()
   } else {
-    let obj = db.get(backing_fs, base) catch { _ => return conflicts }
+    let obj = store.get(base) catch { _ => return conflicts }
     match obj {
       Some(o) => {
         let commit = @git.parse_commit(o.data) catch { _ => return conflicts }
@@ -114,7 +104,7 @@ fn Kv::do_merge(
     }
   }
   let their_tree = {
-    let obj = db.get(backing_fs, their_head) catch { _ => return conflicts }
+    let obj = store.get(their_head) catch { _ => return conflicts }
     match obj {
       Some(o) => {
         let commit = @git.parse_commit(o.data) catch { _ => return conflicts }
@@ -126,10 +116,10 @@ fn Kv::do_merge(
   // Collect files from each tree
   let base_files : Map[String, @git.ObjectId] = {}
   let their_files : Map[String, @git.ObjectId] = {}
-  collect_tree_files_flat(db, backing_fs, base_tree, "", base_files)
-  collect_tree_files_flat(db, backing_fs, their_tree, "", their_files)
+  collect_tree_files_flat(store, base_tree, "", base_files)
+  collect_tree_files_flat(store, their_tree, "", their_files)
   // Get our current files
-  let our_files = self.bitfs.get_working_files()
+  let our_files = self.tree.get_working_files()
   let our_file_set : Map[String, Bool] = {}
   for f in our_files {
     our_file_set[f] = true
@@ -150,16 +140,13 @@ fn Kv::do_merge(
     let path = entry.0
     let in_base = base_files.contains(path)
     let in_theirs = their_files.contains(path)
-    let in_ours = our_file_set.contains(path) ||
-      self.bitfs.is_file(backing_fs, path)
+    let in_ours = our_file_set.contains(path) || self.tree.is_file(path)
     let base_id = base_files.get(path)
     let their_id = their_files.get(path)
     // Determine if there's a conflict
     if in_theirs && in_ours {
       // Both have the file
-      let our_content = self.bitfs.read_file(backing_fs, path) catch {
-        _ => continue
-      }
+      let our_content = self.tree.read_file(path) catch { _ => continue }
       let our_hash = @git.hash_blob(our_content)
       let their_hash = their_id.unwrap_or(@git.ObjectId::zero())
       if our_hash != their_hash {
@@ -168,9 +155,9 @@ fn Kv::do_merge(
           let base_hash = base_id.unwrap_or(@git.ObjectId::zero())
           if base_hash == our_hash {
             // We didn't change, take theirs
-            let their_content = get_blob_content(db, backing_fs, their_hash)
+            let their_content = get_blob_content(store, their_hash)
             match their_content {
-              Some(c) => self.bitfs.write_file(path, c)
+              Some(c) => self.tree.write_file(path, c)
               None => ()
             }
           } else if base_hash == their_hash {
@@ -180,14 +167,14 @@ fn Kv::do_merge(
             // Both changed - conflict
             conflicts.push(path)
             resolve_conflict(
-              self, db, backing_fs, path, our_content, their_hash, strategy,
+              self, store, path, our_content, their_hash, strategy,
             )
           }
         } else {
           // Both added - conflict
           conflicts.push(path)
           resolve_conflict(
-            self, db, backing_fs, path, our_content, their_hash, strategy,
+            self, store, path, our_content, their_hash, strategy,
           )
         }
       }
@@ -196,9 +183,9 @@ fn Kv::do_merge(
       if not(in_base) {
         // New file from them
         let their_hash = their_id.unwrap_or(@git.ObjectId::zero())
-        let content = get_blob_content(db, backing_fs, their_hash)
+        let content = get_blob_content(store, their_hash)
         match content {
-          Some(c) => self.bitfs.write_file(path, c)
+          Some(c) => self.tree.write_file(path, c)
           None => ()
         }
       }
@@ -220,8 +207,7 @@ fn Kv::do_merge(
 ///|
 fn resolve_conflict(
   db : Kv,
-  obj_db : @lib.ObjectDb,
-  backing_fs : &@git.RepoFileSystem,
+  store : &@lib.ObjectStore,
   path : String,
   our_content : Bytes,
   their_hash : @git.ObjectId,
@@ -230,40 +216,39 @@ fn resolve_conflict(
   match strategy {
     LastWriteWins => {
       // Take theirs (they're "newer" in this context)
-      let content = get_blob_content(obj_db, backing_fs, their_hash)
+      let content = get_blob_content(store, their_hash)
       match content {
-        Some(c) => db.bitfs.write_file(path, c)
+        Some(c) => db.tree.write_file(path, c)
         None => ()
       }
     }
     KeepBoth => {
       // Create conflict markers
-      let their_content = get_blob_content(obj_db, backing_fs, their_hash).unwrap_or(
+      let their_content = get_blob_content(store, their_hash).unwrap_or(
         Bytes::new(0),
       )
       let merged = create_conflict_markers(our_content, their_content)
-      db.bitfs.write_file(path, merged)
+      db.tree.write_file(path, merged)
     }
     Custom(resolver) => {
-      let their_content = get_blob_content(obj_db, backing_fs, their_hash).unwrap_or(
+      let their_content = get_blob_content(store, their_hash).unwrap_or(
         Bytes::new(0),
       )
       let resolved = resolver(our_content, their_content)
-      db.bitfs.write_file(path, resolved)
+      db.tree.write_file(path, resolved)
     }
   }
 }
 
 ///|
 fn get_blob_content(
-  db : @lib.ObjectDb,
-  backing_fs : &@git.RepoFileSystem,
+  store : &@lib.ObjectStore,
   id : @git.ObjectId,
 ) -> Bytes? {
   if id == @git.ObjectId::zero() {
     return None
   }
-  let obj = db.get(backing_fs, id) catch { _ => return None }
+  let obj = store.get(id) catch { _ => return None }
   match obj {
     Some(o) => Some(o.data)
     None => None
@@ -299,33 +284,24 @@ fn create_conflict_markers(ours : Bytes, theirs : Bytes) -> Bytes {
 ///|
 fn Kv::create_merge_commit(
   self : Kv,
-  write_fs : &@git.FileSystem,
-  backing_fs : &@git.RepoFileSystem,
   their_head : @git.ObjectId,
   timestamp : Int64,
 ) -> @git.ObjectId raise @git.GitError {
   let hex = their_head.to_hex()
   let short_hex = String::unsafe_substring(hex, start=0, end=8)
   let message = "Merge " + short_hex
-  // First commit the current working state
-  let snapshot = self.bitfs.snapshot(
-    write_fs,
-    backing_fs,
-    message,
-    self.node_id.id,
-    timestamp,
-  )
+  // Commit the current working state
+  let commit_id = self.tree.snapshot(message, self.node_id.id, timestamp)
   // TODO: Create proper merge commit with two parents
   // For now, just use the snapshot commit
-  self.head = snapshot.commit_id
-  snapshot.commit_id
+  self.head = commit_id
+  commit_id
 }
 
 ///|
 /// Find the merge base (common ancestor) of two commits
 fn find_merge_base(
-  db : @lib.ObjectDb,
-  backing_fs : &@git.RepoFileSystem,
+  store : &@lib.ObjectStore,
   commit1 : @git.ObjectId,
   commit2 : @git.ObjectId,
 ) -> @git.ObjectId? {
@@ -334,15 +310,14 @@ fn find_merge_base(
   }
   // Collect ancestors of commit1
   let ancestors1 : Map[String, Int] = {} // hex -> depth
-  collect_ancestors(db, backing_fs, commit1, 0, ancestors1)
+  collect_ancestors(store, commit1, 0, ancestors1)
   // Find first common ancestor from commit2
-  find_common_ancestor(db, backing_fs, commit2, 0, ancestors1)
+  find_common_ancestor(store, commit2, 0, ancestors1)
 }
 
 ///|
 fn collect_ancestors(
-  db : @lib.ObjectDb,
-  backing_fs : &@git.RepoFileSystem,
+  store : &@lib.ObjectStore,
   commit_id : @git.ObjectId,
   depth : Int,
   result : Map[String, Int],
@@ -355,18 +330,17 @@ fn collect_ancestors(
     return
   }
   result[hex] = depth
-  let obj = db.get(backing_fs, commit_id) catch { _ => return }
+  let obj = store.get(commit_id) catch { _ => return }
   guard obj is Some(o) else { return }
   let commit = @git.parse_commit(o.data) catch { _ => return }
   for parent in commit.parents {
-    collect_ancestors(db, backing_fs, parent, depth + 1, result)
+    collect_ancestors(store, parent, depth + 1, result)
   }
 }
 
 ///|
 fn find_common_ancestor(
-  db : @lib.ObjectDb,
-  backing_fs : &@git.RepoFileSystem,
+  store : &@lib.ObjectStore,
   commit_id : @git.ObjectId,
   _depth : Int,
   ancestors1 : Map[String, Int],
@@ -378,17 +352,11 @@ fn find_common_ancestor(
   if ancestors1.contains(hex) {
     return Some(commit_id)
   }
-  let obj = db.get(backing_fs, commit_id) catch { _ => return None }
+  let obj = store.get(commit_id) catch { _ => return None }
   guard obj is Some(o) else { return None }
   let commit = @git.parse_commit(o.data) catch { _ => return None }
   for parent in commit.parents {
-    let found = find_common_ancestor(
-      db,
-      backing_fs,
-      parent,
-      _depth + 1,
-      ancestors1,
-    )
+    let found = find_common_ancestor(store, parent, _depth + 1, ancestors1)
     if found is Some(_) {
       return found
     }
@@ -398,8 +366,7 @@ fn find_common_ancestor(
 
 ///|
 fn collect_tree_files_flat(
-  db : @lib.ObjectDb,
-  backing_fs : &@git.RepoFileSystem,
+  store : &@lib.ObjectStore,
   tree_id : @git.ObjectId,
   prefix : String,
   result : Map[String, @git.ObjectId],
@@ -407,7 +374,7 @@ fn collect_tree_files_flat(
   if tree_id == @git.ObjectId::zero() {
     return
   }
-  let obj = db.get(backing_fs, tree_id) catch { _ => return }
+  let obj = store.get(tree_id) catch { _ => return }
   guard obj is Some(o) else { return }
   let entries = @git.parse_tree(o.data) catch { _ => return }
   for entry in entries {
@@ -417,7 +384,7 @@ fn collect_tree_files_flat(
       prefix + "/" + entry.name
     }
     if entry.mode == "040000" || entry.mode == "40000" {
-      collect_tree_files_flat(db, backing_fs, entry.id, path, result)
+      collect_tree_files_flat(store, entry.id, path, result)
     } else {
       result[path] = entry.id
     }

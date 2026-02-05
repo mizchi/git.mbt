@@ -155,7 +155,8 @@ pub(all) struct PeerInfo {
 /// Main Kv structure
 pub struct Kv {
   node_id : NodeId
-  bitfs : @fs.Fs
+  tree : &@lib.WorkingTree
+  store : &@lib.ObjectStore
   mut clock : VectorClock
   mut head : @git.ObjectId
   peers : Map[String, PeerInfo] // node_id -> peer
@@ -166,7 +167,6 @@ pub struct Kv {
 /// Configuration for Kv
 pub(all) struct KvConfig {
   node_id : NodeId
-  bitfs_config : @fs.FsConfig
   max_peers : Int
   gossip_interval_ms : Int
   sync_batch_size : Int
@@ -176,7 +176,6 @@ pub(all) struct KvConfig {
 pub fn KvConfig::default(node_id : NodeId) -> KvConfig {
   {
     node_id,
-    bitfs_config: @fs.FsConfig::default(),
     max_peers: 32,
     gossip_interval_ms: 5000,
     sync_batch_size: 100,

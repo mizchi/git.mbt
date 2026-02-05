@@ -76,19 +76,18 @@ pub fn Kv::select_gossip_peers(
 /// Returns optional response message
 pub fn Kv::handle_gossip(
   self : Kv,
-  backing_fs : &@git.RepoFileSystem,
   msg : GossipMessage,
   timestamp : Int64,
 ) -> GossipMessage? {
   match msg {
     Announce(state) => self.handle_announce(state, timestamp)
-    WantObjects(ids) => self.handle_want_objects(backing_fs, ids)
+    WantObjects(ids) => self.handle_want_objects(ids)
     HaveObjects(objects) => {
       self.handle_have_objects(objects)
       None
     }
     SyncRequest(from, their_head) =>
-      self.handle_sync_request(backing_fs, from, their_head)
+      self.handle_sync_request(from, their_head)
     SyncResponse(objects, new_head) => {
       self.handle_sync_response(objects, new_head)
       None
@@ -131,13 +130,12 @@ fn Kv::handle_announce(
 ///|
 fn Kv::handle_want_objects(
   self : Kv,
-  backing_fs : &@git.RepoFileSystem,
   ids : Array[@git.ObjectId],
 ) -> GossipMessage? {
   let objects : Array[GitObject] = []
-  let db = self.bitfs.get_db(backing_fs) catch { _ => return None }
+  let store : &@lib.ObjectStore = self.store
   for id in ids {
-    let obj = db.get(backing_fs, id) catch { _ => continue }
+    let obj = store.get(id) catch { _ => continue }
     guard obj is Some(o) else { continue }
     objects.push({ id, obj_type: o.obj_type, data: o.data })
   }
@@ -158,12 +156,11 @@ fn Kv::handle_have_objects(self : Kv, objects : Array[GitObject]) -> Unit {
 ///|
 fn Kv::handle_sync_request(
   self : Kv,
-  backing_fs : &@git.RepoFileSystem,
   _from : NodeId,
   their_head : @git.ObjectId,
 ) -> GossipMessage? {
   // Find objects they don't have
-  let missing = self.find_missing_objects(backing_fs, their_head)
+  let missing = self.find_missing_objects(their_head)
   if missing.length() > 0 || self.head != their_head {
     Some(SyncResponse(missing, self.head))
   } else {
@@ -189,27 +186,26 @@ fn Kv::handle_sync_response(
 /// This does a simple walk from our HEAD to their HEAD
 fn Kv::find_missing_objects(
   self : Kv,
-  backing_fs : &@git.RepoFileSystem,
   their_head : @git.ObjectId,
 ) -> Array[GitObject] {
   let result : Array[GitObject] = []
   if self.head == their_head || self.head == @git.ObjectId::zero() {
     return result
   }
-  let db = self.bitfs.get_db(backing_fs) catch { _ => return result }
+  let store : &@lib.ObjectStore = self.store
   // Collect objects reachable from our HEAD
   let our_objects : Map[String, Bool] = {}
-  collect_reachable_objects(db, backing_fs, self.head, our_objects)
+  collect_reachable_objects(store, self.head, our_objects)
   // Collect objects reachable from their HEAD
   let their_objects : Map[String, Bool] = {}
   if their_head != @git.ObjectId::zero() {
-    collect_reachable_objects(db, backing_fs, their_head, their_objects)
+    collect_reachable_objects(store, their_head, their_objects)
   }
   // Find objects we have that they don't
   for entry in our_objects {
     if not(their_objects.contains(entry.0)) {
       let id = @git.ObjectId::from_hex(entry.0) catch { _ => continue }
-      let obj = db.get(backing_fs, id) catch { _ => continue }
+      let obj = store.get(id) catch { _ => continue }
       guard obj is Some(o) else { continue }
       result.push({ id, obj_type: o.obj_type, data: o.data })
     }
@@ -219,8 +215,7 @@ fn Kv::find_missing_objects(
 
 ///|
 fn collect_reachable_objects(
-  db : @lib.ObjectDb,
-  backing_fs : &@git.RepoFileSystem,
+  store : &@lib.ObjectStore,
   start : @git.ObjectId,
   result : Map[String, Bool],
 ) -> Unit {
@@ -232,20 +227,20 @@ fn collect_reachable_objects(
     return
   }
   result[hex] = true
-  let obj = db.get(backing_fs, start) catch { _ => return }
+  let obj = store.get(start) catch { _ => return }
   guard obj is Some(o) else { return }
   match o.obj_type {
     Commit => {
       let commit = @git.parse_commit(o.data) catch { _ => return }
-      collect_reachable_objects(db, backing_fs, commit.tree, result)
+      collect_reachable_objects(store, commit.tree, result)
       for parent in commit.parents {
-        collect_reachable_objects(db, backing_fs, parent, result)
+        collect_reachable_objects(store, parent, result)
       }
     }
     Tree => {
       let entries = @git.parse_tree(o.data) catch { _ => return }
       for entry in entries {
-        collect_reachable_objects(db, backing_fs, entry.id, result)
+        collect_reachable_objects(store, entry.id, result)
       }
     }
     Blob | Tag => ()
@@ -255,15 +250,12 @@ fn collect_reachable_objects(
 ///|
 /// Apply pending objects from sync
 /// Returns number of objects applied
-pub fn Kv::apply_pending_objects(
-  self : Kv,
-  write_fs : &@git.FileSystem,
-  git_dir : String,
-) -> Int raise @git.GitError {
+pub fn Kv::apply_pending_objects(self : Kv) -> Int raise @git.GitError {
   let mut count = 0
+  let store : &@lib.ObjectStore = self.store
   for entry in self.pending_objects {
     let obj = entry.1
-    let _ = @lib.write_loose_object(write_fs, git_dir, obj.obj_type, obj.data)
+    let _ = store.put(obj.obj_type, obj.data)
     count = count + 1
   }
   self.pending_objects.clear()

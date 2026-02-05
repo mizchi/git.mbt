@@ -11,7 +11,6 @@ struct TestNetwork {
 ///|
 struct TestNode {
   db : Kv
-  fs : @git.TestFs
 }
 
 ///|
@@ -23,8 +22,19 @@ fn TestNetwork::new(node_count : Int) -> TestNetwork {
       _ => ()
     }
     let node_id = NodeId::new("node-" + i.to_string())
-    let db = Kv::empty(node_id, "/repo/.git")
-    nodes.push({ db, fs })
+    let bitfs = @fs.Fs::empty("/repo/.git")
+    let tree : TestWorkingTree = {
+      fs: bitfs,
+      backing_fs: fs,
+      write_fs: fs,
+    }
+    let store : TestObjectStore = {
+      backing_fs: fs,
+      write_fs: fs,
+      git_dir: "/repo/.git",
+    }
+    let kv = Kv::new(node_id, tree, store, @git.ObjectId::zero())
+    nodes.push({ db: kv })
   }
   { nodes, message_queue: [], tick: 0L }
 }
@@ -48,7 +58,7 @@ fn TestNetwork::process_one(self : TestNetwork) -> Bool {
   }
   let (from, to, msg) = self.message_queue.remove(0)
   let node = self.nodes[to]
-  let response = node.db.handle_gossip(node.fs, msg, self.tick)
+  let response = node.db.handle_gossip(msg, self.tick)
   match response {
     Some(resp) => self.send(to, from, resp)
     None => ()
@@ -105,14 +115,14 @@ test "sync: two nodes basic sync" {
   let node0 = net.node(0)
   node0.db.set("key1", b"value1")
   node0.db.set("key2", b"value2")
-  let _ = node0.db.commit(node0.fs, node0.fs, "Initial", 1000L)
+  let _ = node0.db.commit("Initial", 1000L)
   // Broadcast announce
   net.broadcast_announce(0)
   let _ = net.process_all()
   // Apply pending objects on node 1
   let node1 = net.node(1)
   if node1.db.has_pending_objects() {
-    let _ = node1.db.apply_pending_objects(node1.fs, "/repo/.git")
+    let _ = node1.db.apply_pending_objects()
 
   }
   // Node 1 should have received the objects
@@ -125,14 +135,14 @@ test "sync: three nodes chain sync" {
   // Node 0 creates initial data
   let node0 = net.node(0)
   node0.db.set("shared", b"from-node-0")
-  let _ = node0.db.commit(node0.fs, node0.fs, "Node 0 commit", 1000L)
+  let _ = node0.db.commit("Node 0 commit", 1000L)
   // Sync 0 -> 1
   net.broadcast_announce(0)
   let _ = net.process_all()
   // Node 1 creates more data
   let node1 = net.node(1)
   node1.db.set("from-1", b"data")
-  let _ = node1.db.commit(node1.fs, node1.fs, "Node 1 commit", 2000L)
+  let _ = node1.db.commit("Node 1 commit", 2000L)
   // Sync 1 -> 2
   net.broadcast_announce(1)
   let _ = net.process_all()
@@ -153,8 +163,6 @@ test "sync: concurrent writes from multiple nodes" {
     let node = net.node(i)
     node.db.set("node-" + i.to_string(), Bytes::make(10, (i + 65).to_byte()))
     let _ = node.db.commit(
-      node.fs,
-      node.fs,
       "Commit from " + i.to_string(),
       net.tick,
     )
@@ -202,8 +210,6 @@ test "sync: random operations simulation" {
       if next_random() % 3 == 0 {
         // 33% chance to commit
         let _ = node.db.commit(
-          node.fs,
-          node.fs,
           "Round " + round.to_string(),
           net.tick,
         )
@@ -223,7 +229,7 @@ test "sync: random operations simulation" {
     // Commit any pending changes
     let node = net.node(i)
     if node.db.is_dirty() {
-      let _ = node.db.commit(node.fs, node.fs, "Final commit", net.tick)
+      let _ = node.db.commit("Final commit", net.tick)
 
     }
     net.broadcast_announce(i)
@@ -249,13 +255,13 @@ test "sync: vector clock ordering" {
   // Node 0 writes first
   let node0 = net.node(0)
   node0.db.set("key", b"from-0")
-  let _ = node0.db.commit(node0.fs, node0.fs, "First", 1000L)
+  let _ = node0.db.commit("First", 1000L)
   let clock0 = node0.db.clock()
   // Node 1 writes later
   net.advance_time(1000L)
   let node1 = net.node(1)
   node1.db.set("key", b"from-1")
-  let _ = node1.db.commit(node1.fs, node1.fs, "Second", 2000L)
+  let _ = node1.db.commit("Second", 2000L)
   let clock1 = node1.db.clock()
   // Clocks should be concurrent (neither dominates)
   // since they haven't synced yet
@@ -274,12 +280,12 @@ test "sync: message types" {
   // Setup node 0 with data
   let node0 = net.node(0)
   node0.db.set("data", b"hello")
-  let _ = node0.db.commit(node0.fs, node0.fs, "Setup", 1000L)
+  let _ = node0.db.commit("Setup", 1000L)
   // Test Announce message
   let state = node0.db.get_gossip_state(1000L)
   let announce = GossipMessage::Announce(state)
   let node1 = net.node(1)
-  let response = node1.db.handle_gossip(node1.fs, announce, 1000L)
+  let response = node1.db.handle_gossip(announce, 1000L)
   // Node 1 should request sync since it's behind
   assert_true(response is Some(_))
   // The response should be a SyncRequest
@@ -320,7 +326,7 @@ test "sync: large data transfer" {
     let data = Bytes::make(1000, (i % 256).to_byte())
     node0.db.set("file-" + i.to_string(), data)
   }
-  let _ = node0.db.commit(node0.fs, node0.fs, "50 files", 1000L)
+  let _ = node0.db.commit("50 files", 1000L)
   // Sync to node 1
   net.broadcast_announce(0)
   let _ = net.process_all()

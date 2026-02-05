@@ -36,6 +36,21 @@ pub(open) trait Transport {
 }
 
 ///|
+pub(open) trait WorkingTree {
+  read_file(Self, String) -> Bytes raise @git.GitError
+  write_file(Self, String, Bytes) -> Unit
+  remove_file(Self, String) -> Unit
+  is_file(Self, String) -> Bool
+  is_dir(Self, String) -> Bool
+  readdir(Self, String) -> Array[String] raise @git.GitError
+  is_dirty(Self) -> Bool
+  rollback(Self) -> Unit
+  get_working_files(Self) -> Array[String]
+  snapshot(Self, String, String, Int64) -> @git.ObjectId raise @git.GitError
+  checkout(Self, @git.ObjectId) -> Unit raise @git.GitError
+}
+
+///|
 pub struct EnvProvider {
   get : (String) -> String?
   current_dir : () -> String?

@@ -3,12 +3,23 @@
 ///|
 /// Create test data with specified size
 fn create_test_db(
-  fs : @git.TestFs,
   file_count : Int,
   file_size : Int,
-) -> Kv raise @git.GitError {
+) -> (Kv, @git.TestFs) raise @git.GitError {
+  let fs = @git.TestFs::new()
   @lib.init_repo(fs, "/repo")
-  let db = Kv::empty(NodeId::new("bench-node"), "/repo/.git")
+  let bitfs = @fs.Fs::empty("/repo/.git")
+  let tree : TestWorkingTree = {
+    fs: bitfs,
+    backing_fs: fs,
+    write_fs: fs,
+  }
+  let store : TestObjectStore = {
+    backing_fs: fs,
+    write_fs: fs,
+    git_dir: "/repo/.git",
+  }
+  let db = Kv::new(NodeId::new("bench-node"), tree, store, @git.ObjectId::zero())
   // Create files with different content to avoid dedup
   for i = 0; i < file_count; i = i + 1 {
     let path = "dir" +
@@ -20,41 +31,37 @@ fn create_test_db(
     db.set(path, content)
   }
   // Commit
-  let _ = db.commit(fs, fs, "Initial commit", 1000L)
-  db
+  let _ = db.commit("Initial commit", 1000L)
+  (db, fs)
 }
 
 ///|
 /// Benchmark: Serialize small snapshot (10 files, 1KB each)
 test "bench: serialize small snapshot (10 files x 1KB)" (b : @bench.T) {
-  let fs = @git.TestFs::new()
-  let db = try! create_test_db(fs, 10, 1024)
-  b.bench(fn() { b.keep(db.serialize_snapshot(fs)) })
+  let (db, _fs) = try! create_test_db(10, 1024)
+  b.bench(fn() { b.keep(db.serialize_snapshot()) })
 }
 
 ///|
 /// Benchmark: Serialize medium snapshot (100 files, 1KB each)
 test "bench: serialize medium snapshot (100 files x 1KB)" (b : @bench.T) {
-  let fs = @git.TestFs::new()
-  let db = try! create_test_db(fs, 100, 1024)
-  b.bench(fn() { b.keep(db.serialize_snapshot(fs)) })
+  let (db, _fs) = try! create_test_db(100, 1024)
+  b.bench(fn() { b.keep(db.serialize_snapshot()) })
 }
 
 ///|
 /// Benchmark: Serialize large snapshot (100 files, 10KB each)
 test "bench: serialize large snapshot (100 files x 10KB)" (b : @bench.T) {
-  let fs = @git.TestFs::new()
-  let db = try! create_test_db(fs, 100, 10240)
-  b.bench(fn() { b.keep(db.serialize_snapshot(fs)) })
+  let (db, _fs) = try! create_test_db(100, 10240)
+  b.bench(fn() { b.keep(db.serialize_snapshot()) })
 }
 
 ///|
 /// Benchmark: Snapshot to bytes (full pipeline)
 test "bench: snapshot to bytes (10 files x 1KB)" (b : @bench.T) {
-  let fs = @git.TestFs::new()
-  let db = try! create_test_db(fs, 10, 1024)
+  let (db, _fs) = try! create_test_db(10, 1024)
   b.bench(fn() {
-    let snapshot = db.serialize_snapshot(fs)
+    let snapshot = db.serialize_snapshot()
     b.keep(snapshot.to_bytes())
   })
 }
@@ -62,10 +69,9 @@ test "bench: snapshot to bytes (10 files x 1KB)" (b : @bench.T) {
 ///|
 /// Benchmark: Snapshot to bytes (100 files)
 test "bench: snapshot to bytes (100 files x 1KB)" (b : @bench.T) {
-  let fs = @git.TestFs::new()
-  let db = try! create_test_db(fs, 100, 1024)
+  let (db, _fs) = try! create_test_db(100, 1024)
   b.bench(fn() {
-    let snapshot = db.serialize_snapshot(fs)
+    let snapshot = db.serialize_snapshot()
     b.keep(snapshot.to_bytes())
   })
 }
@@ -73,9 +79,8 @@ test "bench: snapshot to bytes (100 files x 1KB)" (b : @bench.T) {
 ///|
 /// Benchmark: Bytes to snapshot (deserialization)
 test "bench: bytes to snapshot (10 files x 1KB)" (b : @bench.T) {
-  let fs = @git.TestFs::new()
-  let db = try! create_test_db(fs, 10, 1024)
-  let snapshot = db.serialize_snapshot(fs)
+  let (db, _fs) = try! create_test_db(10, 1024)
+  let snapshot = db.serialize_snapshot()
   let bytes = snapshot.to_bytes()
   b.bench(fn() { b.keep(SerializedSnapshot::from_bytes(bytes)) })
 }
@@ -83,9 +88,8 @@ test "bench: bytes to snapshot (10 files x 1KB)" (b : @bench.T) {
 ///|
 /// Benchmark: Bytes to snapshot (100 files)
 test "bench: bytes to snapshot (100 files x 1KB)" (b : @bench.T) {
-  let fs = @git.TestFs::new()
-  let db = try! create_test_db(fs, 100, 1024)
-  let snapshot = db.serialize_snapshot(fs)
+  let (db, _fs) = try! create_test_db(100, 1024)
+  let snapshot = db.serialize_snapshot()
   let bytes = snapshot.to_bytes()
   b.bench(fn() { b.keep(SerializedSnapshot::from_bytes(bytes)) })
 }
@@ -93,10 +97,9 @@ test "bench: bytes to snapshot (100 files x 1KB)" (b : @bench.T) {
 ///|
 /// Benchmark: Round-trip (serialize + deserialize)
 test "bench: round-trip (10 files x 1KB)" (b : @bench.T) {
-  let fs = @git.TestFs::new()
-  let db = try! create_test_db(fs, 10, 1024)
+  let (db, _fs) = try! create_test_db(10, 1024)
   b.bench(fn() {
-    let snapshot = db.serialize_snapshot(fs)
+    let snapshot = db.serialize_snapshot()
     let bytes = snapshot.to_bytes()
     b.keep(SerializedSnapshot::from_bytes(bytes))
   })
@@ -105,10 +108,9 @@ test "bench: round-trip (10 files x 1KB)" (b : @bench.T) {
 ///|
 /// Benchmark: Round-trip (100 files)
 test "bench: round-trip (100 files x 1KB)" (b : @bench.T) {
-  let fs = @git.TestFs::new()
-  let db = try! create_test_db(fs, 100, 1024)
+  let (db, _fs) = try! create_test_db(100, 1024)
   b.bench(fn() {
-    let snapshot = db.serialize_snapshot(fs)
+    let snapshot = db.serialize_snapshot()
     let bytes = snapshot.to_bytes()
     b.keep(SerializedSnapshot::from_bytes(bytes))
   })
@@ -117,16 +119,14 @@ test "bench: round-trip (100 files x 1KB)" (b : @bench.T) {
 ///|
 /// Test: Verify serialization correctness
 test "serialization: round-trip preserves data" {
-  let fs = @git.TestFs::new()
-  @lib.init_repo(fs, "/repo")
-  let db = Kv::empty(NodeId::new("test-node"), "/repo/.git")
+  let (db, _fs) = make_test_kv("test-node", "/repo/.git")
   // Add some data
   db.set("users/alice", b"Alice")
   db.set("users/bob", b"Bob")
   db.set("config/version", b"1.0.0")
-  let _ = db.commit(fs, fs, "Test commit", 12345L)
+  let _ = db.commit("Test commit", 12345L)
   // Serialize
-  let snapshot = db.serialize_snapshot(fs)
+  let snapshot = db.serialize_snapshot()
   let bytes = snapshot.to_bytes()
   // Deserialize
   let restored = SerializedSnapshot::from_bytes(bytes)
@@ -141,13 +141,11 @@ test "serialization: round-trip preserves data" {
 ///|
 /// Test: Statistics calculation
 test "serialization: stats" {
-  let fs = @git.TestFs::new()
-  @lib.init_repo(fs, "/repo")
-  let db = Kv::empty(NodeId::new("test-node"), "/repo/.git")
+  let (db, _fs) = make_test_kv("test-node", "/repo/.git")
   db.set("file1.txt", Bytes::make(100, b'a'))
   db.set("file2.txt", Bytes::make(200, b'b'))
-  let _ = db.commit(fs, fs, "Test", 1000L)
-  let snapshot = db.serialize_snapshot(fs)
+  let _ = db.commit("Test", 1000L)
+  let snapshot = db.serialize_snapshot()
   let stats = snapshot.stats()
   assert_eq(stats.commit_count, 1)
   assert_true(stats.tree_count >= 1)
@@ -159,17 +157,15 @@ test "serialization: stats" {
 ///|
 /// Demo: Show serialization overhead
 test "demo: serialization overhead" {
-  let fs = @git.TestFs::new()
-  @lib.init_repo(fs, "/repo")
-  let db = Kv::empty(NodeId::new("demo-node"), "/repo/.git")
+  let (db, _fs) = make_test_kv("demo-node", "/repo/.git")
   // Create 50 files of 2KB each = 100KB raw data
   for i = 0; i < 50; i = i + 1 {
     // Use different content for each file to avoid dedup
     let file_content = Bytes::make(2048, (i % 256).to_byte())
     db.set("file\{i}.txt", file_content)
   }
-  let _ = db.commit(fs, fs, "50 files", 1000L)
-  let snapshot = db.serialize_snapshot(fs)
+  let _ = db.commit("50 files", 1000L)
+  let snapshot = db.serialize_snapshot()
   let bytes = snapshot.to_bytes()
   let stats = snapshot.stats()
   let raw_size = 50 * 2048

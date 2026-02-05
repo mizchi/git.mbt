@@ -58,10 +58,7 @@ fn _int_to_object_type(n : Int) -> @git.ObjectType {
 
 ///|
 /// Create a serialized snapshot from Kv state
-pub fn Kv::serialize_snapshot(
-  self : Kv,
-  backing_fs : &@git.RepoFileSystem,
-) -> SerializedSnapshot {
+pub fn Kv::serialize_snapshot(self : Kv) -> SerializedSnapshot {
   // Collect clock entries
   let clock_entries : Array[(String, Int64)] = []
   for entry in self.clock.clocks {
@@ -70,10 +67,8 @@ pub fn Kv::serialize_snapshot(
   // Collect reachable objects
   let objects : Array[SerializedObject] = []
   if self.head != @git.ObjectId::zero() {
-    let db = self.bitfs.get_db(backing_fs) catch {
-      _ => return make_empty_snapshot(self)
-    }
-    collect_objects_for_serialization(db, backing_fs, self.head, objects, {})
+    let store : &@lib.ObjectStore = self.store
+    collect_objects_for_serialization(store, self.head, objects, {})
   }
   {
     version: 1,
@@ -85,24 +80,8 @@ pub fn Kv::serialize_snapshot(
 }
 
 ///|
-fn make_empty_snapshot(db : Kv) -> SerializedSnapshot {
-  let clock_entries : Array[(String, Int64)] = []
-  for entry in db.clock.clocks {
-    clock_entries.push((entry.0, entry.1))
-  }
-  {
-    version: 1,
-    node_id: db.node_id.id,
-    head: object_id_to_bytes(db.head),
-    clock: clock_entries,
-    objects: [],
-  }
-}
-
-///|
 fn collect_objects_for_serialization(
-  db : @lib.ObjectDb,
-  backing_fs : &@git.RepoFileSystem,
+  store : &@lib.ObjectStore,
   id : @git.ObjectId,
   objects : Array[SerializedObject],
   visited : Map[String, Bool],
@@ -115,7 +94,7 @@ fn collect_objects_for_serialization(
     return
   }
   visited[hex] = true
-  let obj = db.get(backing_fs, id) catch { _ => return }
+  let obj = store.get(id) catch { _ => return }
   guard obj is Some(o) else { return }
   // Add this object
   objects.push({
@@ -127,29 +106,15 @@ fn collect_objects_for_serialization(
   match o.obj_type {
     Commit => {
       let commit = @git.parse_commit(o.data) catch { _ => return }
-      collect_objects_for_serialization(
-        db,
-        backing_fs,
-        commit.tree,
-        objects,
-        visited,
-      )
+      collect_objects_for_serialization(store, commit.tree, objects, visited)
       for parent in commit.parents {
-        collect_objects_for_serialization(
-          db, backing_fs, parent, objects, visited,
-        )
+        collect_objects_for_serialization(store, parent, objects, visited)
       }
     }
     Tree => {
       let entries = @git.parse_tree(o.data) catch { _ => return }
       for entry in entries {
-        collect_objects_for_serialization(
-          db,
-          backing_fs,
-          entry.id,
-          objects,
-          visited,
-        )
+        collect_objects_for_serialization(store, entry.id, objects, visited)
       }
     }
     Blob | Tag => ()
