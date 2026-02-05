@@ -881,7 +881,8 @@ async fn handle_multi_pack_index(args : Array[String]) -> Unit raise Error {
     None => pack_dir
   }
   match subcommand {
-    Some("write") => midx_write(fs, effective_pack_dir, progress, preferred_pack)
+    Some("write") =>
+      midx_write(fs, effective_pack_dir, progress, preferred_pack)
     Some("verify") => midx_verify(fs, effective_pack_dir)
     Some("expire") => midx_expire(fs, effective_pack_dir, progress)
     Some("repack") => midx_repack(fs, effective_pack_dir, batch_size, progress)
@@ -919,7 +920,7 @@ async fn midx_write(
       let mut value = name
       if value.has_suffix(".idx") {
         let end = value.length() - 4
-        value = String::unsafe_substring(value, start=0, end=end) + ".pack"
+        value = String::unsafe_substring(value, start=0, end~) + ".pack"
       }
       match value.rev_find("/") {
         Some(idx) =>
@@ -944,7 +945,8 @@ async fn midx_write(
       preferred_pack_idx = Some(pack_idx)
     }
     let entries = midx_read_pack_index(fs, idx_path, pack_idx)
-    if normalized_preferred.length() > 0 && pack_name == normalized_preferred &&
+    if normalized_preferred.length() > 0 &&
+      pack_name == normalized_preferred &&
       entries.length() == 0 {
       eprint_line("preferred pack " + pack_name + " with no objects")
       @sys.exit(1)
@@ -960,7 +962,7 @@ async fn midx_write(
       return cmp
     }
     match preferred_pack_idx {
-      Some(pref_idx) => {
+      Some(pref_idx) =>
         if a.pack_idx == pref_idx && b.pack_idx != pref_idx {
           -1
         } else if a.pack_idx != pref_idx && b.pack_idx == pref_idx {
@@ -968,7 +970,6 @@ async fn midx_write(
         } else {
           0
         }
-      }
       None => 0
     }
   })

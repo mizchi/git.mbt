@@ -7,7 +7,7 @@ pub fn rev_parse(
   spec : String,
 ) -> @git.ObjectId? raise @git.GitError {
   match spec.find(":") {
-    Some(idx) => {
+    Some(idx) =>
       if idx > 0 && idx + 1 < spec.length() {
         let rev_part = substring_revparse(spec, 0, idx)
         let path_part = substring_revparse(spec, idx + 1, spec.length())
@@ -15,7 +15,6 @@ pub fn rev_parse(
         guard base is Some(base_id) else { return None }
         return resolve_path_in_commit(fs, git_dir, base_id, path_part)
       }
-    }
     None => ()
   }
   // Parse suffix (^, ^^, ~n, ^n)

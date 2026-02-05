@@ -77,7 +77,7 @@ pub fn checkout(
         target = Some(id)
         refname = Some(name)
       }
-      None => {
+      None =>
         if not(spec.has_prefix("refs/")) {
           let remote_ref = "refs/remotes/origin/" + spec
           match resolve_ref(rfs, actual_git_dir, remote_ref) {
@@ -89,15 +89,24 @@ pub fn checkout(
                 fs.mkdir_p(dir)
               }
               fs.write_string(ref_path, id.to_hex() + "\n")
-              set_config_key(fs, rfs, actual_git_dir, "branch", spec, "remote", "origin")
-              set_config_key(fs, rfs, actual_git_dir, "branch", spec, "merge", "refs/heads/" + spec)
+              set_config_key(
+                fs, rfs, actual_git_dir, "branch", spec, "remote", "origin",
+              )
+              set_config_key(
+                fs,
+                rfs,
+                actual_git_dir,
+                "branch",
+                spec,
+                "merge",
+                "refs/heads/" + spec,
+              )
               target = Some(id)
               refname = Some(local_ref)
             }
             None => ()
           }
         }
-      }
     }
   }
   match target {

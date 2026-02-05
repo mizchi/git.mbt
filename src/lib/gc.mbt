@@ -157,7 +157,15 @@ fn repack_from_objects(
     return None
   }
   let pack = @git.create_packfile(objects)
-  @git.write_packfile_with_index(fs, git_dir, pack, objects)
+  // Force index rebuild from the newly created pack to avoid stale offsets/CRC
+  // carried from source packs.
+  let objects_for_index : Array[@git.PackObject] = []
+  for obj in objects {
+    objects_for_index.push(
+      @git.PackObject::with_metadata(obj.obj_type, obj.data, obj.id, -1, 0U),
+    )
+  }
+  @git.write_packfile_with_index(fs, git_dir, pack, objects_for_index)
   let pack_id = pack_trailer_id(pack)
   Some({ pack_id, object_count: objects.length(), pack_bytes: pack.length() })
 }

@@ -563,7 +563,9 @@ fn resolve_tag_chain(
       break
     }
     seen[key] = true
-    let obj = try db.get(fs, current) catch { _ => None } noraise {
+    let obj = try db.get(fs, current) catch {
+      _ => None
+    } noraise {
       value => value
     }
     match obj {
@@ -611,7 +613,7 @@ fn collect_include_tag_objects(
     let (_name, id) = pair
     let (chain, target) = resolve_tag_chain(db, fs, id)
     match target {
-      Some(t) if included.contains(t.to_hex()) => {
+      Some(t) if included.contains(t.to_hex()) =>
         for tag in chain {
           let tag_hex = object_hex(tag)
           if added.contains(tag_hex) {
@@ -621,7 +623,6 @@ fn collect_include_tag_objects(
           included[tag_hex] = true
           out.push(tag)
         }
-      }
       _ => ()
     }
   }
@@ -701,8 +702,6 @@ fn normalize_dir_entry(entry : String) -> String {
       }
   }
 }
-
-
 
 ///|
 fn collect_pack_index_ids(fs : OsFs, idx_path : String) -> Array[String] {
@@ -910,7 +909,7 @@ fn filter_objects(
 ///|
 async fn report_collect_error(err : @git.GitError) -> Unit {
   match err {
-    @git.GitError::InvalidObject(msg) => {
+    @git.GitError::InvalidObject(msg) =>
       if msg.contains("Missing tree object") {
         @stdio.stderr.write("fatal: bad tree object\n")
       } else if msg.contains("Missing commit object") {
@@ -920,10 +919,9 @@ async fn report_collect_error(err : @git.GitError) -> Unit {
       } else {
         @stdio.stderr.write("fatal: " + msg + "\n")
       }
-    }
     @git.GitError::HashMismatch(expected, actual) =>
       @stdio.stderr.write(
-        "fatal: hash mismatch (expected " + expected + ", got " + actual + ")\n"
+        "fatal: hash mismatch (expected " + expected + ", got " + actual + ")\n",
       )
     @git.GitError::PackfileError(msg) =>
       @stdio.stderr.write("fatal: " + msg + "\n")
@@ -972,7 +970,7 @@ async fn run_real_git_pack_objects_with_input(
   let tmp_path = tmp_dir + "/" + tmp_name
   fs.write_file(tmp_path, input)
   let stdin = @process.redirect_from_file(tmp_path)
-      let code = @process.run(real_git, args, inherit_env=true, stdin~)
+  let code = @process.run(real_git, args, inherit_env=true, stdin~)
   fs.remove_file(tmp_path)
   @sys.exit(code)
 }
@@ -994,10 +992,9 @@ fn corrupt_pack_file(fs : OsFs, pack_path : String) -> Unit {
     if data.length() == 0 {
       return
     }
-    let bytes : FixedArray[Byte] = FixedArray::makei(
-      data.length(),
-      fn(i) { data[i] },
-    )
+    let bytes : FixedArray[Byte] = FixedArray::makei(data.length(), fn(i) {
+      data[i]
+    })
     let last = data.length() - 1
     let v = bytes[last].to_int()
     bytes[last] = (v ^ 1).to_byte()
@@ -1055,6 +1052,7 @@ fn append_commit_ids_from_objects(
 }
 
 ///|
+
 ///|
 fn collect_objects_from_ref_allow_missing(
   db : @gitlib.ObjectDb,
@@ -1071,11 +1069,13 @@ fn collect_objects_from_ref_allow_missing(
   if seen.contains(hex) {
     return ()
   }
-  let obj = try db.get(fs, id) catch { _ => None } noraise {
+  let obj = try db.get(fs, id) catch {
+    _ => None
+  } noraise {
     value => value
   }
   match obj {
-    Some(o) => {
+    Some(o) =>
       match o.obj_type {
         @git.ObjectType::Commit =>
           collect_commit_objects_allow_missing(db, fs, id, blocked, seen, out)
@@ -1089,18 +1089,12 @@ fn collect_objects_from_ref_allow_missing(
           match parse_tag_target_id(o.data) {
             Some(target) =>
               collect_objects_from_ref_allow_missing(
-                db,
-                fs,
-                target,
-                blocked,
-                seen,
-                out,
+                db, fs, target, blocked, seen, out,
               )
             None => ()
           }
         }
       }
-    }
     None => ()
   }
 }
@@ -1253,7 +1247,9 @@ fn collect_excluded_commit_ids(
       continue
     }
     excluded[hex] = true
-    let obj = try db.get(fs, id) catch { _ => None } noraise {
+    let obj = try db.get(fs, id) catch {
+      _ => None
+    } noraise {
       value => value
     }
     match obj {
@@ -1275,7 +1271,9 @@ fn read_commit_tree(
   fs : OsFs,
   commit_id : @git.ObjectId,
 ) -> @git.ObjectId? {
-  let obj = try db.get(fs, commit_id) catch { _ => None } noraise {
+  let obj = try db.get(fs, commit_id) catch {
+    _ => None
+  } noraise {
     value => value
   }
   match obj {
@@ -1319,7 +1317,9 @@ fn collect_sparse_tree_objects(
   if seen.contains(hex) {
     return ()
   }
-  let obj = try db.get(fs, tree_id) catch { _ => None } noraise {
+  let obj = try db.get(fs, tree_id) catch {
+    _ => None
+  } noraise {
     value => value
   }
   match obj {
@@ -1328,7 +1328,9 @@ fn collect_sparse_tree_objects(
       let base_entries : Map[String, @git.TreeEntry] = {}
       match base_tree_id {
         Some(base_id) => {
-          let base_obj = try db.get(fs, base_id) catch { _ => None } noraise {
+          let base_obj = try db.get(fs, base_id) catch {
+            _ => None
+          } noraise {
             value => value
           }
           match base_obj {
@@ -1403,7 +1405,9 @@ fn collect_sparse_commit_objects(
     return ()
   }
   seen[hex] = true
-  let obj = try db.get(fs, commit_id) catch { _ => None } noraise {
+  let obj = try db.get(fs, commit_id) catch {
+    _ => None
+  } noraise {
     value => value
   }
   match obj {
@@ -1422,13 +1426,7 @@ fn collect_sparse_commit_objects(
       )
       for parent in info.parents {
         collect_sparse_commit_objects(
-          db,
-          fs,
-          parent,
-          excluded,
-          blocked,
-          seen,
-          out,
+          db, fs, parent, excluded, blocked, seen, out,
         )
       }
     }
@@ -1449,13 +1447,7 @@ fn collect_sparse_objects_from_commits(
   let out : Array[@git.PackObject] = []
   for commit_id in include_commits {
     collect_sparse_commit_objects(
-      db,
-      fs,
-      commit_id,
-      excluded,
-      blocked,
-      seen,
-      out,
+      db, fs, commit_id, excluded, blocked, seen, out,
     )
   }
   out
@@ -1816,12 +1808,12 @@ async fn handle_pack_objects(args : Array[String]) -> Unit {
               None => ()
             }
           }
-        if !handled {
-          match @gitlib.rev_parse(fs, git_dir, spec) {
-            None => {
-              @stdio.stderr.write("fatal: bad revision '" + spec + "'\n")
-              @sys.exit(1)
-            }
+          if !handled {
+            match @gitlib.rev_parse(fs, git_dir, spec) {
+              None => {
+                @stdio.stderr.write("fatal: bad revision '" + spec + "'\n")
+                @sys.exit(1)
+              }
               Some(id) => {
                 let (tags, peeled) = resolve_tag_chain(db, fs, id)
                 let resolved = match peeled {
@@ -1845,11 +1837,11 @@ async fn handle_pack_objects(args : Array[String]) -> Unit {
           None => None
         }
         let cfg_sparse = get_pack_use_sparse(git_dir)
-        let in_git_tests =
-          match @sys.get_env_var("GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME") {
-            Some(_) => true
-            None => false
-          }
+        let in_git_tests = match
+          @sys.get_env_var("GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME") {
+          Some(_) => true
+          None => false
+        }
         let default_sparse = cfg_sparse || in_git_tests
         let use_sparse = match cfg.sparse_mode {
           Some(value) => value
@@ -1861,18 +1853,14 @@ async fn handle_pack_objects(args : Array[String]) -> Unit {
         }
         if use_sparse {
           objects = collect_sparse_objects_from_commits(
-            db,
-            fs,
-            include_commits,
-            exclude_commits,
+            db, fs, include_commits, exclude_commits,
           )
         } else {
           let allow_missing = match cfg.missing_mode {
             MissingMode::AllowAny => true
             _ => false
           }
-          let allow_missing_for_local =
-            allow_missing ||
+          let allow_missing_for_local = allow_missing ||
             cfg.local_only ||
             cfg.honor_pack_keep ||
             cfg.incremental ||
@@ -1880,16 +1868,11 @@ async fn handle_pack_objects(args : Array[String]) -> Unit {
           let include_objects = if allow_missing_for_local {
             let blocked : Map[String, Bool] = {}
             collect_reachable_objects_from_commits_allow_missing(
-              db,
-              fs,
-              include_commits,
-              blocked,
+              db, fs, include_commits, blocked,
             )
           } else {
-            try @gitlib.collect_reachable_objects_from_commits(
-              db,
-              fs,
-              include_commits,
+            @gitlib.collect_reachable_objects_from_commits(
+              db, fs, include_commits,
             ) catch {
               err => {
                 report_collect_error(err)
@@ -1901,13 +1884,9 @@ async fn handle_pack_objects(args : Array[String]) -> Unit {
             objects = include_objects
           } else {
             let blocked : Map[String, Bool] = {}
-            let exclude_objects =
-              collect_reachable_objects_from_commits_allow_missing(
-                db,
-                fs,
-                exclude_commits,
-                blocked,
-              )
+            let exclude_objects = collect_reachable_objects_from_commits_allow_missing(
+              db, fs, exclude_commits, blocked,
+            )
             let exclude_set : Map[String, Bool] = {}
             for obj in exclude_objects {
               let id = @git.hash_object_content(obj.obj_type, obj.data)
@@ -1983,9 +1962,9 @@ async fn handle_pack_objects(args : Array[String]) -> Unit {
                 match db.get(fs, id) {
                   None =>
                     if (match cfg.missing_mode {
-                      MissingMode::AllowAny => true
-                      _ => false
-                    }) {
+                        MissingMode::AllowAny => true
+                        _ => false
+                      }) {
                       ()
                     } else {
                       @stdio.stderr.write(
@@ -2046,10 +2025,7 @@ async fn handle_pack_objects(args : Array[String]) -> Unit {
       if cfg.progress {
         let enumerated = objects.length()
         let pack_reused = count_pack_reused_objects(
-          fs,
-          git_dir,
-          pack_dir,
-          objects,
+          fs, git_dir, pack_dir, objects,
         )
         @stdio.stderr.write(
           "Enumerating objects: " + enumerated.to_string() + ", done\n",

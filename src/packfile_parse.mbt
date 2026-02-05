@@ -42,7 +42,9 @@ pub fn max_delta_chain_length(data : Bytes) -> Int raise GitError {
           e => raise GitError::PackfileError("Zlib error: \{e}")
         }
         if content.length() != size {
-          raise GitError::PackfileError("Object size mismatch: expected=\{size}, got=\{content.length()}")
+          raise GitError::PackfileError(
+            "Object size mismatch: expected=\{size}, got=\{content.length()}",
+          )
         }
         (obj_type, content, after)
       }
@@ -56,7 +58,9 @@ pub fn max_delta_chain_length(data : Bytes) -> Int raise GitError {
           e => raise GitError::PackfileError("Zlib error: \{e}")
         }
         if delta.length() != size {
-          raise GitError::PackfileError("Delta size mismatch: expected=\{size}, got=\{delta.length()}")
+          raise GitError::PackfileError(
+            "Delta size mismatch: expected=\{size}, got=\{delta.length()}",
+          )
         }
         let crc = crc32_range(data, obj_offset, after)
         let placeholder = PackObject::with_metadata(
@@ -73,7 +77,9 @@ pub fn max_delta_chain_length(data : Bytes) -> Int raise GitError {
         by_offset[obj_offset] = idx
         match by_offset.get(base_offset) {
           Some(base_index) =>
-            if base_index >= 0 && base_index < objects.length() && resolved[base_index] {
+            if base_index >= 0 &&
+              base_index < objects.length() &&
+              resolved[base_index] {
               let base = objects[base_index]
               let content = apply_delta(base.data, delta)
               let obj_id = hash_object_content(base.obj_type, content)
@@ -94,7 +100,11 @@ pub fn max_delta_chain_length(data : Bytes) -> Int raise GitError {
               insert_pack_object_by_id(by_id, obj)
               by_id_depth[obj_id.to_hex()] = depth
             } else {
-              pending.push({ index: idx, base: DeltaBaseRef::Ofs(base_index), delta })
+              pending.push({
+                index: idx,
+                base: DeltaBaseRef::Ofs(base_index),
+                delta,
+              })
             }
           None =>
             raise GitError::PackfileError("Missing base object for OFS_DELTA")
@@ -107,7 +117,9 @@ pub fn max_delta_chain_length(data : Bytes) -> Int raise GitError {
           e => raise GitError::PackfileError("Zlib error: \{e}")
         }
         if delta.length() != size {
-          raise GitError::PackfileError("Delta size mismatch: expected=\{size}, got=\{delta.length()}")
+          raise GitError::PackfileError(
+            "Delta size mismatch: expected=\{size}, got=\{delta.length()}",
+          )
         }
         let crc = crc32_range(data, obj_offset, after)
         let placeholder = PackObject::with_metadata(
@@ -147,12 +159,15 @@ pub fn max_delta_chain_length(data : Bytes) -> Int raise GitError {
             insert_pack_object_by_id(by_id, obj)
             by_id_depth[obj_id.to_hex()] = depth
           }
-          None => pending.push({ index: idx, base: DeltaBaseRef::Ref(base_id), delta })
+          None =>
+            pending.push({ index: idx, base: DeltaBaseRef::Ref(base_id), delta })
         }
         (ObjectType::Blob, Bytes::from_array([]), after)
       }
       _ =>
-        raise GitError::PackfileError("Unknown packfile object type: \{type_id}")
+        raise GitError::PackfileError(
+          "Unknown packfile object type: \{type_id}",
+        )
     }
     offset = after
     if type_id == 1 || type_id == 2 || type_id == 3 || type_id == 4 {

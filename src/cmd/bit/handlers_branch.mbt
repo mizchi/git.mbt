@@ -98,35 +98,26 @@ async fn handle_branch(args : Array[String]) -> Unit raise Error {
         match upstream.find("/") {
           Some(idx) => {
             remote_name = String::unsafe_substring(upstream, start=0, end=idx)
-            let name = String::unsafe_substring(upstream, start=idx + 1, end=upstream.length())
+            let name = String::unsafe_substring(
+              upstream,
+              start=idx + 1,
+              end=upstream.length(),
+            )
             merge_ref = "refs/heads/" + name
           }
           None => merge_ref = "refs/heads/" + upstream
         }
       }
       @gitlib.set_config_key(
-        fs,
-        fs,
-        git_dir,
-        "branch",
-        branch_name,
-        "remote",
-        remote_name,
+        fs, fs, git_dir, "branch", branch_name, "remote", remote_name,
       )
       @gitlib.set_config_key(
-        fs,
-        fs,
-        git_dir,
-        "branch",
-        branch_name,
-        "merge",
-        merge_ref,
+        fs, fs, git_dir, "branch", branch_name, "merge", merge_ref,
       )
       return
     }
     None => ()
   }
-
   match delete_branch {
     Some(name) => {
       @gitlib.delete_branch(fs, fs, root, name, force=force_delete)
@@ -154,7 +145,9 @@ async fn handle_branch(args : Array[String]) -> Unit raise Error {
                 Some(sp) => {
                   let commit_id = @gitlib.rev_parse(fs, git_dir, sp)
                   guard commit_id is Some(id) else {
-                    raise @git.GitError::InvalidObject("unknown revision: \{sp}")
+                    raise @git.GitError::InvalidObject(
+                      "unknown revision: \{sp}",
+                    )
                   }
                   @gitlib.create_branch_at(fs, fs, root, name, id)
                 }
@@ -188,22 +181,10 @@ async fn handle_branch(args : Array[String]) -> Unit raise Error {
                   }
                 }
                 @gitlib.set_config_key(
-                  fs,
-                  fs,
-                  git_dir,
-                  "branch",
-                  name,
-                  "remote",
-                  remote_name,
+                  fs, fs, git_dir, "branch", name, "remote", remote_name,
                 )
                 @gitlib.set_config_key(
-                  fs,
-                  fs,
-                  git_dir,
-                  "branch",
-                  name,
-                  "merge",
-                  merge_ref,
+                  fs, fs, git_dir, "branch", name, "merge", merge_ref,
                 )
               }
             }

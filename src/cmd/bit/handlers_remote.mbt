@@ -2219,7 +2219,11 @@ async fn handle_upload_pack(args : Array[String]) -> Unit {
     } else {
       root + "/.git"
     }
-    let config_git_dir = if fs.is_file(root + "/config") { root } else { git_dir }
+    let config_git_dir = if fs.is_file(root + "/config") {
+      root
+    } else {
+      git_dir
+    }
     if is_sha256_repo(config_git_dir) {
       match real_git_path() {
         Some(real_git) => {
@@ -2241,24 +2245,24 @@ async fn handle_upload_pack(args : Array[String]) -> Unit {
         break
       }
     }
-    let allow_filter =
-      match git_config_get(config_git_dir, "uploadpack", "allowfilter") {
-        Some(value) =>
-          match parse_bool_value(value) {
-            Some(flag) => flag
-            None => false
-          }
-        None => false
-      }
-    let allow_any_want =
-      match git_config_get(config_git_dir, "uploadpack", "allowanysha1inwant") {
-        Some(value) =>
-          match parse_bool_value(value) {
-            Some(flag) => flag
-            None => false
-          }
-        None => false
-      }
+    let allow_filter = match
+      git_config_get(config_git_dir, "uploadpack", "allowfilter") {
+      Some(value) =>
+        match parse_bool_value(value) {
+          Some(flag) => flag
+          None => false
+        }
+      None => false
+    }
+    let allow_any_want = match
+      git_config_get(config_git_dir, "uploadpack", "allowanysha1inwant") {
+      Some(value) =>
+        match parse_bool_value(value) {
+          Some(flag) => flag
+          None => false
+        }
+      None => false
+    }
     if has_uploadpackfilter || allow_filter || allow_any_want {
       match real_git_path() {
         Some(real_git) => {
@@ -2697,8 +2701,11 @@ async fn handle_fetch(args : Array[String]) -> Unit raise Error {
       has_filter_flag = true
       continue
     }
-    if arg == "--prune" || arg == "-p" || arg == "--prune-tags" ||
-      arg == "--tags" || arg == "--no-tags" {
+    if arg == "--prune" ||
+      arg == "-p" ||
+      arg == "--prune-tags" ||
+      arg == "--tags" ||
+      arg == "--no-tags" {
       continue
     }
     warn_unimplemented_arg("fetch", arg)
@@ -2749,13 +2756,12 @@ async fn handle_pull(args : Array[String]) -> Unit raise Error {
     match arg {
       "--rebase" | "-r" => rebase = true
       _ if arg.has_prefix("-") => warn_unimplemented_arg("pull", arg)
-      _ => {
+      _ =>
         if arg_remote is None {
           arg_remote = Some(arg)
         } else if arg_refspec is None {
           arg_refspec = Some(arg)
         }
-      }
     }
   }
   // Apply explicit remote argument
@@ -2855,7 +2861,12 @@ async fn handle_pull(args : Array[String]) -> Unit raise Error {
           Some((src_git_dir, _)) =>
             match @gitlib.resolve_ref(fs, src_git_dir, upstream_ref) {
               Some(id) => {
-                @gitlib.copy_tree(fs, fs, src_git_dir + "/objects", git_dir + "/objects")
+                @gitlib.copy_tree(
+                  fs,
+                  fs,
+                  src_git_dir + "/objects",
+                  git_dir + "/objects",
+                )
                 write_ref_file(fs, git_dir, target_ref, id)
                 target_id = Some(id)
               }
@@ -2915,6 +2926,7 @@ async fn handle_pull(args : Array[String]) -> Unit raise Error {
     }
   }
 }
+
 ///|
 async fn handle_push(args : Array[String]) -> Unit raise Error {
   let root = get_work_root()
@@ -2995,8 +3007,11 @@ async fn handle_push(args : Array[String]) -> Unit raise Error {
       print_line("Pushing to \{url}...")
       match @gitlib.resolve_local_repo_path(fs, root, url) {
         Some(remote_path) => {
-          let remote_git_dir = @gitlib.detect_git_dir(fs, remote_path)
-            .map(fn(pair) { pair.0 })
+          let remote_git_dir = @gitlib.detect_git_dir(fs, remote_path).map(fn(
+            pair,
+          ) {
+            pair.0
+          })
           guard remote_git_dir is Some(rgd) else {
             raise @git.GitError::InvalidObject(
               "Not a git repository: " + remote_path,
@@ -3007,8 +3022,7 @@ async fn handle_push(args : Array[String]) -> Unit raise Error {
             None =>
               match @gitlib.resolve_head_commit(fs, git_dir) {
                 Some(id) => id
-                None =>
-                  raise @git.GitError::InvalidObject("HEAD not found")
+                None => raise @git.GitError::InvalidObject("HEAD not found")
               }
           }
           @gitlib.copy_tree(fs, fs, git_dir + "/objects", rgd + "/objects")

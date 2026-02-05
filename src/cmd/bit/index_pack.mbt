@@ -153,7 +153,9 @@ fn parse_index_pack_args(args : Array[String]) -> IndexPackParse {
       return IndexPackParse::Error("fatal: too many arguments")
     }
     if verify && verify_stat_only {
-      return IndexPackParse::Error("fatal: --verify-stat-only cannot be used with --verify")
+      return IndexPackParse::Error(
+        "fatal: --verify-stat-only cannot be used with --verify",
+      )
     }
     if !stdin && !verify && !verify_stat_only && pack_path is None {
       return IndexPackParse::Unsupported
@@ -162,7 +164,9 @@ fn parse_index_pack_args(args : Array[String]) -> IndexPackParse {
       return IndexPackParse::Error("fatal: --verify requires a pack file")
     }
     if verify_stat_only && pack_path is None {
-      return IndexPackParse::Error("fatal: --verify-stat-only requires a pack file")
+      return IndexPackParse::Error(
+        "fatal: --verify-stat-only requires a pack file",
+      )
     }
   }
   IndexPackParse::Ok({
@@ -695,12 +699,13 @@ async fn handle_index_pack(args : Array[String]) -> Unit {
           }
         }
       }
-
       if cfg.verify_stat_only {
         let pack_path = match cfg.pack_path {
           Some(path) => resolve_in_cwd(path)
           None => {
-            @stdio.stderr.write("fatal: --verify-stat-only requires a pack file\n")
+            @stdio.stderr.write(
+              "fatal: --verify-stat-only requires a pack file\n",
+            )
             @sys.exit(1)
             ""
           }
@@ -774,7 +779,9 @@ async fn handle_index_pack(args : Array[String]) -> Unit {
           @sys.exit(1)
         }
         let bases = if cfg.fix_thin {
-          @gitlib.load_all_objects_from_fs(fs, git_dir) catch { _ => [] }
+          @gitlib.load_all_objects_from_fs(fs, git_dir) catch {
+            _ => []
+          }
         } else {
           []
         }

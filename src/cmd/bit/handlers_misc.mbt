@@ -2716,13 +2716,12 @@ async fn handle_submodule_add(
         branch = Some(args[i])
       }
       _ if arg.has_prefix("-") => warn_unimplemented_arg("submodule add", arg)
-      _ => {
+      _ =>
         if url.length() == 0 {
           url = arg
         } else if path.length() == 0 {
           path = arg
         }
-      }
     }
     i += 1
   }
@@ -2750,10 +2749,7 @@ async fn handle_submodule_add(
   let modules_config = modules_dir + "/config"
   set_config(fs, modules_config, "remote.origin.url", url, false)
   set_config(
-    fs,
-    modules_config,
-    "remote.origin.fetch",
-    "+refs/heads/*:refs/remotes/origin/*",
+    fs, modules_config, "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*",
     false,
   )
   fetch_submodule_objects(fs, root, modules_dir, url, target_id)
@@ -2766,11 +2762,7 @@ async fn handle_submodule_add(
   ensure_submodule_gitdir_config(fs, modules_dir, sub_path)
   run_checkout_in_submodule(fs, fs, sub_path, modules_dir, target_id)
   @gitlib.apply_worktree_modes_from_commit(
-    fs,
-    fs,
-    sub_path,
-    modules_dir,
-    target_id,
+    fs, fs, sub_path, modules_dir, target_id,
   ) catch {
     err =>
       eprint_line(
@@ -2835,7 +2827,7 @@ async fn resolve_submodule_head_id(
 ) -> @git.ObjectId raise Error {
   let rfs : &@git.RepoFileSystem = fs
   match @gitlib.resolve_local_repo_path(rfs, root, url) {
-    Some(src_path) => {
+    Some(src_path) =>
       match @gitlib.detect_git_dir(rfs, src_path) {
         Some((src_git_dir, _)) => {
           let head = @gitlib.resolve_head_commit(rfs, src_git_dir)
@@ -2850,7 +2842,6 @@ async fn resolve_submodule_head_id(
         None =>
           raise @git.GitError::InvalidObject("Not a git repository: " + url)
       }
-    }
     None => {
       let resolved = resolve_remote_ref_id(url, "HEAD")
       match resolved {
@@ -2872,23 +2863,16 @@ fn update_submodule_index_entry(
   id : @git.ObjectId,
 ) -> Unit raise Error {
   let rfs : &@git.RepoFileSystem = fs
-  let entries = @gitlib.read_index_entries(rfs, git_dir) catch {
-    _ => []
-  }
+  let entries = @gitlib.read_index_entries(rfs, git_dir) catch { _ => [] }
   let out : Array[@gitlib.IndexEntry] = []
   for e in entries {
     if e.path != path {
       out.push(e)
     }
   }
-  out.push(@gitlib.IndexEntry::new(
-    path,
-    id,
-    57344,
-    0,
-    mtime_sec=0,
-    mtime_nsec=0,
-  ))
+  out.push(
+    @gitlib.IndexEntry::new(path, id, 57344, 0, mtime_sec=0, mtime_nsec=0),
+  )
   @gitlib.write_index_entries(fs, git_dir, out)
 }
 
@@ -3052,10 +3036,7 @@ async fn handle_submodule_update(
       let config_path = modules_dir + "/config"
       set_config(fs, config_path, "remote.origin.url", sub.url, false)
       set_config(
-        fs,
-        config_path,
-        "remote.origin.fetch",
-        "+refs/heads/*:refs/remotes/origin/*",
+        fs, config_path, "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*",
         false,
       )
       has_modules = true
@@ -3064,10 +3045,7 @@ async fn handle_submodule_update(
       let config_path = modules_dir + "/config"
       set_config(fs, config_path, "remote.origin.url", sub.url, false)
       set_config(
-        fs,
-        config_path,
-        "remote.origin.fetch",
-        "+refs/heads/*:refs/remotes/origin/*",
+        fs, config_path, "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*",
         false,
       )
       fetch_submodule_objects(fs, root, modules_dir, sub.url, target_id)
@@ -3106,6 +3084,7 @@ async fn handle_submodule_update(
 }
 
 ///|
+
 ///|
 async fn fetch_submodule_objects(
   fs : OsFs,
@@ -3166,8 +3145,12 @@ fn run_checkout_in_submodule(
   ) catch {
     _ => return
   }
-  let entries = @gitlib.tree_files_to_index(db, rfs, files) catch { _ => return }
-  @gitlib.write_index_entries(wfs, git_dir, entries) catch { _ => return }
+  let entries = @gitlib.tree_files_to_index(db, rfs, files) catch {
+    _ => return
+  }
+  @gitlib.write_index_entries(wfs, git_dir, entries) catch {
+    _ => return
+  }
 }
 
 ///|

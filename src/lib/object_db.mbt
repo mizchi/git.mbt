@@ -86,7 +86,10 @@ pub fn PackIndex::find_offset_hex(self : PackIndex, hex : String) -> Int64? {
 
 ///|
 /// Find object id by offset (linear scan).
-pub fn PackIndex::find_id_by_offset(self : PackIndex, offset : Int64) -> String? {
+pub fn PackIndex::find_id_by_offset(
+  self : PackIndex,
+  offset : Int64,
+) -> String? {
   for i in 0..<self.offsets.length() {
     if self.offsets[i] == offset {
       return Some(self.ids[i])
@@ -209,14 +212,13 @@ pub fn ObjectDb::load_lazy(
 }
 
 ///|
+
 ///|
-pub fn ObjectDb::set_prefer_packed(
-  self : ObjectDb,
-  value : Bool,
-) -> Unit {
+pub fn ObjectDb::set_prefer_packed(self : ObjectDb, value : Bool) -> Unit {
   self.prefer_packed = value
 }
 
+///|
 pub fn ObjectDb::get(
   self : ObjectDb,
   fs : &@git.RepoFileSystem,
@@ -390,6 +392,7 @@ pub fn load_object_store_from_fs(
   }
   store
 }
+
 ///|
 pub fn load_all_objects_from_fs(
   fs : &@git.RepoFileSystem,
@@ -542,6 +545,7 @@ fn load_pack_objects(
 }
 
 ///|
+
 ///|
 /// Parse v1 pack index (no magic header).
 fn parse_pack_index_v1(
@@ -582,6 +586,7 @@ fn parse_pack_index_v1(
   { pack_path, ids, offsets, version: 1 }
 }
 
+///|
 fn parse_pack_index(
   data : Bytes,
   pack_path : String,
@@ -700,16 +705,14 @@ fn read_pack_object_at(
           "Delta size mismatch: expected=\{size}, got=\{delta.length()}",
         )
       }
-      let base = try {
-        read_pack_object_at(
-          data,
-          pack,
-          base_offset.to_int64(),
-          db,
-          fs,
-          seen,
-        )
-      } catch {
+      let base = read_pack_object_at(
+        data,
+        pack,
+        base_offset.to_int64(),
+        db,
+        fs,
+        seen,
+      ) catch {
         e =>
           match PackIndex::find_id_by_offset(pack, base_offset.to_int64()) {
             Some(base_hex) =>
@@ -736,9 +739,7 @@ fn read_pack_object_at(
       }
       let base = match PackIndex::find_offset_hex(pack, base_hex) {
         Some(base_offset) =>
-          try {
-            read_pack_object_at(data, pack, base_offset, db, fs, seen)
-          } catch {
+          read_pack_object_at(data, pack, base_offset, db, fs, seen) catch {
             _ =>
               match get_by_hex(db, fs, base_hex, seen) {
                 Some(obj) => obj

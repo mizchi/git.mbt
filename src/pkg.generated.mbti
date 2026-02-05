@@ -62,6 +62,8 @@ pub fn create_packfile_with_delta_stats(Array[PackObject], PackDeltaMode) -> (By
 
 pub fn create_packfile_with_delta_stats_compression(Array[PackObject], PackDeltaMode, PackCompression) -> (Bytes, Int)
 
+pub fn create_packfile_with_delta_stats_compression_reuse(Array[PackObject], PackDeltaMode, PackCompression, Bool, Int) -> (Bytes, Int)
+
 pub fn create_tree(Array[TreeEntry]) -> (ObjectId, Bytes)
 
 pub fn decode_type_and_size_at(Bytes, Int) -> (Int, Int, Int) raise GitError
@@ -119,6 +121,8 @@ pub fn hash_object_content(ObjectType, Bytes) -> ObjectId
 pub fn hex_dump(Bytes) -> String
 
 pub fn materialize_clone_to_fs(ObjectStore, ObjectId, String, String, &FileSystem, String) -> Unit raise GitError
+
+pub fn max_delta_chain_length(Bytes) -> Int raise GitError
 
 pub async fn native_http_get(String, Map[String, String]) -> (HttpResponse, Bytes) raise GitError
 

@@ -170,6 +170,8 @@ pub async fn list_working_files_async(&@bit.RepoFileSystem, String) -> Array[Str
 
 pub fn list_worktrees(&@bit.RepoFileSystem, String) -> Array[WorktreeInfo] raise @bit.GitError
 
+pub fn load_all_objects_from_fs(&@bit.RepoFileSystem, String) -> Array[@bit.PackObject] raise @bit.GitError
+
 pub fn load_object_store_from_fs(&@bit.RepoFileSystem, String) -> @bit.ObjectStore raise @bit.GitError
 
 pub fn load_rebase_state(&@bit.RepoFileSystem, String) -> RebaseState? raise @bit.GitError
@@ -547,11 +549,13 @@ pub struct ObjectDb {
   pack_cache : Map[String, Bytes]
   pack_cache_order : Array[String]
   pack_cache_limit : Int
+  mut prefer_packed : Bool
   mut saw_corrupt_pack : Bool
 }
 pub fn ObjectDb::get(Self, &@bit.RepoFileSystem, @bit.ObjectId) -> @bit.PackObject? raise @bit.GitError
 pub fn ObjectDb::load(&@bit.RepoFileSystem, String) -> Self raise @bit.GitError
 pub fn ObjectDb::load_lazy(&@bit.RepoFileSystem, String) -> Self raise @bit.GitError
+pub fn ObjectDb::set_prefer_packed(Self, Bool) -> Unit
 
 pub struct PackIndex {
   pack_path : String

@@ -431,12 +431,7 @@ async fn handle_bundle_create(args : Array[String]) -> Unit raise Error {
         Some(path) => extra_env["GIT_EXEC_PATH"] = path
         None => ()
       }
-      let code = @process.run(
-        real_git,
-        real_args,
-        extra_env=extra_env,
-        inherit_env=true,
-      )
+      let code = @process.run(real_git, real_args, extra_env~, inherit_env=true)
       if code != 0 {
         @sys.exit(code)
       }

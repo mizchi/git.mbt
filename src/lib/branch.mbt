@@ -14,10 +14,7 @@ pub struct BranchInfo {
 }
 
 ///|
-fn resolve_worktree_git_dir(
-  fs : &@git.RepoFileSystem,
-  root : String,
-) -> String {
+fn resolve_worktree_git_dir(fs : &@git.RepoFileSystem, root : String) -> String {
   let git_path = join_path(root, ".git")
   if fs.is_file(git_path) {
     resolve_gitdir(fs, git_path)
