@@ -27,6 +27,7 @@ import "wbtest" {
 
 options(
   targets: {
+    "bench_worktree_entry_wbtest.mbt": [ "native" ],
     "env_native.mbt": [ "native" ],
     "gitignore_async_test.mbt": [ "native" ],
     "promisor.mbt": [ "native" ],
