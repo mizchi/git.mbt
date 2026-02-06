@@ -134,14 +134,36 @@ let pr = collab.create_pr(fs, fs, "Fix bug", "...",
 
 ほとんど実装されていません。アイデアだけです。
 
-## 制限
+## Git テストスイート互換性
 
-実装した範囲では git 本体のテストは多く通っていますが、テストに含まれていない未実装のコマンドが多数あるのを認識しています。
+git 本体のテストスイート (git/t) 1,031 ファイルのうち 706 ファイルが allowlist に登録されています。
 
-### 未対応のコマンド
+| | 件数 |
+|---|---|
+| テストファイル (allowlist) | 706 / 1,031 (68.5%) |
+| サブテスト success | 24,278 |
+| サブテスト failed | 0 |
+| サブテスト broken (prereq skip) | 178 |
 
-- **インタラクティブ系**: `bit add -p` や `bit rebase -i`。対応できてないというより、抽象が思いついていません
-- **GPG 署名**: 未実装
+broken 178 件はテスト失敗ではなく、環境に依存する前提条件 (GPG 未インストール、Windows 専用テスト等) によるスキップです。
+
+### allowlist 外のテスト (325 ファイル)
+
+| カテゴリ | 未対応数 | 内容 |
+|---|---|---|
+| t9xxx (contrib) | 124 | git-p4, git-svn 等の外部連携。対応予定なし |
+| t7xxx (porcelain) | 102 | stash, submodule, rebase -i 等の高レベルコマンド |
+| t6xxx (rev-list) | 85 | rev-list, rev-parse, bisect, describe 等 |
+| t5xxx (transport) | 5 | bitmap, multi-pack reuse, send-pack |
+| t0xxx/t1xxx (basic) | 5 | cat-file, help 等 |
+
+### 未対応のコマンド・機能
+
+- **インタラクティブ系**: `bit add -p`、`bit rebase -i` — ターミナル UI の抽象化が未設計
+- **GPG 署名**: `commit -S`、`tag -s` — 未実装
+- **rev-list / rev-parse**: `bit rev-list`、`bit bisect`、`bit describe` 等の履歴探索系コマンド
+- **submodule**: `bit submodule` 系の操作全般
+- **send-pack**: `git push` のネイティブ Git プロトコル (HTTP push は対応済み)
 
 ### パフォーマンス
 
