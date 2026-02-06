@@ -132,6 +132,8 @@ pub fn is_ignored_path(&@bit.RepoFileSystem, String, String, Bool) -> Bool raise
 
 pub fn is_mirror_fetch_config(RemoteConfig) -> Bool
 
+pub fn is_partial_clone(&@bit.RepoFileSystem, String) -> Bool
+
 pub fn is_rebase_in_progress(&@bit.RepoFileSystem, String) -> Bool
 
 pub fn is_remote_namespace(String, String) -> Bool
@@ -243,6 +245,8 @@ pub fn read_head_ref(&@bit.RepoFileSystem, String) -> HeadRef raise @bit.GitErro
 pub fn read_index_entries(&@bit.RepoFileSystem, String) -> Array[IndexEntry] raise @bit.GitError
 
 pub fn read_local_remote_head_state(&@bit.RepoFileSystem, String, String) -> RemoteHeadState
+
+pub fn read_promisor_remote(&@bit.RepoFileSystem, String) -> String?
 
 pub fn read_reflog(&@bit.RepoFileSystem, String, String) -> Array[ReflogEntry] raise @bit.GitError
 
@@ -569,6 +573,22 @@ pub struct PackIndex {
 pub fn PackIndex::find_id_by_offset(Self, Int64) -> String?
 pub fn PackIndex::find_offset(Self, @bit.ObjectId) -> Int64?
 pub fn PackIndex::find_offset_hex(Self, String) -> Int64?
+
+pub struct PromisorDb {
+  db : ObjectDb
+  git_dir : String
+  promisor_remote : String?
+  fetched : Map[String, Bool]
+  fetch_fn : (async (String, Array[@bit.ObjectId]) -> Result[Array[@bit.PackObject], @bit.GitError] noraise)?
+}
+pub async fn PromisorDb::fetch_missing(Self, &@bit.FileSystem, Array[@bit.ObjectId]) -> Array[@bit.PackObject] raise @bit.GitError
+pub async fn PromisorDb::fetch_one(Self, &@bit.FileSystem, @bit.ObjectId) -> @bit.PackObject? raise @bit.GitError
+pub fn PromisorDb::get(Self, &@bit.RepoFileSystem, @bit.ObjectId) -> @bit.PackObject? raise @bit.GitError
+pub async fn PromisorDb::get_or_fetch(Self, &@bit.RepoFileSystem, &@bit.FileSystem, @bit.ObjectId) -> @bit.PackObject? raise @bit.GitError
+pub fn PromisorDb::get_promisor_remote(Self) -> String?
+pub fn PromisorDb::has_local(Self, &@bit.RepoFileSystem, @bit.ObjectId) -> Bool raise @bit.GitError
+pub fn PromisorDb::has_promisor(Self) -> Bool
+pub fn PromisorDb::new(&@bit.RepoFileSystem, String, lazy_load? : Bool, fetch_fn? : (async (String, Array[@bit.ObjectId]) -> Result[Array[@bit.PackObject], @bit.GitError] noraise)?) -> Self raise @bit.GitError
 
 pub struct PruneResult {
   pruned : Array[@bit.ObjectId]

@@ -43,7 +43,7 @@ pub fn stash_list(
           start=idx + 1,
           end=line.length(),
         )
-        let parts = prefix.split(" ").map(fn(v) { v.to_string() }).collect()
+        let parts = prefix.split(" ").map(v => v.to_string()).collect()
         if parts.length() >= 2 {
           let new_sha = parts[1]
           let id = @git.ObjectId::from_hex(new_sha) catch { _ => continue }
@@ -291,11 +291,11 @@ fn stash_drop_at(
     lines.rev_in_place()
     let new_content = lines
       .iter()
-      .fold(init="", fn(acc, line) { acc + line + "\n" })
+      .fold(init="", (acc, line) => acc + line + "\n")
     fs.write_string(reflog_path, new_content)
     // Update refs/stash to newest entry (last line has newest)
     let newest = lines[lines.length() - 1]
-    let parts = newest.split(" ").map(fn(v) { v.to_string() }).collect()
+    let parts = newest.split(" ").map(v => v.to_string()).collect()
     if parts.length() >= 2 {
       let new_id = parts[1]
       fs.write_string(git_dir + "/refs/stash", new_id + "\n")

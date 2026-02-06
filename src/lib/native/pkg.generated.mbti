@@ -15,7 +15,7 @@ pub fn init_env_provider() -> Unit
 
 pub fn init_worktree_probe() -> Unit
 
-pub fn is_partial_clone(&@bit.RepoFileSystem, String) -> Bool
+pub fn native_promisor_db(&@bit.RepoFileSystem, String, lazy_load? : Bool) -> @lib.PromisorDb raise @bit.GitError
 
 pub async fn pull_http(&@bit.FileSystem, &@bit.RepoFileSystem, String, String, Bool, rebase? : Bool) -> @bit.ObjectId? raise @bit.GitError
 
@@ -25,27 +25,11 @@ pub async fn push_http_from_commit(&@bit.RepoFileSystem, String, String, @bit.Ob
 
 pub async fn push_http_tree_only(&@bit.RepoFileSystem, String, String, @bit.ObjectId, @bit.ObjectId, String) -> String raise @bit.GitError
 
-pub fn read_promisor_remote(&@bit.RepoFileSystem, String) -> String?
-
 pub async fn resolve_remote_ref_id(String, String) -> (@bit.ObjectId, String?)? raise @bit.GitError
 
 // Errors
 
 // Types and methods
-pub struct PromisorDb {
-  db : @lib.ObjectDb
-  git_dir : String
-  promisor_remote : String?
-  fetched : Map[String, Bool]
-}
-pub async fn PromisorDb::fetch_missing(Self, &@bit.FileSystem, Array[@bit.ObjectId]) -> Array[@bit.PackObject] raise @bit.GitError
-pub async fn PromisorDb::fetch_one(Self, &@bit.FileSystem, @bit.ObjectId) -> @bit.PackObject? raise @bit.GitError
-pub fn PromisorDb::get(Self, &@bit.RepoFileSystem, @bit.ObjectId) -> @bit.PackObject? raise @bit.GitError
-pub async fn PromisorDb::get_or_fetch(Self, &@bit.RepoFileSystem, &@bit.FileSystem, @bit.ObjectId) -> @bit.PackObject? raise @bit.GitError
-pub fn PromisorDb::get_promisor_remote(Self) -> String?
-pub fn PromisorDb::has_local(Self, &@bit.RepoFileSystem, @bit.ObjectId) -> Bool raise @bit.GitError
-pub fn PromisorDb::has_promisor(Self) -> Bool
-pub fn PromisorDb::new(&@bit.RepoFileSystem, String, lazy_load? : Bool) -> Self raise @bit.GitError
 
 // Type aliases
 
