@@ -9,6 +9,36 @@ pub fn relay_unix_timestamp_sec() -> Int64 {
 }
 
 ///|
+fn relay_sign_private_key_file() -> String? {
+  match @sys.get_env_var("BIT_RELAY_SIGN_PRIVATE_KEY_FILE") {
+    Some(value) => {
+      let normalized = value.trim(chars=" \n\r\t").to_string()
+      if normalized.length() > 0 {
+        Some(normalized)
+      } else {
+        None
+      }
+    }
+    None => None
+  }
+}
+
+///|
+fn relay_sign_public_key() -> String? {
+  match @sys.get_env_var("BIT_RELAY_SIGN_PUBLIC_KEY") {
+    Some(value) => {
+      let normalized = value.trim(chars=" \n\r\t").to_string()
+      if normalized.length() > 0 {
+        Some(normalized)
+      } else {
+        None
+      }
+    }
+    None => None
+  }
+}
+
+///|
 pub fn relay_load_signing_key() -> String? {
   relay_sign_private_key_file()
 }

@@ -1,6 +1,21 @@
 ///| JS relay signing: Web Crypto API via extern "js".
 
 ///|
+fn relay_sign_public_key() -> String? {
+  match @sys.get_env_var("BIT_RELAY_SIGN_PUBLIC_KEY") {
+    Some(value) => {
+      let normalized = value.trim(chars=" \n\r\t").to_string()
+      if normalized.length() > 0 {
+        Some(normalized)
+      } else {
+        None
+      }
+    }
+    None => None
+  }
+}
+
+///|
 extern "js" fn js_unix_timestamp_sec() -> Int64 =
   #| () => BigInt(Math.floor(Date.now() / 1000))
 

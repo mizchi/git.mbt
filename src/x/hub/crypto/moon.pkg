@@ -9,7 +9,7 @@ import {
   "moonbitlang/x/sys" @sys,
 }
 
-warnings = "-29"
+warnings = "-29-67"
 
 options(
   targets: {
