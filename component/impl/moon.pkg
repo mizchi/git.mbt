@@ -5,6 +5,8 @@ import {
   "mizchi/bit" @bit,
   "mizchi/bit/lib" @bitlib,
   "mizchi/bit/ignore" @ignore,
+  "mizchi/bit/protocol" @protocol,
+  "mizchi/bit/pack" @pack,
 }
 
 options(
