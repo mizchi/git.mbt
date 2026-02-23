@@ -93,6 +93,9 @@ fn collect_tree_ids_only(
       if o.obj_type == @bit.ObjectType::Tree {
         let entries = @bit.parse_tree(o.data)
         for entry in entries {
+          if collect_is_gitlink_mode(entry.mode) {
+            continue // Skip submodule entries
+          }
           let entry_hex = entry.id.to_hex()
           seen[entry_hex] = true
           if collect_is_tree_mode(entry.mode) {
@@ -153,6 +156,9 @@ fn collect_new_tree_objects(
       out.push(o)
       let entries = @bit.parse_tree(o.data)
       for entry in entries {
+        if collect_is_gitlink_mode(entry.mode) {
+          continue // Skip submodule entries (commit refs to external repos)
+        }
         let entry_hex = entry.id.to_hex()
         if base_ids.contains(entry_hex) {
           continue // Skip objects that exist in base
@@ -271,7 +277,9 @@ fn collect_tree_objects(
       out.push(o)
       let entries = @bit.parse_tree(o.data)
       for entry in entries {
-        if collect_is_tree_mode(entry.mode) {
+        if collect_is_gitlink_mode(entry.mode) {
+          continue // Skip submodule entries (commit refs to external repos)
+        } else if collect_is_tree_mode(entry.mode) {
           collect_tree_objects(db, fs, entry.id, seen, out)
         } else {
           collect_blob_object(db, fs, entry.id, seen, out)
@@ -309,4 +317,9 @@ fn collect_blob_object(
 ///|
 fn collect_is_tree_mode(mode : String) -> Bool {
   mode == "40000" || mode == "040000"
+}
+
+///|
+fn collect_is_gitlink_mode(mode : String) -> Bool {
+  mode == "160000"
 }
