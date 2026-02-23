@@ -22,11 +22,11 @@ pub async fn relay_http_signing_config() -> RelayHttpSigningConfig? raise @objec
 
 pub fn relay_load_signing_key() -> String?
 
-pub fn relay_resolve_public_key(String) -> String raise @object.GitError
+pub async fn relay_resolve_public_key(String) -> String raise @object.GitError
 
-pub fn relay_sha256_hex(String) -> String raise @object.GitError
+pub async fn relay_sha256_hex(String) -> String raise @object.GitError
 
-pub fn relay_sign_ed25519(String, String) -> String raise @object.GitError
+pub async fn relay_sign_ed25519(String, String) -> String raise @object.GitError
 
 pub async fn relay_sign_publish_payload(RelayHttpSigningConfig?, String, String, String, String, Json) -> RelayPublishHttpSignature? raise @object.GitError
 

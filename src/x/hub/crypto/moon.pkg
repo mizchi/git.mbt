@@ -13,9 +13,9 @@ warnings = "-29-67"
 
 options(
   targets: {
-    "relay_sign.mbt": ["native", "js", "wasm-gc", "wasm"],
-    "relay_sign_native.mbt": ["native"],
-    "relay_sign_js.mbt": ["js"],
-    "relay_sign_wasm.mbt": ["wasm-gc", "wasm"],
+    "relay_sign.mbt": [ "native", "js", "wasm-gc", "wasm" ],
+    "relay_sign_js.mbt": [ "js" ],
+    "relay_sign_native.mbt": [ "native" ],
+    "relay_sign_wasm.mbt": [ "wasm-gc", "wasm" ],
   },
 )

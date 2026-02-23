@@ -921,7 +921,11 @@ fn completion_custom_summary(cmd : String) -> String? {
   match cmd {
     "add" => Some("Add file contents to the index")
     "commit" => Some("Record changes to the repository")
-    "hub" => Some("Manage pull requests and issues")
+    "debug" => Some("Debug tools and diagnostics")
+    "hub" => Some("(deprecated) Use bit pr / bit issue instead")
+    "issue" => Some("Manage issues")
+    "pr" => Some("Manage pull requests")
+    "relay" => Some("Relay sync and signaling")
     "hq" => Some("ghq-compatible repository management")
     "init" => Some("Create an empty Git repository")
     "log" => Some("Show commit logs")
@@ -953,17 +957,17 @@ fn completion_summary(cmd : String) -> String {
 fn all_subcommands() -> Array[(String, String)] {
   let names = [
     "add", "ai", "am", "apply", "bisect", "blame", "branch", "bundle", "cat", "cat-file",
-    "checkout", "cherry", "cherry-pick", "clean", "clone", "hub", "commit", "completion",
-    "x/hooks", "x/doc", "config", "describe", "diff", "diff-files", "fetch", "format-patch",
-    "fsck", "gc", "grep", "hash-object", "help", "hq", "index-pack", "init", "log",
-    "ls-files", "ls-tree", "maintenance", "mcp", "merge", "mktree", "multi-pack-index",
-    "mv", "notes", "pack-objects", "pack-refs", "prune", "pull", "push", "range-diff",
-    "read-tree", "repo", "rebase", "receive-pack", "reflog", "remote", "repack",
-    "request-pull", "reset", "rev-list", "rev-parse", "revert", "rm", "send-pack",
-    "shortlog", "show", "show-branch", "show-ref", "sparse-checkout", "stash", "status",
-    "subdir-clone", "submodule", "switch", "symbolic-ref", "tag", "tree", "unpack-objects",
-    "update-index", "update-ref", "upload-pack", "verify-pack", "worktree", "workspace",
-    "ws", "write-tree",
+    "checkout", "cherry", "cherry-pick", "clean", "clone", "commit", "completion",
+    "x/hooks", "x/doc", "config", "debug", "describe", "diff", "diff-files", "fetch",
+    "format-patch", "fsck", "gc", "grep", "hash-object", "help", "hq", "hub", "index-pack",
+    "init", "issue", "log", "ls-files", "ls-tree", "maintenance", "mcp", "merge",
+    "mktree", "multi-pack-index", "mv", "notes", "pack-objects", "pack-refs", "pr",
+    "prune", "pull", "push", "range-diff", "read-tree", "repo", "rebase", "receive-pack",
+    "reflog", "relay", "remote", "repack", "request-pull", "reset", "rev-list", "rev-parse",
+    "revert", "rm", "send-pack", "shortlog", "show", "show-branch", "show-ref", "sparse-checkout",
+    "stash", "status", "subdir-clone", "submodule", "switch", "symbolic-ref", "tag",
+    "tree", "unpack-objects", "update-index", "update-ref", "upload-pack", "verify-pack",
+    "worktree", "workspace", "ws", "write-tree",
   ]
   let out = []
   for cmd in names {

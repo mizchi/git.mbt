@@ -1,4 +1,5 @@
-///| ~/.config/bit/bitconfig.toml のパスを解決
+///|
+/// ~/.config/bit/bitconfig.toml のパスを解決
 fn config_path() -> String? {
   match @sys.get_env_var("HOME") {
     Some(home) => Some(home + "/.config/bit/bitconfig.toml")
@@ -6,21 +7,20 @@ fn config_path() -> String? {
   }
 }
 
-///| TOML テーブルから文字列値を取得
-fn get_string(
-  table : Map[String, @toml.TomlValue],
-  key : String
-) -> String? {
+///|
+/// TOML テーブルから文字列値を取得
+fn get_string(table : Map[String, @toml.TomlValue], key : String) -> String? {
   guard table.get(key) is Some(@toml.TomlValue::TomlString(v)) else {
     return None
   }
   Some(v)
 }
 
-///| TOML テーブルから bool 値を取得し文字列に変換
+///|
+/// TOML テーブルから bool 値を取得し文字列に変換
 fn get_bool_string(
   table : Map[String, @toml.TomlValue],
-  key : String
+  key : String,
 ) -> String? {
   guard table.get(key) is Some(@toml.TomlValue::TomlBoolean(v)) else {
     return None
@@ -28,10 +28,11 @@ fn get_bool_string(
   Some(if v { "true" } else { "false" })
 }
 
-///| TOML テーブルからサブテーブルを取得
+///|
+/// TOML テーブルからサブテーブルを取得
 fn get_table(
   table : Map[String, @toml.TomlValue],
-  key : String
+  key : String,
 ) -> Map[String, @toml.TomlValue]? {
   guard table.get(key) is Some(@toml.TomlValue::TomlTable(t)) else {
     return None
@@ -39,7 +40,8 @@ fn get_table(
   Some(t)
 }
 
-///| 環境変数が未設定の場合のみ値を注入
+///|
+/// 環境変数が未設定の場合のみ値を注入
 fn inject_if_unset(env_key : String, value : String) -> Unit {
   match @sys.get_env_var(env_key) {
     Some(existing) if existing.length() > 0 => () // 既存値を優先
@@ -47,20 +49,22 @@ fn inject_if_unset(env_key : String, value : String) -> Unit {
   }
 }
 
-///| ~ をホームディレクトリに展開
+///|
+/// ~ をホームディレクトリに展開
 fn expand_home(path : String, home : String) -> String {
   if path.has_prefix("~/") {
-    let rest = try { path[1:].to_string() } catch { _ => path }
+    let rest = path[1:].to_string() catch { _ => path }
     home + rest
   } else {
     path
   }
 }
 
-///| [bit] セクション配下の設定を環境変数に注入
+///|
+/// [bit] セクション配下の設定を環境変数に注入
 fn inject_from_bit_table(
   bit : Map[String, @toml.TomlValue],
-  home : String
+  home : String,
 ) -> Unit {
   // [bit.user]
   if get_table(bit, "user") is Some(user) {
@@ -119,7 +123,9 @@ fn inject_from_bit_table(
 }
 
 ///| TOML 設定を読み込み、未設定の環境変数に注入する。
-///| エラーは静かに無視する（設定ファイルはオプション）。
+
+///|
+/// エラーは静かに無視する（設定ファイルはオプション）。
 pub fn load_and_inject() -> Unit {
   let path = match config_path() {
     Some(p) => p
@@ -129,7 +135,7 @@ pub fn load_and_inject() -> Unit {
     return
   }
   let content = @fs.read_file_to_string(path) catch { _ => return }
-  let root = try { @toml.parse(content) } catch { _ => return }
+  let root = @toml.parse(content) catch { _ => return }
   guard root is @toml.TomlValue::TomlTable(top) else { return }
   let home = @sys.get_env_var("HOME").unwrap_or("")
   // [bit.*] セクションから bit 固有の設定を注入

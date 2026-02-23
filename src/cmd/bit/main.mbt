@@ -53,10 +53,13 @@ async fn show_help() -> Unit {
     #|relay
     #|   relay        Relay-based repository sharing (serve, sync)
     #|
+    #|collaboration
+    #|   pr           Manage pull requests
+    #|   issue        Manage issues
+    #|   debug        Debug and inspect hub internals
+    #|
     #|experimental
-    #|   hub          Manage pull requests and issues
-    #|   pr           Shortcut for 'hub pr' (gh-like)
-    #|   issue        Shortcut for 'hub issue' (gh-like)
+    #|   hub          (deprecated) Use 'bit pr' / 'bit issue' / 'bit debug' instead
     #|   mcp          Run bit MCP server (stdio)
     #|   workspace    Manage hierarchical bit workspace projects
     #|   ws           Shortcut for 'workspace'
@@ -330,6 +333,11 @@ fn show_command_help_specs() -> Array[(String, String, String)] {
       "shell", "bit shell [--login] [<path>]", "Start an interactive bit shell with command forwarding.",
     ),
     ("version", "git version", "Show version information."),
+    ("pr", "bit pr <subcommand> [<args>]", "Manage pull requests."),
+    ("issue", "bit issue <subcommand> [<args>]", "Manage issues."),
+    (
+      "debug", "bit debug <subcommand> [<args>]", "Debug and inspect hub internals.",
+    ),
   ]
 }
 
@@ -424,7 +432,7 @@ async fn show_command_help(cmd : String, silent? : Bool = false) -> Bool {
     }
     "hub" => {
       if not(silent) {
-        print_hub_usage()
+        print_hub_deprecation_guide()
       }
       true
     }
@@ -443,6 +451,12 @@ async fn show_command_help(cmd : String, silent? : Bool = false) -> Bool {
     "issue" => {
       if not(silent) {
         print_hub_issue_usage()
+      }
+      true
+    }
+    "debug" => {
+      if not(silent) {
+        print_debug_usage()
       }
       true
     }
@@ -910,6 +924,7 @@ async fn dispatch_known_command(
     "relay" => handle_relay(rest)
     "pr" => handle_hub_pr(rest)
     "issue" => handle_hub_issue(rest)
+    "debug" => handle_debug(rest)
     "mcp" => handle_mcp(rest)
     "workspace" => handle_workspace(rest)
     "repo" => handle_repo(rest)

@@ -239,14 +239,12 @@ fn relay_ws_url(
 ) -> String raise @bit.GitError {
   let ws_base = if base_url.has_prefix("https://") {
     let rest = base_url[8:].to_string() catch {
-      _ =>
-        raise @bit.GitError::InvalidObject("invalid base_url: \{base_url}")
+      _ => raise @bit.GitError::InvalidObject("invalid base_url: \{base_url}")
     }
     "wss://" + rest
   } else if base_url.has_prefix("http://") {
     let rest = base_url[7:].to_string() catch {
-      _ =>
-        raise @bit.GitError::InvalidObject("invalid base_url: \{base_url}")
+      _ => raise @bit.GitError::InvalidObject("invalid base_url: \{base_url}")
     }
     "ws://" + rest
   } else {
@@ -340,7 +338,9 @@ pub async fn relay_watch_claims_ws(
     guard parsed is Json::Object(obj) else { continue }
     match obj.get("type") {
       Some(Json::String("ping")) => {
-        conn.send_text("{\"type\":\"pong\"}") catch { _ => () }
+        conn.send_text("{\"type\":\"pong\"}") catch {
+          _ => ()
+        }
         continue
       }
       _ => ()

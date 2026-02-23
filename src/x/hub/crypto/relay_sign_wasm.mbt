@@ -11,9 +11,7 @@ pub fn relay_load_signing_key() -> String? {
 }
 
 ///|
-pub fn relay_sha256_hex(
-  _text : String,
-) -> String raise @bit.GitError {
+pub fn relay_sha256_hex(_text : String) -> String raise @bit.GitError {
   raise @bit.GitError::IoError(
     "relay sign: SHA-256 not supported on WASM target",
   )

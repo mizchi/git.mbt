@@ -254,7 +254,6 @@ fn relay_conflict_policy() -> @hub.RecordMergePolicy {
   }
 }
 
-
 ///|
 fn relay_copy_headers(headers : Map[String, String]) -> Map[String, String] {
   let out : Map[String, String] = {}

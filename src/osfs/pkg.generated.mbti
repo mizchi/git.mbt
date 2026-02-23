@@ -1,11 +1,22 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "mizchi/bit/osfs"
 
+import {
+  "mizchi/bit/object",
+  "mizchi/bit/types",
+}
+
 // Values
 
 // Errors
 
 // Types and methods
+pub struct OsFs {
+  // private fields
+}
+pub fn OsFs::new() -> Self
+pub impl @types.FileSystem for OsFs
+pub impl @types.RepoFileSystem for OsFs
 
 // Type aliases
 

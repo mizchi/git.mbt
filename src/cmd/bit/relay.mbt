@@ -1,4 +1,5 @@
 ///| Dispatch for `bit relay` top-level command.
+
 ///| Delegates to existing serve/sync implementations.
 
 ///|

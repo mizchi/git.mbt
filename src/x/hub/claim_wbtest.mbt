@@ -2,11 +2,14 @@
 
 ///|
 test "ClaimMessage::to_json serializes correctly" {
-  let msg = ClaimMessage::new("issue-0001", ClaimAction::Claim, "mizchi", 1708700000L)
+  let msg = ClaimMessage::new(
+    "issue-0001",
+    ClaimAction::Claim,
+    "mizchi",
+    1708700000L,
+  )
   let json = msg.to_json()
-  guard json is Json::Object(obj) else {
-    fail("expected object")
-  }
+  guard json is Json::Object(obj) else { fail("expected object") }
   assert_eq(obj.get("type"), Some(Json::string("work-item.claim")))
   assert_eq(obj.get("issue_id"), Some(Json::string("issue-0001")))
   assert_eq(obj.get("action"), Some(Json::string("claim")))
@@ -15,22 +18,28 @@ test "ClaimMessage::to_json serializes correctly" {
 
 ///|
 test "ClaimMessage::to_json unclaim action" {
-  let msg = ClaimMessage::new("issue-0002", ClaimAction::Unclaim, "alice", 1708700100L)
+  let msg = ClaimMessage::new(
+    "issue-0002",
+    ClaimAction::Unclaim,
+    "alice",
+    1708700100L,
+  )
   let json = msg.to_json()
-  guard json is Json::Object(obj) else {
-    fail("expected object")
-  }
+  guard json is Json::Object(obj) else { fail("expected object") }
   assert_eq(obj.get("action"), Some(Json::string("unclaim")))
 }
 
 ///|
 test "parse_claim_message roundtrip" {
-  let msg = ClaimMessage::new("issue-0001", ClaimAction::Claim, "mizchi", 1708700000L)
+  let msg = ClaimMessage::new(
+    "issue-0001",
+    ClaimAction::Claim,
+    "mizchi",
+    1708700000L,
+  )
   let json = msg.to_json()
   let parsed = parse_claim_message(json)
-  guard parsed is Some(result) else {
-    fail("expected Some")
-  }
+  guard parsed is Some(result) else { fail("expected Some") }
   assert_eq(result.issue_id(), "issue-0001")
   assert_eq(result.action(), ClaimAction::Claim)
   assert_eq(result.claimer(), "mizchi")
@@ -76,8 +85,18 @@ test "parse_claim_message returns None for invalid action" {
 
 ///|
 test "parse_claims_from_envelopes extracts claims" {
-  let claim1 = ClaimMessage::new("issue-0001", ClaimAction::Claim, "mizchi", 1708700000L)
-  let claim2 = ClaimMessage::new("issue-0002", ClaimAction::Claim, "alice", 1708700100L)
+  let claim1 = ClaimMessage::new(
+    "issue-0001",
+    ClaimAction::Claim,
+    "mizchi",
+    1708700000L,
+  )
+  let claim2 = ClaimMessage::new(
+    "issue-0002",
+    ClaimAction::Claim,
+    "alice",
+    1708700100L,
+  )
   let envelopes : Array[Json] = [
     make_test_envelope(claim1.to_json()),
     make_test_envelope(claim2.to_json()),
@@ -90,7 +109,12 @@ test "parse_claims_from_envelopes extracts claims" {
 
 ///|
 test "parse_claims_from_envelopes skips non-claim envelopes" {
-  let claim = ClaimMessage::new("issue-0001", ClaimAction::Claim, "mizchi", 1708700000L)
+  let claim = ClaimMessage::new(
+    "issue-0001",
+    ClaimAction::Claim,
+    "mizchi",
+    1708700000L,
+  )
   let other_payload : Map[String, Json] = {}
   other_payload["kind"] = Json::string("hub.record")
   let envelopes : Array[Json] = [
@@ -140,7 +164,12 @@ test "resolve_active_claims reclaim after unclaim" {
 
 ///|
 test "is_stale returns true when past threshold" {
-  let claim = ClaimMessage::new("issue-0001", ClaimAction::Claim, "mizchi", 1708700000L)
+  let claim = ClaimMessage::new(
+    "issue-0001",
+    ClaimAction::Claim,
+    "mizchi",
+    1708700000L,
+  )
   // 25 hours later
   let now = 1708700000L + 25L * 3600L
   assert_true(claim.is_stale(now))
@@ -148,7 +177,12 @@ test "is_stale returns true when past threshold" {
 
 ///|
 test "is_stale returns false when within threshold" {
-  let claim = ClaimMessage::new("issue-0001", ClaimAction::Claim, "mizchi", 1708700000L)
+  let claim = ClaimMessage::new(
+    "issue-0001",
+    ClaimAction::Claim,
+    "mizchi",
+    1708700000L,
+  )
   // 23 hours later
   let now = 1708700000L + 23L * 3600L
   assert_false(claim.is_stale(now))
@@ -156,7 +190,12 @@ test "is_stale returns false when within threshold" {
 
 ///|
 test "is_stale custom threshold" {
-  let claim = ClaimMessage::new("issue-0001", ClaimAction::Claim, "mizchi", 1708700000L)
+  let claim = ClaimMessage::new(
+    "issue-0001",
+    ClaimAction::Claim,
+    "mizchi",
+    1708700000L,
+  )
   // 5 hours later, threshold = 4 hours
   let now = 1708700000L + 5L * 3600L
   assert_true(claim.is_stale(now, threshold_hours=4))

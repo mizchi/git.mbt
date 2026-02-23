@@ -201,13 +201,13 @@ test "hub parser: parse_hub_pr_list_options handles gh-style flags and limit" {
   let opts = parse_hub_pr_list_options(["--closed", "--limit", "5"])
   assert_eq(opts.limit, Some(5))
   match opts.state {
-    Some(@hub.PrState::Closed) => ()
+    Some(@hub.WorkItemState::Closed) => ()
     _ => fail("expected closed state")
   }
   let opts2 = parse_hub_pr_list_options(["-L", "3", "--open"])
   assert_eq(opts2.limit, Some(3))
   match opts2.state {
-    Some(@hub.PrState::Open) => ()
+    Some(@hub.WorkItemState::Open) => ()
     _ => fail("expected open state")
   }
 }
@@ -217,13 +217,13 @@ test "hub parser: parse_hub_issue_list_options handles gh-style flags and limit"
   let opts = parse_hub_issue_list_options(["--closed", "--limit", "7"])
   assert_eq(opts.limit, Some(7))
   match opts.state {
-    Some(@hub.IssueState::Closed) => ()
+    Some(@hub.WorkItemState::Closed) => ()
     _ => fail("expected closed state")
   }
   let opts2 = parse_hub_issue_list_options(["-L", "2", "--open"])
   assert_eq(opts2.limit, Some(2))
   match opts2.state {
-    Some(@hub.IssueState::Open) => ()
+    Some(@hub.WorkItemState::Open) => ()
     _ => fail("expected open state")
   }
 }

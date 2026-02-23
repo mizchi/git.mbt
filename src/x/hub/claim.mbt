@@ -110,9 +110,12 @@ pub fn parse_claim_message(json : Json) -> ClaimMessage? {
   Some(ClaimMessage::new(issue_id, action, claimer, timestamp))
 }
 
-///| Parse claim messages from relay poll envelopes.
+///|
+/// Parse claim messages from relay poll envelopes.
 /// Each envelope has shape: { "payload": { ... }, "topic": "...", ... }
-pub fn parse_claims_from_envelopes(envelopes : Array[Json]) -> Array[ClaimMessage] {
+pub fn parse_claims_from_envelopes(
+  envelopes : Array[Json],
+) -> Array[ClaimMessage] {
   let claims : Array[ClaimMessage] = []
   for item in envelopes {
     guard item is Json::Object(envelope_obj) else { continue }
@@ -125,7 +128,8 @@ pub fn parse_claims_from_envelopes(envelopes : Array[Json]) -> Array[ClaimMessag
   claims
 }
 
-///| Resolve active claims: for each issue_id, keep only the latest action.
+///|
+/// Resolve active claims: for each issue_id, keep only the latest action.
 /// If the latest action is Unclaim, the issue is not actively claimed.
 pub fn resolve_active_claims(
   claims : Array[ClaimMessage],
@@ -150,17 +154,19 @@ pub fn resolve_active_claims(
   active
 }
 
-///| Check if a claim is stale based on the threshold.
+///|
+/// Check if a claim is stale based on the threshold.
 pub fn ClaimMessage::is_stale(
   self : ClaimMessage,
   now : Int64,
-  threshold_hours~ : Int = 24,
+  threshold_hours? : Int = 24,
 ) -> Bool {
   let threshold_seconds = threshold_hours.to_int64() * 3600L
   now - self.timestamp > threshold_seconds
 }
 
-///| Topic string for claim messages.
+///|
+/// Topic string for claim messages.
 pub fn claim_topic() -> String {
   "work-item.claim"
 }

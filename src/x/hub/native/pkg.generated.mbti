@@ -1,7 +1,30 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "mizchi/bit/x/hub/native"
 
+import {
+  "mizchi/bit/object",
+  "mizchi/bit/types",
+  "mizchi/bit/x/hub",
+}
+
 // Values
+pub async fn hub_fetch(@hub.Hub, &@types.FileSystem, &@types.RepoFileSystem, String, String, signing_key~ : String?, require_signed~ : Bool?, auth_token~ : String?, conflict_policy~ : @hub.RecordMergePolicy?) -> @hub.PrSyncResult raise @object.GitError
+
+pub async fn hub_push(@hub.Hub, &@types.RepoFileSystem, String, String, signing_key~ : String?, require_signed~ : Bool?, auth_token~ : String?, conflict_policy~ : @hub.RecordMergePolicy?) -> @hub.PrSyncResult raise @object.GitError
+
+pub async fn relay_list_clone_peers(String, auth_token~ : String?, include_self? : Bool) -> Array[(String, String, String?)] raise @object.GitError
+
+pub async fn relay_poll_claims(String, auth_token~ : String?) -> Array[@hub.ClaimMessage] raise @object.GitError
+
+pub async fn relay_poll_claims_after(String, Int, Int, auth_token~ : String?) -> (Int, Array[@hub.ClaimMessage]) raise @object.GitError
+
+pub async fn relay_publish_claim(String, @hub.ClaimMessage, auth_token~ : String?) -> Bool raise @object.GitError
+
+pub async fn relay_publish_clone_announce(String, String, repo~ : String?, auth_token~ : String?) -> Bool raise @object.GitError
+
+pub fn relay_sender_name() -> String
+
+pub async fn relay_watch_claims_ws(String, (@hub.ClaimMessage) -> Unit, auth_token~ : String?) -> Unit raise @object.GitError
 
 // Errors
 

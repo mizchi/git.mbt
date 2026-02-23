@@ -2,20 +2,171 @@
 package "mizchi/bit/cmd/bit"
 
 import {
+  "mizchi/bit/lib",
+  "mizchi/bit/object",
   "mizchi/bit/runtime",
   "mizchi/bit/types",
 }
 
 // Values
+pub fn apply_alias_overrides(Map[String, String], Array[(String, String)]) -> Unit
+
+pub fn check_shorthand_ambiguity(String, (String) -> Bool) -> String?
+
 pub fn get_current_timestamp() -> Int64
+
+pub fn get_effective_remote_url(OsFs, String) -> String?
+
+pub fn get_subdir_info(OsFs, String) -> (String, String, String)?
+
+pub fn get_subdir_tree_from_commit(@lib.ObjectDb, OsFs, @object.ObjectId, String) -> @object.ObjectId? raise @object.GitError
+
+pub fn is_subdir_clone(OsFs, String) -> Bool
+
+pub fn load_global_aliases(OsFs) -> Map[String, String]
+
+pub fn parse_gitconfig_aliases(String) -> Map[String, String]
+
+pub fn parse_github_shorthand(String) -> @lib.GitHubShorthand?
+
+pub fn read_subdir_attributes(OsFs, String) -> (String, String, String)?
+
+pub fn resolve_alias(Map[String, String], String, Array[String]) -> AliasResolution
+
+pub fn resolve_ref_for_subdir(OsFs, String, String) -> @object.ObjectId? raise
 
 pub async fn run_storage_command(&@types.FileSystem, &@types.RepoFileSystem, String, @runtime.StorageCommand) -> Unit
 
 pub async fn run_storage_command_by_name(&@types.FileSystem, &@types.RepoFileSystem, String, String, Array[String]) -> Unit
 
+pub fn split_alias_command(String) -> Array[String]
+
+pub fn update_subdir_base(OsFs, String, String) -> Unit
+
 // Errors
 
 // Types and methods
+type AiCherryPickCommandOptions
+
+type AiCommitCommandOptions
+
+type AiDiffUnit
+
+type AiMergeCommandOptions
+
+type AiRevertCommandOptions
+
+pub enum AliasResolution {
+  Resolved(String, Array[String])
+  Shell(String)
+}
+
+type BlameLine
+
+type BlameOptions
+
+type CatFileBatchAllObjectDiskRecord
+
+type CatFileFollowResolution
+
+type CatFileObjectFilter
+
+type CatFilePathAttrs
+
+type CherryPickResult
+
+type DenyCurrentBranchDecision
+
+type FetchHeadEntry
+
+type GitHubImportProvider
+
+type GlobalOptions
+
+type GrepPatternType
+
+type HubDumpOptions
+
+type HubPrCreateOptions
+
+type HubSearchOptions
+
+type HubSearchType
+
+type HubServeOptions
+
+type HubSyncCloneAnnounceOptions
+
+type HubSyncClonePeersOptions
+
+type HubSyncIssueUrlOptions
+
+type HubSyncRuntimeOptions
+
+type HubWorkItemListOptions
+
+type MboxPatch
+
+type OsClock
+
+pub struct OsFs {
+  dummy : Int
+}
+pub fn OsFs::new() -> Self
+pub impl @types.FileSystem for OsFs
+pub impl @types.RepoFileSystem for OsFs
+
+type OsObjectStore
+
+type OsRefStore
+
+type PushDefaultMode
+
+type PushParsedRefspec
+
+type PushPorcelainLine
+
+type PushRefPlan
+
+type PushResolvedUpdate
+
+type PushSourceKind
+
+type PushTargetPlan
+
+type RebaseAiArgs
+
+type RebaseTodoEntry
+
+type RemoteTrackingHeadState
+
+type RmOptions
+
+type RunGitCommandInvocation
+
+type RunGitEnvSnapshot
+
+type ScalarCloneOptions
+
+type ServeFeatureBroadcast
+
+type ServePollRequest
+
+type ServeSession
+
+type SubdirChangeInfo
+
+type SubdirDiffEntry
+
+pub(all) enum SubdirDiffKind {
+  Added
+  Modified
+  Deleted
+}
+
+type SubmoduleInfo
+
+type UploadPackTransport
 
 // Type aliases
 
