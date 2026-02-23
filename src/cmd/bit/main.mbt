@@ -1,7 +1,7 @@
 ///| Git-shim main entry point and command dispatcher
 
 ///| bit version tag (update this and moon.mod.json together when releasing)
-let bit_version_tag : String = "2.47.0 (bit v0.24.2)"
+let bit_version_tag : String = "2.47.0 (bit v0.24.3)"
 
 ///|
 async fn show_help() -> Unit {
