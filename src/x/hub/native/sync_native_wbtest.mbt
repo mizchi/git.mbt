@@ -57,7 +57,62 @@ test "relay: parse_relay_base_url handles explicit prefixes" {
     parse_relay_base_url("relay://127.0.0.1:8787"),
     Some("http://127.0.0.1:8787"),
   )
+  // Plain HTTP URLs without /git/<session> pattern are NOT relay URLs
   assert_eq(parse_relay_base_url("http://127.0.0.1:8787"), None)
+  assert_eq(parse_relay_base_url("https://github.com/user/repo.git"), None)
+}
+
+///|
+test "relay: parse_relay_base_url detects proxied relay git session URLs" {
+  // Proxied URL stored by `bit clone relay+https://host/<session>`
+  assert_eq(
+    parse_relay_base_url("https://relay.example.com/git/AbCdEfGh"),
+    Some("https://relay.example.com"),
+  )
+  assert_eq(
+    parse_relay_base_url("http://localhost:8788/git/jfIGqUeq"),
+    Some("http://localhost:8788"),
+  )
+  // With trailing slash
+  assert_eq(
+    parse_relay_base_url("https://relay.example.com/git/AbCdEfGh/"),
+    Some("https://relay.example.com"),
+  )
+  // With query parameters
+  assert_eq(
+    parse_relay_base_url("https://relay.example.com/git/AbCdEfGh?room=main"),
+    Some("https://relay.example.com"),
+  )
+  // Too short session ID (< 6 chars) - not a relay URL
+  assert_eq(
+    parse_relay_base_url("https://relay.example.com/git/Ab12"),
+    None,
+  )
+  // Too long session ID (> 16 chars) - not a relay URL
+  assert_eq(
+    parse_relay_base_url("https://relay.example.com/git/AbCdEfGhIjKlMnOpQr"),
+    None,
+  )
+  // Named session (owner/repo) - not a random session, contains slash
+  assert_eq(
+    parse_relay_base_url("https://relay.example.com/git/owner/repo"),
+    None,
+  )
+  // Non-alphanumeric chars in session - not a relay URL
+  assert_eq(
+    parse_relay_base_url("https://relay.example.com/git/abc-def"),
+    None,
+  )
+  // .git suffix contains dot - not a relay URL
+  assert_eq(
+    parse_relay_base_url("https://github.com/git/foobar123.git"),
+    None,
+  )
+  // SSH URL - not a relay URL
+  assert_eq(
+    parse_relay_base_url("git@github.com:user/repo.git"),
+    None,
+  )
 }
 
 ///|

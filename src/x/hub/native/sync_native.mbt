@@ -300,8 +300,56 @@ fn parse_relay_base_url(remote_url : String) -> String? {
     )
     Some(trim_trailing_slash("http://" + suffix))
   } else {
-    None
+    // Detect proxied relay URL: https://host/git/<session_id>
+    // This pattern is stored in git config after `bit clone relay+https://host/<session>`
+    match detect_relay_proxied_git_base(remote_url) {
+      Some(base) => Some(base)
+      None => None
+    }
   }
+}
+
+///|
+/// Detect proxied relay git session URL and extract the relay base URL.
+/// Matches: http(s)://host/git/<session_id> where session_id is 6-16 alphanumeric chars.
+/// Returns the base URL (everything before /git/).
+fn detect_relay_proxied_git_base(url : String) -> String? {
+  if not(is_http_url(url)) {
+    return None
+  }
+  let git_path = "/git/"
+  guard url.find(git_path) is Some(idx) else { return None }
+  let after_git_start = idx + git_path.length()
+  if after_git_start >= url.length() {
+    return None
+  }
+  // Strip query string and trailing slash to isolate the path segment
+  let after_git = String::unsafe_substring(
+    url,
+    start=after_git_start,
+    end=url.length(),
+  )
+  let segment = match after_git.find("?") {
+    Some(qi) => String::unsafe_substring(after_git, start=0, end=qi)
+    None => after_git
+  }
+  let session = if segment.has_suffix("/") {
+    String::unsafe_substring(segment, start=0, end=segment.length() - 1)
+  } else {
+    segment
+  }
+  // Session ID must be 6-16 alphanumeric chars with no path separators
+  if session.length() < 6 || session.length() > 16 {
+    return None
+  }
+  for c in session {
+    if not(
+      (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'),
+    ) {
+      return None
+    }
+  }
+  Some(String::unsafe_substring(url, start=0, end=idx))
 }
 
 ///|
