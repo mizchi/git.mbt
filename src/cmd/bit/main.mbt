@@ -1,5 +1,8 @@
 ///| Git-shim main entry point and command dispatcher
 
+///| bit version tag (update this and moon.mod.json together when releasing)
+let bit_version_tag : String = "2.47.0 (bit v0.24.2)"
+
 ///|
 async fn show_help() -> Unit {
   let help =
@@ -572,8 +575,8 @@ async fn run_main_for_args(args : Array[String]) -> Unit {
   // Handle --version and --help early (can appear anywhere before command)
   for i in 1..<args.length() {
     match args[i] {
-      "--version" | "version" => {
-        print_line("git version 2.47.0 (bit)")
+      "-v" | "--version" | "version" => {
+        print_line("git version \{bit_version_tag}")
         return ()
       }
       "-h" | "--help" => {
@@ -976,7 +979,7 @@ async fn dispatch_known_command(
     "x/doc" => handle_x_doc(rest)
     "scalar" => handle_scalar(rest)
     "shell" => handle_shell(rest)
-    "version" => print_line("git version 2.47.0 (bit)")
+    "version" => print_line("git version \{bit_version_tag}")
     // Error for unknown commands
     _ => {
       eprint_line("bit: '\{cmd}' is not a bit command")

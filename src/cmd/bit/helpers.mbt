@@ -173,7 +173,7 @@ async fn run_git_internal_command(
 ) -> Int raise Error {
   match cmd {
     "version" => {
-      print_line("git version 2.47.0 (bit)")
+      print_line("git version \{bit_version_tag}")
       0
     }
     "clone" => {
