@@ -16,6 +16,7 @@ pub fn init_worktree_probe() -> Unit {
     fn(path : String) { native_read_symlink_target_path(path) },
     entry_meta_sync=sync_meta,
     lstat=native_lstat_meta,
+    readdir_typed=native_readdir_typed,
   )
   @bitio.set_worktree_probe(provider)
 }
@@ -125,3 +126,34 @@ extern "c" fn readlink(path_buf : Bytes, buf : Bytes, size : Int) -> Int = "read
 ///|
 #borrow(path_buf, buf)
 extern "c" fn bit_lstat(path_buf : Bytes, buf : Bytes) -> Int = "bit_lstat"
+
+///|
+#borrow(path_buf, buf)
+extern "c" fn bit_readdir(path_buf : Bytes, buf : Bytes, buf_size : Int) -> Int = "bit_readdir"
+
+///|
+/// Read directory entries with d_type info via native readdir.
+/// Returns array of (name, d_type) pairs where d_type: 4=DT_DIR, 8=DT_REG, 10=DT_LNK, 0=DT_UNKNOWN.
+pub fn native_readdir_typed(path : String) -> Array[(String, Int)]? {
+  let path_buf = native_string_to_cstring(path)
+  let buf_size = 65536
+  let buf = Bytes::new(buf_size)
+  let ret = bit_readdir(path_buf, buf, buf_size)
+  if ret < 0 {
+    return None
+  }
+  let total = ret
+  let result : Array[(String, Int)] = []
+  let mut pos = 0
+  while pos + 3 <= total {
+    let name_len = buf[pos].to_int() | (buf[pos + 1].to_int() << 8)
+    let d_type = buf[pos + 2].to_int()
+    if pos + 3 + name_len > total {
+      break
+    }
+    let name = @utf8.decode_lossy(buf[pos + 3:pos + 3 + name_len])
+    result.push((name, d_type))
+    pos = pos + 3 + name_len
+  }
+  Some(result)
+}

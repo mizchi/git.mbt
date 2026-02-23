@@ -7,6 +7,8 @@ pub struct Rule {
   base : String
   /// The pattern to match against
   pattern : String
+  /// Pre-compiled pattern code units for match_glob (avoids repeated to_array allocation)
+  pattern_chars : FixedArray[UInt16]
   /// Whether this is a negation rule (starts with !)
   negated : Bool
   /// Whether this rule only applies to directories (ends with /)
@@ -92,6 +94,81 @@ pub fn Matcher::has_negation(self : Matcher) -> Bool {
 }
 
 ///|
+/// Check if any negation rule could potentially un-ignore a child under `dir_rel`.
+/// More precise than `has_negation()` — only returns true if a negation rule's
+/// target path overlaps with the given directory.
+pub fn Matcher::could_negate_under(self : Matcher, dir_rel : String) -> Bool {
+  if self.negation_count == 0 {
+    return false
+  }
+  for rule in self.rules {
+    if not(rule.negated) {
+      continue
+    }
+    // Non-path-specific rules (no slash, not anchored) could match anywhere
+    if not(rule.has_slash) && not(rule.anchored) {
+      return true
+    }
+    // Path-specific rule: compute target path and check prefix overlap
+    let target = if rule.base.length() == 0 {
+      rule.pattern
+    } else {
+      rule.base + "/" + rule.pattern
+    }
+    let prefix = negation_literal_prefix(target)
+    if prefix.length() == 0 {
+      return true
+    }
+    // Check if dir_rel is an ancestor of prefix or prefix is an ancestor of dir_rel
+    if is_path_prefix(dir_rel, prefix) || is_path_prefix(prefix, dir_rel) {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// Extract the literal directory prefix before any wildcard in a pattern.
+fn negation_literal_prefix(pattern : String) -> String {
+  let mut last_slash = -1
+  for i in 0..<pattern.length() {
+    let c = pattern.unsafe_get(i)
+    if c == char_star || c == char_question || c == char_open_bracket {
+      if last_slash < 0 {
+        return ""
+      }
+      return String::unsafe_substring(pattern, start=0, end=last_slash)
+    }
+    if c == char_slash {
+      last_slash = i
+    }
+  }
+  pattern
+}
+
+///|
+let char_open_bracket : UInt16 = {
+  let c : Int = '['.to_int()
+  c.to_uint16()
+}
+
+///|
+/// Check if `a` is a path prefix of `b` (a == b or b starts with a + "/").
+fn is_path_prefix(a : String, b : String) -> Bool {
+  let alen = a.length()
+  let blen = b.length()
+  if alen > blen {
+    return false
+  }
+  for i in 0..<alen {
+    if a.unsafe_get(i) != b.unsafe_get(i) {
+      return false
+    }
+  }
+  alen == blen || b.unsafe_get(alen) == char_slash
+}
+
+///|
 /// Parse gitignore content into rules.
 /// `base` is the relative directory where the gitignore file is located.
 pub fn parse(content : String, base : String) -> Array[Rule] {
@@ -145,26 +222,70 @@ pub fn parse(content : String, base : String) -> Array[Rule] {
       continue
     }
     let has_slash = line.contains("/")
-    rules.push({ base, pattern: line, negated, dir_only, anchored, has_slash })
+    let pattern_chars = string_to_uint16_array(line)
+    rules.push({
+      base,
+      pattern: line,
+      pattern_chars,
+      negated,
+      dir_only,
+      anchored,
+      has_slash,
+    })
   }
   rules
+}
+
+///|
+let char_star : UInt16 = {
+  let c : Int = '*'.to_int()
+  c.to_uint16()
+}
+
+///|
+let char_question : UInt16 = {
+  let c : Int = '?'.to_int()
+  c.to_uint16()
+}
+
+///|
+let char_slash : UInt16 = {
+  let c : Int = '/'.to_int()
+  c.to_uint16()
+}
+
+///|
+fn string_to_uint16_array(s : String) -> FixedArray[UInt16] {
+  let len = s.length()
+  let arr = FixedArray::make(len, UInt16::default())
+  for i in 0..<len {
+    arr[i] = s.unsafe_get(i)
+  }
+  arr
 }
 
 ///|
 /// Check if a single pattern matches a path segment.
 /// Supports * (any characters) and ? (single character) wildcards.
 pub fn match_glob(pattern : String, text : String) -> Bool {
-  let p = pattern.to_array()
-  let s = text.to_array()
+  let p = string_to_uint16_array(pattern)
+  match_glob_precompiled(p, text)
+}
+
+///|
+/// match_glob using pre-compiled pattern code units to avoid repeated allocation.
+fn match_glob_precompiled(p : FixedArray[UInt16], text : String) -> Bool {
+  let slen = text.length()
+  let plen = p.length()
   let mut pi = 0
   let mut si = 0
   let mut star = -1
   let mut mark = 0
-  while si < s.length() {
-    if pi < p.length() && (p[pi] == '?' || p[pi] == s[si]) {
+  while si < slen {
+    if pi < plen && (p[pi] == char_question || p[pi] == text.unsafe_get(si)) {
       pi += 1
       si += 1
-    } else if pi < p.length() && p[pi] == '*' {
+    } else if pi < plen && p[pi] == char_star {
       star = pi
       mark = si
       pi += 1
@@ -176,10 +297,10 @@ pub fn match_glob(pattern : String, text : String) -> Bool {
       return false
     }
   }
-  while pi < p.length() && p[pi] == '*' {
+  while pi < plen && p[pi] == char_star {
     pi += 1
   }
-  pi == p.length()
+  pi == plen
 }
 
 ///|
@@ -216,14 +337,36 @@ fn match_rule_path(rule : Rule, rel : String) -> Bool {
   if rule.has_slash || rule.anchored {
     match_path(rule.pattern, rel)
   } else {
-    let segs = split_path(rel)
-    for seg in segs {
-      if match_glob(rule.pattern, seg) {
+    // Use pre-compiled pattern_chars to avoid allocation per segment
+    for_each_segment(rel, fn(seg) {
+      if match_glob_precompiled(rule.pattern_chars, seg) {
+        return true
+      }
+      false
+    })
+  }
+}
+
+///|
+/// Iterate over "/" separated segments without allocating an Array.
+/// Returns true if callback returns true for any segment.
+fn for_each_segment(path : String, f : (String) -> Bool) -> Bool {
+  let len = path.length()
+  let mut start = 0
+  while start < len {
+    let mut end = start
+    while end < len && path.unsafe_get(end) != char_slash {
+      end += 1
+    }
+    if end > start {
+      let seg = String::unsafe_substring(path, start~, end~)
+      if f(seg) {
         return true
       }
     }
-    false
+    start = end + 1
   }
+  false
 }
 
 ///|
@@ -270,15 +413,26 @@ fn match_segments(
 
 ///|
 fn relative_to_base(path : String, base : String) -> String? {
-  if base == "" {
+  let blen = base.length()
+  if blen == 0 {
     return Some(path)
   }
-  if path == base {
+  let plen = path.length()
+  if plen < blen {
+    return None
+  }
+  // Check character-by-character that path starts with base
+  for i in 0..<blen {
+    if path.unsafe_get(i) != base.unsafe_get(i) {
+      return None
+    }
+  }
+  if plen == blen {
     return Some("")
   }
-  if path.has_prefix(base + "/") {
-    let start = base.length() + 1
-    Some(String::unsafe_substring(path, start~, end=path.length()))
+  // path must have '/' right after base
+  if path.unsafe_get(blen) == char_slash {
+    Some(String::unsafe_substring(path, start=blen + 1, end=plen))
   } else {
     None
   }

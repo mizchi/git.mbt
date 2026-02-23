@@ -62,6 +62,8 @@ pub async fn native_http_get(String, Map[String, String]) -> (@types.HttpRespons
 
 pub async fn native_http_post(String, Bytes, Map[String, String]) -> (@types.HttpResponse, Bytes) raise @object.GitError
 
+pub fn native_readdir_typed(String) -> Array[(String, Int)]?
+
 pub async fn push(@protocol.Remote, @protocol.PushRequest) -> String raise @object.GitError
 
 pub async fn push_file(@protocol.Remote, Bytes, String, String, String, Int64, @object.ObjectId?) -> @object.ObjectId raise @object.GitError

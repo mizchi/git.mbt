@@ -29,6 +29,11 @@ pub async fn status(
   let racy_git = racy_git_enabled()
   let index_entries = read_index_entries(fs, actual_git_dir)
   t0 = profile_lap(profile, "status read_index_entries", t0)
+  let (unstaged_modified, unstaged_deleted, untracked) = index_guided_status_walk(
+    fs, root, index_entries, skip_worktree_paths, autocrlf, racy_git,
+  )
+  t0 = profile_lap(profile, "status index_guided_walk", t0)
+  // Build index_map for staged changes detection
   let index_map : Map[String, IndexEntry] = {}
   for e in index_entries {
     if skip_worktree_paths.contains(e.path) {
@@ -36,127 +41,6 @@ pub async fn status(
     }
     index_map[e.path] = e
   }
-  let untracked : Array[String] = []
-  let unstaged_modified : Array[String] = []
-  let unstaged_deleted : Array[String] = []
-  let files = @ignore.list_working_files_async(fs, root)
-  t0 = profile_lap(profile, "status list_working_files", t0)
-  let visited : Map[String, Bool] = {}
-  for path in files {
-    visited[path] = true
-    match index_map.get(path) {
-      None => untracked.push(path)
-      Some(entry) => {
-        if is_gitlink_mode_int(entry.mode) {
-          continue
-        }
-        let abs = join_path(root, path)
-        match @bitio.worktree_entry_meta(fs, abs) {
-          None => ()
-          Some(info) =>
-            match info.kind {
-              @bitio.WorktreeKindMeta::Regular => {
-                let mut stat_matches = false
-                let mut size_mismatch = false
-                match info.size {
-                  Some(sz) => {
-                    size_mismatch = sz != entry.size
-                    match info.mtime_sec {
-                      Some(ms) =>
-                        match info.mtime_nsec {
-                          Some(mn) =>
-                            if entry.mtime_sec != 0 || entry.mtime_nsec != 0 {
-                              stat_matches = not(size_mismatch) &&
-                                ms == entry.mtime_sec &&
-                                mn == entry.mtime_nsec
-                            }
-                          None => ()
-                        }
-                      None => ()
-                    }
-                  }
-                  None => ()
-                }
-                if info.mode != entry.mode {
-                  unstaged_modified.push(path)
-                } else if size_mismatch {
-                  unstaged_modified.push(path)
-                } else if not(stat_matches) {
-                  let content = fs.read_file(abs)
-                  let normalized = normalize_worktree_content(content, autocrlf)
-                  let id = @bit.hash_blob(normalized)
-                  if id != entry.id {
-                    unstaged_modified.push(path)
-                  }
-                } else if racy_git {
-                  let content = fs.read_file(abs)
-                  let normalized = normalize_worktree_content(content, autocrlf)
-                  let id = @bit.hash_blob(normalized)
-                  if id != entry.id {
-                    unstaged_modified.push(path)
-                  }
-                }
-              }
-              @bitio.WorktreeKindMeta::Symlink => {
-                let mode_changed = info.mode != entry.mode
-                let mut stat_matches = false
-                match info.mtime_sec {
-                  Some(ms) =>
-                    match info.mtime_nsec {
-                      Some(mn) =>
-                        if entry.mtime_sec != 0 || entry.mtime_nsec != 0 {
-                          stat_matches = ms == entry.mtime_sec &&
-                            mn == entry.mtime_nsec
-                        }
-                      None => ()
-                    }
-                  None => ()
-                }
-                if mode_changed {
-                  unstaged_modified.push(path)
-                } else if not(stat_matches) {
-                  match @bitio.read_symlink_target_path(abs) {
-                    Some(target) => {
-                      let id = target |> @utf8.encode |> @bit.hash_blob
-                      if id != entry.id {
-                        unstaged_modified.push(path)
-                      }
-                    }
-                    None => ()
-                  }
-                } else if racy_git {
-                  match @bitio.read_symlink_target_path(abs) {
-                    Some(target) => {
-                      let id = target |> @utf8.encode |> @bit.hash_blob
-                      if id != entry.id {
-                        unstaged_modified.push(path)
-                      }
-                    }
-                    None => ()
-                  }
-                }
-              }
-            }
-        }
-      }
-    }
-  }
-  t0 = profile_lap(profile, "status scan_worktree", t0)
-  for item in index_map.to_array() {
-    let (path, _) = item
-    if not(visited.contains(path)) {
-      let abs = join_path(root, path)
-      if index_map.get(path) is Some(entry) {
-        if is_gitlink_mode_int(entry.mode) {
-          continue
-        }
-      }
-      if @bitio.worktree_entry_meta(fs, abs) is None {
-        unstaged_deleted.push(path)
-      }
-    }
-  }
-  t0 = profile_lap(profile, "status scan_deleted", t0)
   let staged_added : Array[String] = []
   let staged_modified : Array[String] = []
   let staged_deleted : Array[String] = []

@@ -60,6 +60,7 @@ pub struct WorktreeProbeProvider {
   entry_meta_sync : (&@types.RepoFileSystem, String) -> WorktreeEntryMeta?
   lstat : (String) -> WorktreeEntryMeta?
   symlink_target : (String) -> String?
+  readdir_typed : (String) -> Array[(String, Int)]?
 }
 
 ///|
@@ -68,6 +69,7 @@ pub fn WorktreeProbeProvider::new(
   symlink_target : (String) -> String?,
   entry_meta_sync? : (&@types.RepoFileSystem, String) -> WorktreeEntryMeta?,
   lstat? : (String) -> WorktreeEntryMeta?,
+  readdir_typed? : (String) -> Array[(String, Int)]?,
 ) -> WorktreeProbeProvider {
   let sync_fn = match entry_meta_sync {
     Some(f) => f
@@ -77,7 +79,17 @@ pub fn WorktreeProbeProvider::new(
     Some(f) => f
     None => fn(_path) { None }
   }
-  { entry_meta, entry_meta_sync: sync_fn, lstat: lstat_fn, symlink_target }
+  let readdir_fn = match readdir_typed {
+    Some(f) => f
+    None => fn(_path) { None }
+  }
+  {
+    entry_meta,
+    entry_meta_sync: sync_fn,
+    lstat: lstat_fn,
+    symlink_target,
+    readdir_typed: readdir_fn,
+  }
 }
 
 ///|
@@ -110,6 +122,7 @@ pub fn WorktreeProbeProvider::none() -> WorktreeProbeProvider {
     entry_meta_sync: fallback_meta,
     lstat: fn(_path) { None },
     symlink_target: fn(_ : String) { None },
+    readdir_typed: fn(_path) { None },
   }
 }
 
@@ -154,6 +167,14 @@ pub fn lstat_entry_meta(abs_path : String) -> WorktreeEntryMeta? {
 ///|
 pub fn read_symlink_target_path(path : String) -> String? {
   (worktree_probe_box.value.symlink_target)(path)
+}
+
+///|
+/// Read directory entries with file type info. Returns (name, d_type) pairs.
+/// d_type: 4=DT_DIR, 8=DT_REG, 10=DT_LNK, 0=DT_UNKNOWN.
+/// Returns None if native readdir is not available (fallback to fs.readdir + is_dir).
+pub fn readdir_typed(path : String) -> Array[(String, Int)]? {
+  (worktree_probe_box.value.readdir_typed)(path)
 }
 
 ///|
