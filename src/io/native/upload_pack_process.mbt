@@ -444,17 +444,12 @@ fn read_ssh_ip_option() -> String? {
   }
 }
 
-///|
-fn build_upload_pack_remote_command(
-  path : String,
-  advertise_refs : Bool,
-) -> String {
+///| Build the remote command for SSH transport.
+/// SSH uses the native interactive git protocol (no --stateless-rpc).
+/// The server sends ref advertisement first, then reads wants, then sends pack.
+fn build_upload_pack_remote_command(path : String) -> String {
   let quoted_path = quote_shell_arg_single(path)
-  if advertise_refs {
-    "git-upload-pack --stateless-rpc --advertise-refs " + quoted_path
-  } else {
-    "git-upload-pack --stateless-rpc " + quoted_path
-  }
+  "git-upload-pack " + quoted_path
 }
 
 ///|
@@ -555,7 +550,7 @@ fn build_upload_pack_process_spec(
         None => ()
       }
       args.push(endpoint.host)
-      args.push(build_upload_pack_remote_command(endpoint.path, advertise_refs))
+      args.push(build_upload_pack_remote_command(endpoint.path))
       let extra_env = if prefer_v2 {
         Some({ "GIT_PROTOCOL": "version=2" })
       } else {
@@ -753,8 +748,190 @@ pub async fn upload_pack_request_process(
   body : Bytes,
   prefer_v2 : Bool,
 ) -> Bytes raise @bit.GitError {
+  let remote_spec = @protocol.parse_remote(remote)
+  if remote_spec.kind == @protocol.RemoteKind::Ssh {
+    let spec = build_upload_pack_process_spec(
+      remote_spec, advertise_refs=false, prefer_v2~,
+    )
+    return run_ssh_upload_pack_interactive(spec, body)
+  }
   let proc = build_upload_pack_request_process_spec(remote, prefer_v2)
   run_upload_pack_process(proc, Some(body))
+}
+
+///| Parse 4-byte hex pkt-line length from raw bytes.
+fn parse_pkt_hex_bytes(header : Bytes) -> Int {
+  let mut result = 0
+  for i in 0..<4 {
+    let b = header[i].to_int()
+    let digit = if b >= 0x30 && b <= 0x39 {
+      b - 0x30
+    } else if b >= 0x61 && b <= 0x66 {
+      b - 0x61 + 10
+    } else if b >= 0x41 && b <= 0x46 {
+      b - 0x41 + 10
+    } else {
+      0
+    }
+    result = result * 16 + digit
+  }
+  result
+}
+
+///| Skip pkt-lines from an SSH process stdout until flush (0000).
+/// Discards the ref advertisement that the server sends before reading wants.
+async fn skip_ssh_ref_advertisement(
+  reader : @process.ReadFromProcess,
+) -> Unit raise @bit.GitError {
+  while true {
+    let header = reader.read_exactly(4) catch {
+      _ => break
+    }
+    let len = parse_pkt_hex_bytes(header)
+    if len == 0 {
+      break // flush packet
+    }
+    if len <= 4 {
+      continue // delimiter or empty
+    }
+    let _discard = reader.read_exactly(len - 4) catch {
+      err =>
+        raise @bit.GitError::ProtocolError("SSH pkt-line read failed: \{err}")
+    }
+  }
+}
+
+///| Run SSH git-upload-pack with pipe-based interactive protocol.
+///
+/// SSH interactive protocol requires that the client reads the ref
+/// advertisement BEFORE sending wants. File-based stdin doesn't work
+/// because SSH sends EOF immediately, causing the server to exit before
+/// processing wants.
+///
+/// This function:
+/// 1. Spawns SSH process with pipe-based stdin/stdout
+/// 2. Reads and discards the ref advertisement from stdout
+/// 3. Writes the fetch request (wants) to stdin
+/// 4. Closes stdin (signals EOF to server)
+/// 5. Reads the pack response (NAK + sideband pack data) from stdout
+async fn run_ssh_upload_pack_interactive(
+  spec : ProcessSpec,
+  wants_data : Bytes,
+) -> Bytes raise @bit.GitError {
+  let (stdin_input, stdin_writer) = @process.write_to_process() catch {
+    err => raise @bit.GitError::IoError("SSH stdin pipe failed: \{err}")
+  }
+  let (stdout_reader, stdout_output) = @process.read_from_process() catch {
+    err => raise @bit.GitError::IoError("SSH stdout pipe failed: \{err}")
+  }
+  let nonce = @async.now()
+  let stderr_path = ".moonbit-ssh-upload-pack-\{nonce}.err"
+  let stderr = @process.redirect_to_file(
+    stderr_path, truncate=true, create=420,
+  ) catch {
+    err => raise @bit.GitError::IoError("SSH stderr file failed: \{err}")
+  }
+  let run_cwd = resolve_process_cwd()
+  let pid = match (spec.extra_env, run_cwd) {
+    (None, None) =>
+      @process.spawn_orphan(
+        spec.cmd,
+        spec.args,
+        inherit_env=true,
+        stdin=stdin_input,
+        stdout=stdout_output,
+        stderr~,
+      ) catch {
+        e => {
+          cleanup_temp_files([stderr_path])
+          raise @bit.GitError::IoError("SSH spawn failed: \{e}")
+        }
+      }
+    (Some(env), None) =>
+      @process.spawn_orphan(
+        spec.cmd,
+        spec.args,
+        extra_env=env,
+        inherit_env=true,
+        stdin=stdin_input,
+        stdout=stdout_output,
+        stderr~,
+      ) catch {
+        e => {
+          cleanup_temp_files([stderr_path])
+          raise @bit.GitError::IoError("SSH spawn failed: \{e}")
+        }
+      }
+    (None, Some(cwd)) =>
+      @process.spawn_orphan(
+        spec.cmd,
+        spec.args,
+        inherit_env=true,
+        stdin=stdin_input,
+        stdout=stdout_output,
+        stderr~,
+        cwd~,
+      ) catch {
+        e => {
+          cleanup_temp_files([stderr_path])
+          raise @bit.GitError::IoError("SSH spawn failed: \{e}")
+        }
+      }
+    (Some(env), Some(cwd)) =>
+      @process.spawn_orphan(
+        spec.cmd,
+        spec.args,
+        extra_env=env,
+        inherit_env=true,
+        stdin=stdin_input,
+        stdout=stdout_output,
+        stderr~,
+        cwd~,
+      ) catch {
+        e => {
+          cleanup_temp_files([stderr_path])
+          raise @bit.GitError::IoError("SSH spawn failed: \{e}")
+        }
+      }
+  }
+  // Step 1: Read and discard ref advertisement (pkt-lines until flush)
+  skip_ssh_ref_advertisement(stdout_reader)
+  // Step 2: Write fetch request (wants) to stdin, then close to signal EOF
+  stdin_writer.write(wants_data) catch {
+    e => {
+      cleanup_temp_files([stderr_path])
+      raise @bit.GitError::IoError("SSH stdin write failed: \{e}")
+    }
+  }
+  stdin_writer.close()
+  // Step 3: Read remaining response (NAK + sideband pack data)
+  let response = stdout_reader.read_all() catch {
+    e => {
+      cleanup_temp_files([stderr_path])
+      raise @bit.GitError::IoError("SSH stdout read failed: \{e}")
+    }
+  }
+  stdout_reader.close()
+  // Step 4: Wait for SSH process to exit
+  let code = @process.wait_pid(pid) catch {
+    e => {
+      cleanup_temp_files([stderr_path])
+      raise @bit.GitError::IoError("SSH wait failed: \{e}")
+    }
+  }
+  if code != 0 {
+    let err_bytes = @fs.read_file_to_bytes(stderr_path) catch {
+      _ => Bytes::default()
+    }
+    let err_text = bytes_to_string_lossy(err_bytes)
+    cleanup_temp_files([stderr_path])
+    let args_joined = spec.args.join(" ")
+    raise @bit.GitError::IoError(
+      "git-upload-pack failed (exit=\{code}): \{spec.cmd} \{args_joined}: \{err_text}",
+    )
+  }
+  cleanup_temp_files([stderr_path])
+  response.binary()
 }
 
 ///|

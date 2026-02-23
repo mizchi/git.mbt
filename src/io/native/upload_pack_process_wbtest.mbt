@@ -10,7 +10,7 @@ fn restore_env_var_for_upload_pack_process_wbtest(
 }
 
 ///|
-test "upload-pack process: info-refs over ssh keeps ssh command" {
+test "upload-pack process: info-refs over ssh uses native protocol (no stateless-rpc)" {
   let prev_ssh_command = @sys.get_env_var("GIT_SSH_COMMAND")
   let prev_ssh = @sys.get_env_var("GIT_SSH")
   @sys.unset_env_var("GIT_SSH_COMMAND")
@@ -22,8 +22,8 @@ test "upload-pack process: info-refs over ssh keeps ssh command" {
   assert_true(spec.args.length() >= 2)
   let remote_cmd = spec.args[spec.args.length() - 1]
   assert_true(remote_cmd.contains("git-upload-pack"))
-  assert_true(remote_cmd.contains("--stateless-rpc"))
-  assert_true(remote_cmd.contains("--advertise-refs"))
+  assert_false(remote_cmd.contains("--stateless-rpc"))
+  assert_false(remote_cmd.contains("--advertise-refs"))
   assert_true(remote_cmd.contains("bit-vcs.git"))
   match spec.extra_env {
     Some(extra) => assert_eq(extra.get("GIT_PROTOCOL"), Some("version=2"))
@@ -36,7 +36,7 @@ test "upload-pack process: info-refs over ssh keeps ssh command" {
 }
 
 ///|
-test "upload-pack process: request over ssh keeps ssh command" {
+test "upload-pack process: request over ssh uses native protocol (no stateless-rpc)" {
   let prev_ssh_command = @sys.get_env_var("GIT_SSH_COMMAND")
   let prev_ssh = @sys.get_env_var("GIT_SSH")
   @sys.unset_env_var("GIT_SSH_COMMAND")
@@ -48,9 +48,8 @@ test "upload-pack process: request over ssh keeps ssh command" {
   assert_true(spec.args.length() >= 2)
   let remote_cmd = spec.args[spec.args.length() - 1]
   assert_true(remote_cmd.contains("git-upload-pack"))
-  assert_true(remote_cmd.contains("--stateless-rpc"))
+  assert_false(remote_cmd.contains("--stateless-rpc"))
   assert_true(remote_cmd.contains("bit-vcs.git"))
-  assert_false(remote_cmd.contains("--advertise-refs"))
   match spec.extra_env {
     Some(extra) => assert_eq(extra.get("GIT_PROTOCOL"), Some("version=2"))
     None => fail("expected GIT_PROTOCOL for prefer_v2")
@@ -62,7 +61,7 @@ test "upload-pack process: request over ssh keeps ssh command" {
 }
 
 ///|
-test "upload-pack process: info-refs over ssh escapes single quote in remote path" {
+test "upload-pack process: ssh remote command escapes single quote in path" {
   let prev_ssh_command = @sys.get_env_var("GIT_SSH_COMMAND")
   let prev_ssh = @sys.get_env_var("GIT_SSH")
   @sys.unset_env_var("GIT_SSH_COMMAND")
@@ -74,7 +73,7 @@ test "upload-pack process: info-refs over ssh escapes single quote in remote pat
   assert_true(spec.args.length() >= 2)
   let remote_cmd = spec.args[spec.args.length() - 1]
   assert_eq(
-    remote_cmd, "git-upload-pack --stateless-rpc --advertise-refs 'mizchi/o'\\''hara.git'",
+    remote_cmd, "git-upload-pack 'mizchi/o'\\''hara.git'",
   )
   restore_env_var_for_upload_pack_process_wbtest(
     "GIT_SSH_COMMAND", prev_ssh_command,
