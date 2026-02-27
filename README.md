@@ -194,11 +194,35 @@ run_storage_command(fs, fs, root, "commit", ["-m", "agent snapshot"])
 
 ## Compatibility
 
-- Hash algorithm: SHA-1 only.
-- SHA-256 repositories and `--object-format=sha256` are not supported.
 - Git config: reads global aliases from `~/.gitconfig` (or `GIT_CONFIG_GLOBAL`) only.
-- Shell aliases (prefixed with `!`) are not supported.
+- Generic `filter=` attributes (clean/smudge) are handled natively.
 - Detailed standalone scope, unsupported paths, fallback points, and git/t coverage are documented in [`docs/git-compatibility.md`](docs/git-compatibility.md).
+
+### Explicitly Unsupported Features
+
+The following features are **not supported** and will produce a fatal error:
+
+**Repository formats**
+- SHA-256 repositories (`--object-format=sha256`)
+- Reftable ref format (`--ref-format=reftable`)
+- Incremental multi-pack-index chains
+
+**Gitattributes**
+- `filter=lfs` (Git LFS)
+- `working-tree-encoding=`
+
+**Commit & rebase**
+- Signed commits (`-S`, `--gpg-sign`)
+- Interactive rebase (`-i`, `--interactive`)
+
+**Clone**
+- Recursive clone (`--recursive`, submodule auto-init)
+
+**Network**
+- SSH URLs (`git@...`) in `bit cat` / `bit tree` commands
+
+**Shell**
+- Shell aliases (prefixed with `!`)
 
 ## Environment Variables
 

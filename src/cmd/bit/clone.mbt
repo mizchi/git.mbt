@@ -291,12 +291,6 @@ async fn handle_clone(args : Array[String]) -> Unit raise Error {
   let local_src_file_path = resolve_local_clone_source_file(
     fs, command_root, remote_url,
   )
-  if clone_bundle_requires_advanced_compat(local_src_file_path) {
-    eprint_line(
-      "fatal: clone from local bundle is not supported in standalone mode",
-    )
-    @sys.exit(1)
-  }
   // Check for ambiguity with local directories only when path is not local.
   if local_src_path is None && local_src_file_path is None {
     match check_shorthand_ambiguity(remote_url, p => fs.is_dir(p)) {
@@ -434,6 +428,38 @@ async fn handle_clone(args : Array[String]) -> Unit raise Error {
   let clone_git_dir = match separate_git_dir {
     Some(path) => path
     None => if bare { clone_root } else { clone_root + "/.git" }
+  }
+  // Handle bundle clone separately
+  match local_src_file_path {
+    Some(bundle_path) if bundle_path.has_suffix(".bundle") => {
+      clone_local_bundle(
+        fs,
+        bundle_path,
+        clone_root,
+        remote_url,
+        bare,
+        no_checkout~,
+        separate_git_dir~,
+        remote_name~,
+        ref_format~,
+      )
+      if not(bare) && not(no_checkout) {
+        match @bitlib.resolve_head_commit(fs, clone_git_dir) {
+          Some(commit_id) => {
+            warn_case_insensitive_collisions_from_commit(
+              fs, clone_git_dir, commit_id,
+            )
+            @bitlibnative.apply_worktree_modes_from_commit(
+              fs, fs, clone_root, clone_git_dir, commit_id,
+            )
+          }
+          None => ()
+        }
+      }
+      run_postclone_hook(fs, fs, clone_root, clone_git_dir, skip_hooks)
+      return ()
+    }
+    _ => ()
   }
   match local_src_path {
     Some(src_path) => {
@@ -876,14 +902,6 @@ async fn resolve_clone_remote_via_relay(
     )
   }
   (sender, clone_url)
-}
-
-///|
-fn clone_bundle_requires_advanced_compat(local_src_file_path : String?) -> Bool {
-  match local_src_file_path {
-    Some(path) => path.has_suffix(".bundle")
-    None => false
-  }
 }
 
 ///|

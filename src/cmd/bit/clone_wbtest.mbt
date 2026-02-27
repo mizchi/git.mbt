@@ -58,17 +58,6 @@ test "clone local source file resolver: remote URL is ignored" {
 }
 
 ///|
-test "clone bundle advanced compat requires local bundle path" {
-  assert_true(
-    clone_bundle_requires_advanced_compat(Some("/work/repo/repo.bundle")),
-  )
-  assert_false(
-    clone_bundle_requires_advanced_compat(Some("/work/repo/not-bundle.git")),
-  )
-  assert_false(clone_bundle_requires_advanced_compat(None))
-}
-
-///|
 test "clone reftable advanced compat depends on ref-format only" {
   assert_true(clone_ref_format_requires_advanced_compat("reftable"))
   assert_false(clone_ref_format_requires_advanced_compat("files"))

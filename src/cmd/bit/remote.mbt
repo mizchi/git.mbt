@@ -2100,6 +2100,210 @@ async fn clone_local_repo(
 }
 
 ///|
+async fn clone_local_bundle(
+  fs : OsFs,
+  bundle_path : String,
+  dest_path : String,
+  remote_url : String,
+  bare : Bool,
+  no_checkout? : Bool = false,
+  separate_git_dir? : String? = None,
+  remote_name? : String = "origin",
+  ref_format? : String = "files",
+) -> Unit raise Error {
+  let (_header, _prereqs, refs, pack_data) = parse_bundle_file(fs, bundle_path)
+  // Determine HEAD and default branch from bundle refs
+  let mut default_branch = "main"
+  let mut head_id : @bitcore.ObjectId? = None
+  let mut head_refname : String? = None
+  for item in refs {
+    let (id_hex, name) = item
+    if name == "HEAD" {
+      head_id = Some(@bitcore.ObjectId::from_hex(id_hex))
+    }
+  }
+  // Find which branch HEAD points to
+  for item in refs {
+    let (id_hex, name) = item
+    if name.has_prefix("refs/heads/") {
+      match head_id {
+        Some(hid) =>
+          if hid.to_hex() == id_hex && head_refname is None {
+            let branch_name = String::unsafe_substring(
+              name,
+              start=11,
+              end=name.length(),
+            )
+            default_branch = branch_name
+            head_refname = Some(name)
+          }
+        None => ()
+      }
+    }
+  }
+  // If no HEAD ref was found, use the first refs/heads/* entry
+  if head_id is None {
+    for item in refs {
+      let (id_hex, name) = item
+      if name.has_prefix("refs/heads/") {
+        head_id = Some(@bitcore.ObjectId::from_hex(id_hex))
+        let branch_name = String::unsafe_substring(
+          name,
+          start=11,
+          end=name.length(),
+        )
+        default_branch = branch_name
+        head_refname = Some(name)
+        break
+      }
+    }
+  }
+  // Initialize destination repository
+  let dest_git_dir = if bare {
+    @bitlib.init_repo_with_options_with_repo_fs(fs, fs, dest_path, {
+      default_branch,
+      bare: true,
+      separate_git_dir: None,
+      template_dir: None,
+      ref_format,
+      object_format: "sha1",
+    })
+    dest_path
+  } else {
+    match separate_git_dir {
+      Some(path) => {
+        fs.mkdir_p(dest_path)
+        @bitlib.init_repo_with_options_with_repo_fs(fs, fs, dest_path, {
+          default_branch,
+          bare: false,
+          separate_git_dir: Some(path),
+          template_dir: None,
+          ref_format,
+          object_format: "sha1",
+        })
+        path
+      }
+      None => {
+        @bitlib.init_repo_with_options_with_repo_fs(fs, fs, dest_path, {
+          default_branch,
+          bare: false,
+          separate_git_dir: None,
+          template_dir: None,
+          ref_format,
+          object_format: "sha1",
+        })
+        dest_path + "/.git"
+      }
+    }
+  }
+  // Write pack data from bundle
+  let objects = @pack.parse_packfile(pack_data)
+  @pack.write_packfile_with_index(fs, dest_git_dir, pack_data, objects)
+  // Write refs from bundle
+  match head_id {
+    Some(id) =>
+      if head_refname is Some(_) {
+        write_ref_file(fs, dest_git_dir, "refs/heads/" + default_branch, id)
+      } else {
+        // Detached HEAD
+        fs.write_string(dest_git_dir + "/HEAD", id.to_hex() + "\n")
+      }
+    None => ()
+  }
+  let detached_head = head_refname is None && head_id is Some(_)
+  // Set up remote-tracking refs and tags from bundle refs
+  let branches : Array[(String, @bitcore.ObjectId)] = []
+  for item in refs {
+    let (id_hex, name) = item
+    let id = @bitcore.ObjectId::from_hex(id_hex)
+    if name.has_prefix("refs/heads/") {
+      let branch_name = String::unsafe_substring(
+        name,
+        start=11,
+        end=name.length(),
+      )
+      branches.push((branch_name, id))
+      write_ref_file(
+        fs,
+        dest_git_dir,
+        "refs/remotes/" + remote_name + "/" + branch_name,
+        id,
+      )
+    } else if name.has_prefix("refs/tags/") {
+      write_ref_file(fs, dest_git_dir, name, id)
+    }
+  }
+  // Configure origin remote
+  let fetch_specs = ["+refs/heads/*:refs/remotes/" + remote_name + "/*"]
+  remote_add(
+    fs,
+    fs,
+    dest_git_dir,
+    remote_name,
+    remote_url,
+    fetch_specs,
+    false,
+    None,
+  )
+  // Branch tracking config
+  if not(bare) && not(detached_head) {
+    @bitlib.set_config_key(
+      fs, fs, dest_git_dir, "branch", default_branch, "remote", remote_name,
+    )
+    @bitlib.set_config_key(
+      fs,
+      fs,
+      dest_git_dir,
+      "branch",
+      default_branch,
+      "merge",
+      "refs/heads/" + default_branch,
+    )
+    match read_global_branch_autosetuprebase(fs) {
+      Some(mode) =>
+        if mode == "always" || mode == "true" || mode == "remote" {
+          @bitlib.set_config_key(
+            fs, fs, dest_git_dir, "branch", default_branch, "rebase", "true",
+          )
+        }
+      None => ()
+    }
+  }
+  // Write remote HEAD symref
+  if not(detached_head) && branches.length() > 0 {
+    write_symref_file(
+      fs,
+      dest_git_dir,
+      "refs/remotes/" + remote_name + "/HEAD",
+      "refs/remotes/" + remote_name + "/" + default_branch,
+    )
+  }
+  pack_remote_tracking_refs(fs, dest_git_dir, remote_name)
+  // Checkout working tree
+  if not(bare) && not(no_checkout) {
+    match head_id {
+      Some(id) => {
+        let checkout_spec = if detached_head {
+          id.to_hex()
+        } else {
+          default_branch
+        }
+        let _ = run_checkout_with_sensitive_hooks(
+          fs,
+          fs,
+          dest_path,
+          checkout_spec,
+          detach=detached_head,
+          update_worktree=true,
+          update_index=true,
+        )
+      }
+      None => ()
+    }
+  }
+}
+
+///|
 fn read_clone_source_head_fallback(
   fs : &@bitcore.RepoFileSystem,
   git_dir : String,
