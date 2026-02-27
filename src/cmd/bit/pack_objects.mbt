@@ -34,6 +34,13 @@ priv enum MissingMode {
 }
 
 ///|
+priv enum PackReuseMode {
+  Disabled
+  Single
+  Multi
+}
+
+///|
 priv enum PackObjectsParse {
   Ok(PackObjectsConfig)
   Unsupported
@@ -218,14 +225,15 @@ fn parse_pack_objects_args(args : Array[String]) -> PackObjectsParse {
             }
           } else if arg.has_prefix("--filter=") {
             let spec = String::unsafe_substring(arg, start=9, end=arg.length())
-            filter = parse_pack_filter_spec(spec)
-            has_unsupported_options = true
+            filter = combine_filter_specs(filter, parse_pack_filter_spec(spec))
           } else if arg == "--filter" {
             if i + 1 >= args.length() {
               return PackObjectsParse::Unsupported
             }
-            filter = parse_pack_filter_spec(args[i + 1])
-            has_unsupported_options = true
+            filter = combine_filter_specs(
+              filter,
+              parse_pack_filter_spec(args[i + 1]),
+            )
             i += 1
           } else if arg.has_prefix("--object-format=") {
             object_format = normalize_object_format((try! arg[16:]).to_string())
@@ -353,18 +361,66 @@ fn parse_pack_objects_args(args : Array[String]) -> PackObjectsParse {
 }
 
 ///|
-/// Parse filter specification for pack-objects
+/// Combine two filter specs: when both are BlobLimit, pick the smaller limit.
+/// Otherwise, the new filter overrides the old one.
+fn combine_filter_specs(
+  old : @protocol.FilterSpec,
+  new_ : @protocol.FilterSpec,
+) -> @protocol.FilterSpec {
+  match (old, new_) {
+    (NoFilter, _) => new_
+    (_, NoFilter) => old
+    (BlobLimit(a), BlobLimit(b)) =>
+      @protocol.FilterSpec::BlobLimit(if a < b { a } else { b })
+    (BlobNone, BlobLimit(_)) => @protocol.FilterSpec::BlobNone
+    (BlobLimit(_), BlobNone) => @protocol.FilterSpec::BlobNone
+    _ => new_
+  }
+}
+
+///|
+fn parse_size_with_suffix(s : String) -> Int64 {
+  if s.length() == 0 {
+    return 0L
+  }
+  let last = s[s.length() - 1]
+  if last == 'k' || last == 'K' {
+    let num_str = String::unsafe_substring(s, start=0, end=s.length() - 1)
+    let num = @strconv.parse_int64(num_str) catch { _ => 0L }
+    num * 1024L
+  } else if last == 'm' || last == 'M' {
+    let num_str = String::unsafe_substring(s, start=0, end=s.length() - 1)
+    let num = @strconv.parse_int64(num_str) catch { _ => 0L }
+    num * 1024L * 1024L
+  } else if last == 'g' || last == 'G' {
+    let num_str = String::unsafe_substring(s, start=0, end=s.length() - 1)
+    let num = @strconv.parse_int64(num_str) catch { _ => 0L }
+    num * 1024L * 1024L * 1024L
+  } else {
+    @strconv.parse_int64(s) catch {
+      _ => 0L
+    }
+  }
+}
+
+///|
 fn parse_pack_filter_spec(spec : String) -> @protocol.FilterSpec {
   if spec == "blob:none" {
     @protocol.FilterSpec::BlobNone
   } else if spec.has_prefix("blob:limit=") {
     let limit_str = String::unsafe_substring(spec, start=11, end=spec.length())
-    let limit = @strconv.parse_int64(limit_str) catch { _ => 0L }
+    let limit = parse_size_with_suffix(limit_str)
     @protocol.FilterSpec::BlobLimit(limit)
   } else if spec.has_prefix("tree:") {
     let depth_str = String::unsafe_substring(spec, start=5, end=spec.length())
     let depth = @strconv.parse_int(depth_str) catch { _ => 0 }
     @protocol.FilterSpec::TreeDepth(depth)
+  } else if spec.has_prefix("sparse:path=") {
+    // sparse:path has been dropped for security reasons - return error indicator
+    @protocol.FilterSpec::SparsePathUnsupported
+  } else if spec.has_prefix("sparse:oid=") {
+    let oid_str = String::unsafe_substring(spec, start=11, end=spec.length())
+    @protocol.FilterSpec::SparseOid(oid_str)
   } else {
     @protocol.FilterSpec::NoFilter
   }
@@ -389,20 +445,118 @@ fn apply_pack_filter_spec(
       result
     }
     BlobLimit(max_size) => {
-      // Exclude blobs larger than max_size
+      // Exclude blobs with size >= max_size (strictly less than)
       let result : Array[@bitcore.PackObject] = []
       for obj in objects {
         if obj.obj_type != @bitcore.ObjectType::Blob ||
-          obj.data.length().to_int64() <= max_size {
+          obj.data.length().to_int64() < max_size {
           result.push(obj)
         }
       }
       result
     }
-    TreeDepth(_depth) =>
-      // Tree depth filtering is complex, not implemented yet
+    TreeDepth(depth) =>
+      if depth == 0 {
+        // tree:0 means exclude all trees and blobs (commits only)
+        let result : Array[@bitcore.PackObject] = []
+        for obj in objects {
+          if obj.obj_type != @bitcore.ObjectType::Tree &&
+            obj.obj_type != @bitcore.ObjectType::Blob {
+            result.push(obj)
+          }
+        }
+        result
+      } else {
+        // tree:N (N>0) - not yet implemented, pass through
+        objects
+      }
+    SparseOid(_) =>
+      // sparse:oid filtering requires resolving the oid to get the sparse spec;
+      // handled separately in apply_sparse_oid_filter
       objects
+    SparsePathUnsupported => objects // should not reach here; caught earlier
   }
+}
+
+///|
+/// Apply sparse:oid filter. Resolves the oid-ish to a blob containing
+/// sparse-checkout patterns, then filters objects to keep only blobs whose
+/// paths match the patterns (plus all non-blob objects).
+fn apply_sparse_oid_filter(
+  fs : OsFs,
+  git_dir : String,
+  db : @bitlib.ObjectDb,
+  objects : Array[@bitcore.PackObject],
+  oid_spec : String,
+) -> Array[@bitcore.PackObject] {
+  // Resolve the oid-ish to get the sparse pattern blob
+  let pattern_id = @bitrepo.rev_parse(fs, git_dir, oid_spec) catch { _ => None }
+  let pattern_id = match pattern_id {
+    Some(id) => id
+    None => return objects
+  }
+  let pattern_obj = db.get(fs, pattern_id) catch { _ => None }
+  let pattern_data = match pattern_obj {
+    Some(obj) => obj.data
+    None => return objects
+  }
+  // Parse sparse-checkout patterns from blob content
+  let pattern_str = @utf8.decode_lossy(pattern_data[:])
+  let patterns : Array[String] = []
+  let lines = pattern_str.split("\n")
+  lines.each(fn(line) {
+    let s = line.to_string().trim().to_string()
+    if s.length() > 0 && !s.has_prefix("#") {
+      patterns.push(s)
+    }
+  })
+  if patterns.length() == 0 {
+    return objects
+  }
+  // Build a set of blob IDs that match the sparse patterns
+  // We need to walk all commits' trees to determine which blobs match
+  let matching_blob_ids : Map[String, Bool] = {}
+  for obj in objects {
+    if obj.obj_type == @bitcore.ObjectType::Commit {
+      let info = @bitcore.parse_commit(obj.data) catch { _ => continue }
+      let tree_files = @bitlib.collect_tree_files(db, fs, info.tree) catch {
+        _ => continue
+      }
+      for path, entry in tree_files {
+        if sparse_path_matches(path, patterns) {
+          matching_blob_ids[entry.id.to_hex()] = true
+        }
+      }
+    }
+  }
+  // Filter: keep non-blobs and matching blobs
+  let result : Array[@bitcore.PackObject] = []
+  for obj in objects {
+    if obj.obj_type != @bitcore.ObjectType::Blob ||
+      matching_blob_ids.contains(obj.id.to_hex()) {
+      result.push(obj)
+    }
+  }
+  result
+}
+
+///|
+/// Check if a path matches any of the sparse-checkout patterns.
+/// Sparse-checkout cone-mode patterns: a trailing '/' means include
+/// everything under that directory.
+fn sparse_path_matches(path : String, patterns : Array[String]) -> Bool {
+  for pattern in patterns {
+    if pattern.has_suffix("/") {
+      // Directory pattern: include all files under this directory
+      if path.has_prefix(pattern) {
+        return true
+      }
+      // Exact file match
+    } else if path == pattern {
+      return true
+    }
+  }
+  false
 }
 
 ///|
@@ -1003,29 +1157,218 @@ async fn report_collect_error(err : @bitcore.GitError) -> Unit {
 }
 
 ///|
+/// Write a trace2 "data" event to the trace2 event file.
+fn write_trace2_data_event(
+  fs : OsFs,
+  trace2_path : String,
+  category : String,
+  key : String,
+  value : String,
+) -> Unit {
+  let json_line = "{\"event\":\"data\",\"category\":\"" +
+    category +
+    "\",\"key\":\"" +
+    key +
+    "\",\"value\":\"" +
+    value +
+    "\"}\n"
+  append_text_file(fs, trace2_path, json_line)
+}
+
+///|
+fn get_pack_reuse_mode(git_dir : String) -> PackReuseMode {
+  // Check config override first
+  match get_config_override("pack.allowPackReuse") {
+    Some(value) => {
+      let v = value.trim().to_string().to_lower()
+      if v == "multi" {
+        return PackReuseMode::Multi
+      }
+      if v == "single" || v == "true" || v == "1" {
+        return PackReuseMode::Single
+      }
+      if v == "false" || v == "0" {
+        return PackReuseMode::Disabled
+      }
+      return PackReuseMode::Single
+    }
+    None => ()
+  }
+  // Check git config
+  match bit_config_get(git_dir, "pack", "allowPackReuse") {
+    Some(value) => {
+      let v = value.trim().to_string().to_lower()
+      if v == "multi" {
+        return PackReuseMode::Multi
+      }
+      if v == "single" || v == "true" || v == "1" {
+        return PackReuseMode::Single
+      }
+      if v == "false" || v == "0" {
+        return PackReuseMode::Disabled
+      }
+      return PackReuseMode::Single
+    }
+    None => ()
+  }
+  // Check feature.experimental
+  match get_config_override("feature.experimental") {
+    Some(value) =>
+      match parse_bool_value(value) {
+        Some(true) => return PackReuseMode::Multi
+        _ => ()
+      }
+    None => ()
+  }
+  match bit_config_get(git_dir, "feature", "experimental") {
+    Some(value) =>
+      match parse_bool_value(value) {
+        Some(true) => return PackReuseMode::Multi
+        _ => ()
+      }
+    None => ()
+  }
+  // Default: single-pack reuse
+  PackReuseMode::Single
+}
+
+///|
+/// Read MIDX to build object_hex -> pack_idx mapping
+fn midx_read_object_pack_mapping(data : Bytes) -> Map[String, Int] {
+  let out : Map[String, Int] = {}
+  if data.length() < 12 {
+    return out
+  }
+  let num_chunks = data[6].to_int()
+  let oidf_offset = midx_find_chunk(data, num_chunks, "OIDF")
+  let oidf_end = midx_find_chunk_end(data, num_chunks, "OIDF")
+  if oidf_offset <= 0 || oidf_end - oidf_offset != 256 * 4 {
+    return out
+  }
+  let object_count = midx_read_u32(data, oidf_offset + 255 * 4)
+  if object_count <= 0 {
+    return out
+  }
+  let oidl_offset = midx_find_chunk(data, num_chunks, "OIDL")
+  let ooff_offset = midx_find_chunk(data, num_chunks, "OOFF")
+  if oidl_offset <= 0 || ooff_offset <= 0 {
+    return out
+  }
+  for i in 0..<object_count {
+    let oid = @bitcore.ObjectId::new(
+      FixedArray::makei(20, fn(j) { data[oidl_offset + i * 20 + j] }),
+    )
+    let pack_idx = midx_read_u32(data, ooff_offset + i * 8)
+    out[oid.to_hex()] = pack_idx
+  }
+  out
+}
+
+///|
+/// Read preferred pack index from MIDX BTMP chunk.
+/// The preferred pack is the one with bitmap_position = 0 (rank 0).
+fn midx_read_preferred_pack_idx(data : Bytes, num_packs : Int) -> Int? {
+  if data.length() < 12 || num_packs <= 0 {
+    return None
+  }
+  let num_chunks = data[6].to_int()
+  let btmp_offset = midx_find_chunk(data, num_chunks, "BTMP")
+  if btmp_offset <= 0 {
+    return None
+  }
+  // BTMP format: 8 bytes per pack (4 bytes bitmap_pos + 4 bytes count)
+  // The preferred pack has bitmap_pos = 0
+  for i in 0..<num_packs {
+    let bitmap_pos = midx_read_u32(data, btmp_offset + i * 8)
+    let count = midx_read_u32(data, btmp_offset + i * 8 + 4)
+    if bitmap_pos == 0 && count > 0 {
+      return Some(i)
+    }
+  }
+  // Fallback: if no pack has bitmap_pos=0 with objects, return pack 0
+  Some(0)
+}
+
+///|
+/// Returns (pack-reused count, packs-reused count)
 fn count_pack_reused_objects(
   fs : OsFs,
   git_dir : String,
   pack_dir : String,
   objects : Array[@bitcore.PackObject],
-) -> Int {
-  let packed_ids = collect_pack_ids_from_dir(fs, pack_dir)
-  let alt_dirs = read_alternate_object_dirs(fs, git_dir)
-  for alt_dir in alt_dirs {
-    let alt_pack_dir = alt_dir + "/pack"
-    let alt_pack_ids = collect_pack_ids_from_dir(fs, alt_pack_dir)
-    for item in alt_pack_ids {
-      let (hex, _v) = item
-      packed_ids[hex] = true
+) -> (Int, Int) {
+  let reuse_mode = get_pack_reuse_mode(git_dir)
+  if reuse_mode is Disabled {
+    return (0, 0)
+  }
+  // Try to read MIDX
+  let midx_path = pack_dir + "/multi-pack-index"
+  let midx_data = fs.read_file(midx_path) catch { _ => return (0, 0) }
+  // Check for MIDX bitmap (reuse only works with bitmap)
+  // Bitmap file is named multi-pack-index-<checksum>.bitmap
+  let has_bitmap = has_midx_bitmap(fs, pack_dir)
+  if !has_bitmap {
+    return (0, 0)
+  }
+  // Read pack names from MIDX
+  let pack_info = midx_read_pack_usage_from_data(midx_data)
+  match pack_info {
+    None => return (0, 0)
+    Some((pack_names, _counts)) => {
+      // Read object -> pack_idx mapping from MIDX
+      let obj_to_pack_idx = midx_read_object_pack_mapping(midx_data)
+      // Determine eligible pack indices based on reuse mode
+      let eligible : Map[Int, Bool] = {}
+      match reuse_mode {
+        Single => {
+          let preferred = midx_read_preferred_pack_idx(
+            midx_data,
+            pack_names.length(),
+          )
+          match preferred {
+            Some(idx) => eligible[idx] = true
+            None => eligible[0] = true
+          }
+        }
+        Multi =>
+          for i in 0..<pack_names.length() {
+            eligible[i] = true
+          }
+        Disabled => ()
+      }
+      // Count reused objects
+      let mut reused = 0
+      let packs_used : Map[Int, Bool] = {}
+      for obj in objects {
+        let hex = obj.id.to_hex()
+        match obj_to_pack_idx.get(hex) {
+          Some(pack_idx) =>
+            if eligible.contains(pack_idx) {
+              reused += 1
+              packs_used[pack_idx] = true
+            }
+          None => ()
+        }
+      }
+      let packs_count = packs_used.length()
+      (reused, packs_count)
     }
   }
-  let mut count = 0
-  for obj in objects {
-    if packed_ids.contains(obj.id.to_hex()) {
-      count += 1
+}
+
+///|
+fn has_midx_bitmap(fs : OsFs, pack_dir : String) -> Bool {
+  if !fs.is_dir(pack_dir) {
+    return false
+  }
+  let entries = fs.readdir(pack_dir) catch { _ => return false }
+  for entry in entries {
+    let name = normalize_dir_entry(entry)
+    if name.has_prefix("multi-pack-index") && name.has_suffix(".bitmap") {
+      return true
     }
   }
-  count
+  false
 }
 
 ///|
@@ -1698,7 +2041,6 @@ async fn handle_pack_objects(args : Array[String]) -> Unit raise Error {
         @sys.exit(1)
       }
       let trace2_event = @sys.get_env_var("GIT_TRACE2_EVENT")
-      ignore(trace2_event)
       ignore(is_pack_reuse_config_enabled(git_dir))
       // Keep these flags visible for future compatibility tuning.
       let non_default_delta_params = cfg.window == 0 || cfg.depth != 50
@@ -1730,6 +2072,9 @@ async fn handle_pack_objects(args : Array[String]) -> Unit raise Error {
       }
       let lookup_dbs = load_object_lookup_dbs(fs, git_dir, db)
       let mut objects : Array[@bitcore.PackObject] = []
+      // Objects explicitly given by the user (e.g., tree/blob OIDs in --revs input)
+      // that should bypass filter_spec application
+      let filter_exempt_objects : Array[@bitcore.PackObject] = []
       if cfg.stdin_packs {
         let input = read_all_stdin()
         let (include_names, exclude_names) = parse_stdin_pack_lines(input)
@@ -1760,6 +2105,7 @@ async fn handle_pack_objects(args : Array[String]) -> Unit raise Error {
         let include_commits : Array[@bitcore.ObjectId] = []
         let exclude_commits : Array[@bitcore.ObjectId] = []
         let explicit_tags : Array[@bitcore.PackObject] = []
+        let user_given_objects : Array[@bitcore.PackObject] = []
         let mut negate_mode = false
         for line in lines {
           let trimmed = trim_line_bytes(line)
@@ -1846,12 +2192,36 @@ async fn handle_pack_objects(args : Array[String]) -> Unit raise Error {
                   for tag in tags {
                     explicit_tags.push(tag)
                   }
-                  include_commits.push(resolved)
+                  // Check if the resolved object is a commit or a non-commit (tree/blob)
+                  // Non-commit objects are "user given" and bypass filters
+                  let obj_for_type = try db.get(fs, resolved) catch {
+                    _ => None
+                  } noraise {
+                    value => value
+                  }
+                  match obj_for_type {
+                    Some(o) =>
+                      if o.obj_type != @bitcore.ObjectType::Commit {
+                        user_given_objects.push(o)
+                      } else {
+                        include_commits.push(resolved)
+                      }
+                    _ => include_commits.push(resolved)
+                  }
                 }
               }
             }
           }
         }
+        let allow_missing = match cfg.missing_mode {
+          MissingMode::AllowAny => true
+          _ => false
+        }
+        let allow_missing_for_local = allow_missing ||
+          cfg.local_only ||
+          cfg.honor_pack_keep ||
+          cfg.incremental ||
+          cfg.unpacked
         let env_sparse = match @sys.get_env_var("GIT_TEST_PACK_SPARSE") {
           Some(value) => parse_bool_value(value)
           None => None
@@ -1866,20 +2236,14 @@ async fn handle_pack_objects(args : Array[String]) -> Unit raise Error {
               None => default_sparse
             }
         }
-        if use_sparse {
+        // Sparse collection silently skips missing objects, so only use it
+        // when missing objects are allowed (allow_missing or local flags).
+        // Otherwise, use strict collection that detects missing objects.
+        if use_sparse && allow_missing_for_local {
           objects = collect_sparse_objects_from_commits(
             db, fs, include_commits, exclude_commits,
           )
         } else {
-          let allow_missing = match cfg.missing_mode {
-            MissingMode::AllowAny => true
-            _ => false
-          }
-          let allow_missing_for_local = allow_missing ||
-            cfg.local_only ||
-            cfg.honor_pack_keep ||
-            cfg.incremental ||
-            cfg.unpacked
           let include_objects = if allow_missing_for_local {
             let blocked : Map[String, Bool] = {}
             collect_reachable_objects_from_commits_allow_missing(
@@ -1920,6 +2284,10 @@ async fn handle_pack_objects(args : Array[String]) -> Unit raise Error {
         }
         if explicit_tags.length() > 0 {
           objects.append(explicit_tags)
+        }
+        // User-given non-commit objects bypass filters
+        if user_given_objects.length() > 0 {
+          filter_exempt_objects.append(user_given_objects)
         }
       } else {
         let input = read_all_stdin()
@@ -1978,8 +2346,34 @@ async fn handle_pack_objects(args : Array[String]) -> Unit raise Error {
       if cfg.path_walk {
         @stdio.stderr.write("Compressing objects by path\n")
       }
+      // Handle sparse:path (security-dropped) error before filtering
+      if cfg.filter is SparsePathUnsupported {
+        @stdio.stderr.write(
+          "fatal: --filter=sparse:path is no longer supported\n",
+        )
+        @sys.exit(1)
+      }
+      // Handle sparse:oid filter
+      if cfg.filter is SparseOid(oid_spec) {
+        objects = apply_sparse_oid_filter(fs, git_dir, db, objects, oid_spec)
+      }
       // Apply filter specification (e.g., blob:none for partial clone)
       let mut objects = apply_pack_filter_spec(objects, cfg.filter)
+      // Add back user-given objects that bypass filters (e.g., explicitly
+      // specified trees/blobs in --revs input)
+      if filter_exempt_objects.length() > 0 {
+        let existing : Map[String, Bool] = {}
+        for obj in objects {
+          existing[@bitcore.hash_object_content(obj.obj_type, obj.data).to_hex()] = true
+        }
+        for obj in filter_exempt_objects {
+          let hex = @bitcore.hash_object_content(obj.obj_type, obj.data).to_hex()
+          if !existing.contains(hex) {
+            objects.push(obj)
+            existing[hex] = true
+          }
+        }
+      }
       if cfg.local_only {
         let alt_dirs = read_alternate_object_dirs(fs, git_dir)
         let non_local_ids : Map[String, Bool] = {}
@@ -2022,11 +2416,28 @@ async fn handle_pack_objects(args : Array[String]) -> Unit raise Error {
         sort_stdin_object_mode_objects(objects)
       }
       objects = dedup_objects(objects)
+      let (pack_reused, packs_reused) = count_pack_reused_objects(
+        fs, git_dir, pack_dir, objects,
+      )
+      // Write trace2 data events for pack-reused / packs-reused
+      if trace2_event is Some(trace2_path) {
+        write_trace2_data_event(
+          fs,
+          trace2_path,
+          "pack-objects",
+          "pack-reused",
+          pack_reused.to_string(),
+        )
+        write_trace2_data_event(
+          fs,
+          trace2_path,
+          "pack-objects",
+          "packs-reused",
+          packs_reused.to_string(),
+        )
+      }
       if cfg.progress {
         let enumerated = objects.length()
-        let pack_reused = count_pack_reused_objects(
-          fs, git_dir, pack_dir, objects,
-        )
         @stdio.stderr.write(
           "Enumerating objects: " + enumerated.to_string() + ", done\n",
         )

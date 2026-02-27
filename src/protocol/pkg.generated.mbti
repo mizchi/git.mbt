@@ -67,6 +67,8 @@ pub(all) enum FilterSpec {
   BlobNone
   BlobLimit(Int64)
   TreeDepth(Int)
+  SparseOid(String)
+  SparsePathUnsupported
 }
 pub fn FilterSpec::is_partial(Self) -> Bool
 pub fn FilterSpec::to_string(Self) -> String

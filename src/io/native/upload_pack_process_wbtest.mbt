@@ -72,9 +72,7 @@ test "upload-pack process: ssh remote command escapes single quote in path" {
   assert_eq(spec.cmd, "ssh")
   assert_true(spec.args.length() >= 2)
   let remote_cmd = spec.args[spec.args.length() - 1]
-  assert_eq(
-    remote_cmd, "git-upload-pack 'mizchi/o'\\''hara.git'",
-  )
+  assert_eq(remote_cmd, "git-upload-pack 'mizchi/o'\\''hara.git'")
   restore_env_var_for_upload_pack_process_wbtest(
     "GIT_SSH_COMMAND", prev_ssh_command,
   )

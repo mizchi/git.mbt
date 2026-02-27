@@ -792,10 +792,20 @@ fn apply_filter_spec(
       }
       result
     }
-    TreeDepth(_depth) =>
-      // Tree depth filtering is complex, not implemented yet
-      // For now, return all objects
-      objects
+    TreeDepth(depth) =>
+      if depth == 0 {
+        let result : Array[@bit.PackObject] = []
+        for obj in objects {
+          if obj.obj_type != @bit.ObjectType::Tree &&
+            obj.obj_type != @bit.ObjectType::Blob {
+            result.push(obj)
+          }
+        }
+        result
+      } else {
+        objects
+      }
+    SparseOid(_) | SparsePathUnsupported => objects
   }
 }
 

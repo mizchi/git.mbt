@@ -99,14 +99,14 @@ t5306-pack-nobase.sh
 t5307-pack-missing-commit.sh
 t5308-pack-detect-duplicates.sh
 t5309-pack-delta-cycles.sh
-# t5310-pack-bitmaps.sh  # 13 failed among 233 — bitmap reuse tests fail in shim
+t5310-pack-bitmaps.sh
 t5311-pack-bitmaps-shallow.sh
 t5312-prune-corruption.sh
 t5313-pack-bounds-checks.sh
 t5314-pack-cycle-detection.sh
 t5315-pack-objects-compression.sh
-# t5316-pack-delta-depth.sh  # 2 failed among 5 — delta depth tests fail in shim
-# t5317-pack-objects-filter-objects.sh  # 3 failed among 33 — filter-objects tests fail in shim
+# t5316-pack-delta-depth.sh  # 3 failed among 5 — delta depth tests fail in shim
+t5317-pack-objects-filter-objects.sh
 t5318-commit-graph.sh
 t5319-multi-pack-index.sh
 t5320-delta-islands.sh
@@ -121,7 +121,7 @@ t5328-commit-graph-64bit-time.sh
 t5329-pack-objects-cruft.sh
 t5330-no-lazy-fetch-with-commit-graph.sh
 t5331-pack-objects-stdin.sh
-# t5332-multi-pack-reuse.sh  # 3 failed among 14 — multi-pack reuse tests fail in shim
+# t5332-multi-pack-reuse.sh  # 3 failed among 14 — tests 8,11,12 fail (pack object ordering + corrupt delta base in partial revs packing)
 t5333-pseudo-merge-bitmaps.sh
 t5334-incremental-multi-pack-index.sh
 t5351-unpack-large-objects.sh

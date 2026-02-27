@@ -194,6 +194,8 @@ pub(all) enum FilterSpec {
   BlobNone // blob:none - exclude all blobs
   BlobLimit(Int64) // blob:limit=<n> - exclude blobs > n bytes
   TreeDepth(Int) // tree:<depth> - limit tree depth
+  SparseOid(String) // sparse:oid=<oid> - sparse checkout filter
+  SparsePathUnsupported // sparse:path= - dropped for security
 }
 
 ///|
@@ -203,6 +205,8 @@ pub fn FilterSpec::to_string(self : FilterSpec) -> String {
     BlobNone => "blob:none"
     BlobLimit(n) => "blob:limit=\{n}"
     TreeDepth(d) => "tree:\{d}"
+    SparseOid(oid) => "sparse:oid=\{oid}"
+    SparsePathUnsupported => "sparse:path"
   }
 }
 

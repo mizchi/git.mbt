@@ -444,7 +444,8 @@ fn read_ssh_ip_option() -> String? {
   }
 }
 
-///| Build the remote command for SSH transport.
+///|
+/// Build the remote command for SSH transport.
 /// SSH uses the native interactive git protocol (no --stateless-rpc).
 /// The server sends ref advertisement first, then reads wants, then sends pack.
 fn build_upload_pack_remote_command(path : String) -> String {
@@ -751,7 +752,9 @@ pub async fn upload_pack_request_process(
   let remote_spec = @protocol.parse_remote(remote)
   if remote_spec.kind == @protocol.RemoteKind::Ssh {
     let spec = build_upload_pack_process_spec(
-      remote_spec, advertise_refs=false, prefer_v2~,
+      remote_spec,
+      advertise_refs=false,
+      prefer_v2~,
     )
     return run_ssh_upload_pack_interactive(spec, body)
   }
@@ -759,7 +762,8 @@ pub async fn upload_pack_request_process(
   run_upload_pack_process(proc, Some(body))
 }
 
-///| Parse 4-byte hex pkt-line length from raw bytes.
+///|
+/// Parse 4-byte hex pkt-line length from raw bytes.
 fn parse_pkt_hex_bytes(header : Bytes) -> Int {
   let mut result = 0
   for i in 0..<4 {
@@ -778,15 +782,14 @@ fn parse_pkt_hex_bytes(header : Bytes) -> Int {
   result
 }
 
-///| Skip pkt-lines from an SSH process stdout until flush (0000).
+///|
+/// Skip pkt-lines from an SSH process stdout until flush (0000).
 /// Discards the ref advertisement that the server sends before reading wants.
 async fn skip_ssh_ref_advertisement(
   reader : @process.ReadFromProcess,
 ) -> Unit raise @bit.GitError {
   while true {
-    let header = reader.read_exactly(4) catch {
-      _ => break
-    }
+    let header = reader.read_exactly(4) catch { _ => break }
     let len = parse_pkt_hex_bytes(header)
     if len == 0 {
       break // flush packet
@@ -801,7 +804,8 @@ async fn skip_ssh_ref_advertisement(
   }
 }
 
-///| Run SSH git-upload-pack with pipe-based interactive protocol.
+///|
+/// Run SSH git-upload-pack with pipe-based interactive protocol.
 ///
 /// SSH interactive protocol requires that the client reads the ref
 /// advertisement BEFORE sending wants. File-based stdin doesn't work
@@ -826,9 +830,7 @@ async fn run_ssh_upload_pack_interactive(
   }
   let nonce = @async.now()
   let stderr_path = ".moonbit-ssh-upload-pack-\{nonce}.err"
-  let stderr = @process.redirect_to_file(
-    stderr_path, truncate=true, create=420,
-  ) catch {
+  let stderr = @process.redirect_to_file(stderr_path, truncate=true, create=420) catch {
     err => raise @bit.GitError::IoError("SSH stderr file failed: \{err}")
   }
   let run_cwd = resolve_process_cwd()

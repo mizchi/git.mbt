@@ -17,7 +17,7 @@ pub fn rev_parse(
   }
   match spec.find(":") {
     Some(idx) =>
-      if idx > 0 && idx + 1 < spec.length() {
+      if idx > 0 && idx + 1 <= spec.length() {
         let rev_part = substring_revparse(spec, 0, idx)
         let path_part = substring_revparse(spec, idx + 1, spec.length())
         let base = rev_parse(fs, git_dir, rev_part)
@@ -531,9 +531,6 @@ fn resolve_path_in_commit(
   base_id : @bit.ObjectId,
   path : String,
 ) -> @bit.ObjectId? raise @bit.GitError {
-  if path.length() == 0 {
-    return None
-  }
   let db = ObjectDb::load(fs, git_dir)
   let obj = db.get(fs, base_id)
   match obj {
@@ -543,6 +540,10 @@ fn resolve_path_in_commit(
         @bit.ObjectType::Commit => @bit.parse_commit(o.data).tree
         @bit.ObjectType::Tree => base_id
         _ => return None
+      }
+      // Empty path means "return the tree itself" (e.g., HEAD:)
+      if path.length() == 0 {
+        return Some(tree_id)
       }
       let entry = find_tree_entry(db, fs, tree_id, path)
       match entry {

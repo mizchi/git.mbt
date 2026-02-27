@@ -64,14 +64,8 @@ fn parse_index_pack_args(args : Array[String]) -> IndexPackParse {
         "--rev-index" => has_unsupported_options = true
         "--no-rev-index" => has_unsupported_options = true
         "--keep" => keep_msg = Some("")
-        "--strict" => {
-          strict = true
-          has_unsupported_options = true
-        }
-        "--fsck-objects" => {
-          fsck_objects = true
-          has_unsupported_options = true
-        }
+        "--strict" => strict = true
+        "--fsck-objects" => fsck_objects = true
         "--index-version" => {
           has_unsupported_options = true
           if i + 1 < args.length() {
@@ -113,13 +107,11 @@ fn parse_index_pack_args(args : Array[String]) -> IndexPackParse {
             }
           } else if arg.has_prefix("--strict=") {
             strict = true
-            has_unsupported_options = true
             if arg.contains("missingEmail=ignore") {
               ignore_missing_email = true
             }
           } else if arg.has_prefix("--fsck-objects=") {
             fsck_objects = true
-            has_unsupported_options = true
             if arg.contains("missingEmail=ignore") {
               ignore_missing_email = true
             }

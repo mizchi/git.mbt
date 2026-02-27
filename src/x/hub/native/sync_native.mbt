@@ -344,8 +344,10 @@ fn detect_relay_proxied_git_base(url : String) -> String? {
   }
   for c in session {
     if not(
-      (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'),
-    ) {
+        (c >= 'A' && c <= 'Z') ||
+        (c >= 'a' && c <= 'z') ||
+        (c >= '0' && c <= '9'),
+      ) {
       return None
     }
   }
