@@ -12,7 +12,7 @@
   - [x] t5332 multi-pack-reuse: trace2 data イベント, OFS_DELTA クロスパック判定（14/14）
   - [x] t5316 delta-depth: index-pack --fix-thin 許可, trace2 region イベント（5/5）
   - [x] bitmap/rev 生成検証: pack-reused カウント修正（単一パック bitmap フォールバック）
-  - `rev-list --test-bitmap`
+  - [x] `rev-list --test-bitmap`: 単一パック bitmap フォールバック追加（2026-02-27）
   - incremental layer/relink
 - [x] allowlist/full の全流し再計測を実施する（2026-02-27, CI 5 shard 全通過）
 - [x] SHIM_STRICT=1 known breakage 6→0 修正（2026-02-27）

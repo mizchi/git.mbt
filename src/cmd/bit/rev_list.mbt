@@ -341,6 +341,17 @@ async fn rev_list_test_bitmap(fs : OsFs, git_dir : String) -> Unit raise Error {
       None => ()
     }
   }
+  // Fallback: single-pack bitmap (pack-*.bitmap)
+  if bitmap_data is None {
+    match find_pack_with_bitmap(fs, pack_dir) {
+      Some(pack_name) => {
+        let stem = (try! pack_name[:pack_name.length() - 5]).to_string()
+        let bmp_path = pack_dir + "/" + stem + ".bitmap"
+        bitmap_data = midx_try_read_file(fs, bmp_path)
+      }
+      None => ()
+    }
+  }
   guard bitmap_data is Some(bmp_bytes) else {
     eprint_line("error: could not find bitmap")
     @sys.exit(1)
