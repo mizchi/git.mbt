@@ -4,8 +4,9 @@
 /// Parse a packfile into objects.
 pub fn parse_packfile(
   data : Bytes,
+  verify_checksum? : Bool = true,
 ) -> Array[@bit.PackObject] raise @bit.GitError {
-  parse_packfile_with_bases(data, [])
+  parse_packfile_with_bases(data, [], verify_checksum~)
 }
 
 ///|
@@ -273,6 +274,7 @@ pub fn max_delta_chain_length(data : Bytes) -> Int raise @bit.GitError {
 pub fn parse_packfile_with_bases(
   data : Bytes,
   bases : Array[@bit.PackObject],
+  verify_checksum? : Bool = true,
 ) -> Array[@bit.PackObject] raise @bit.GitError {
   let by_offset : Map[Int, Int] = {}
   let by_id : Map[String, @bit.PackObject] = {}
@@ -287,7 +289,7 @@ pub fn parse_packfile_with_bases(
     )
     insert_pack_object_by_id(by_id, base_obj)
   }
-  parse_packfile_internal(data, by_offset, by_id)
+  parse_packfile_internal(data, by_offset, by_id, verify_checksum~)
 }
 
 ///|
@@ -295,8 +297,9 @@ pub fn parse_packfile_with_bases(
 pub fn parse_packfile_stream(
   data : Bytes,
   emit : (@bit.PackObject) -> Unit,
+  verify_checksum? : Bool = true,
 ) -> Unit raise @bit.GitError {
-  parse_packfile_stream_with_bases(data, [], emit)
+  parse_packfile_stream_with_bases(data, [], emit, verify_checksum~)
 }
 
 ///|
@@ -305,6 +308,7 @@ pub fn parse_packfile_stream_with_bases(
   data : Bytes,
   bases : Array[@bit.PackObject],
   emit : (@bit.PackObject) -> Unit,
+  verify_checksum? : Bool = true,
 ) -> Unit raise @bit.GitError {
   let by_offset : Map[Int, @bit.PackObject] = {}
   let by_id : Map[String, @bit.PackObject] = {}
@@ -319,7 +323,7 @@ pub fn parse_packfile_stream_with_bases(
     )
     insert_pack_object_by_id(by_id, base_obj)
   }
-  parse_packfile_stream_internal(data, by_offset, by_id, emit)
+  parse_packfile_stream_internal(data, by_offset, by_id, emit, verify_checksum~)
 }
 
 ///|
@@ -364,6 +368,7 @@ fn parse_packfile_internal(
   data : Bytes,
   by_offset : Map[Int, Int],
   by_id : Map[String, @bit.PackObject],
+  verify_checksum? : Bool = true,
 ) -> Array[@bit.PackObject] raise @bit.GitError {
   if data.length() < 32 {
     raise @bit.GitError::PackfileError("Packfile too short")
@@ -592,10 +597,12 @@ fn parse_packfile_internal(
   if offset != trailer_offset {
     raise @bit.GitError::PackfileError("Packfile length mismatch")
   }
-  let computed = @bit.sha1_prefix(data, trailer_offset)
-  let trailer = read_trailer_id(data, trailer_offset)
-  if computed != trailer {
-    raise @bit.GitError::HashMismatch(computed.to_hex(), trailer.to_hex())
+  if verify_checksum {
+    let computed = @bit.sha1_prefix(data, trailer_offset)
+    let trailer = read_trailer_id(data, trailer_offset)
+    if computed != trailer {
+      raise @bit.GitError::HashMismatch(computed.to_hex(), trailer.to_hex())
+    }
   }
   objects
 }
@@ -606,6 +613,7 @@ fn parse_packfile_stream_internal(
   by_offset : Map[Int, @bit.PackObject],
   by_id : Map[String, @bit.PackObject],
   emit : (@bit.PackObject) -> Unit,
+  verify_checksum? : Bool = true,
 ) -> Unit raise @bit.GitError {
   if data.length() < 32 {
     raise @bit.GitError::PackfileError("Packfile too short")
@@ -753,10 +761,12 @@ fn parse_packfile_stream_internal(
   if offset != trailer_offset {
     raise @bit.GitError::PackfileError("Packfile length mismatch")
   }
-  let computed = @bit.sha1_prefix(data, trailer_offset)
-  let trailer = read_trailer_id(data, trailer_offset)
-  if computed != trailer {
-    raise @bit.GitError::HashMismatch(computed.to_hex(), trailer.to_hex())
+  if verify_checksum {
+    let computed = @bit.sha1_prefix(data, trailer_offset)
+    let trailer = read_trailer_id(data, trailer_offset)
+    if computed != trailer {
+      raise @bit.GitError::HashMismatch(computed.to_hex(), trailer.to_hex())
+    }
   }
 }
 

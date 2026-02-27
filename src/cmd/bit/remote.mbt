@@ -2213,9 +2213,8 @@ async fn clone_local_bundle(
     separate_git_dir~,
     ref_format~,
   )
-  // Write pack data from bundle
-  let objects = @pack.parse_packfile(pack_data)
-  @pack.write_packfile_with_index(fs, dest_git_dir, pack_data, objects)
+  // Write pack data from bundle (skip checksum - bundle already verified)
+  @pack.write_pack_and_index(fs, dest_git_dir, pack_data, verify_checksum=false)
   // Write refs from bundle
   match head_id {
     Some(id) =>

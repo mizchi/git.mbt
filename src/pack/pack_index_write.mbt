@@ -325,95 +325,6 @@ fn build_pack_index_v1_from_objects(
 }
 
 ///|
-fn _scan_pack_entry_offsets(
-  data : Bytes,
-) -> (Array[Int], Array[Int]) raise @bit.GitError {
-  if data.length() < 32 {
-    raise @bit.GitError::PackfileError("Packfile too short")
-  }
-  if not(
-      data[0] == b'P' && data[1] == b'A' && data[2] == b'C' && data[3] == b'K',
-    ) {
-    raise @bit.GitError::PackfileError("Invalid packfile magic")
-  }
-  let version = read_u32_be(data, 4)
-  if version != 2 {
-    raise @bit.GitError::PackfileError(
-      "Unsupported packfile version: \{version}",
-    )
-  }
-  let count = read_u32_be(data, 8)
-  if count < 0 {
-    raise @bit.GitError::PackfileError("Packfile object count out of range")
-  }
-  let mut offset = 12
-  let starts : Array[Int] = []
-  let ends : Array[Int] = []
-  for _ in 0..<count {
-    let start = offset
-    let (type_id, size, next_offset) = decode_type_and_size_at(data, offset)
-    offset = next_offset
-    let after = match type_id {
-      1 | 2 | 3 | 4 => {
-        let (content, after) = @zlib.zlib_decompress_at(data, offset) catch {
-          e => raise @bit.GitError::PackfileError("Zlib error: \{e}")
-        }
-        if content.length() != size {
-          raise @bit.GitError::PackfileError(
-            "Object size mismatch: expected=\{size}, got=\{content.length()}",
-          )
-        }
-        after
-      }
-      6 => {
-        let (_, after_ref) = read_ofs_delta_offset(data, offset)
-        let (delta, after) = @zlib.zlib_decompress_at(data, after_ref) catch {
-          e => raise @bit.GitError::PackfileError("Zlib error: \{e}")
-        }
-        if delta.length() != size {
-          raise @bit.GitError::PackfileError(
-            "Delta size mismatch: expected=\{size}, got=\{delta.length()}",
-          )
-        }
-        after
-      }
-      7 => {
-        let (_, after_ref) = read_ref_delta_id(data, offset)
-        let (delta, after) = @zlib.zlib_decompress_at(data, after_ref) catch {
-          e => raise @bit.GitError::PackfileError("Zlib error: \{e}")
-        }
-        if delta.length() != size {
-          raise @bit.GitError::PackfileError(
-            "Delta size mismatch: expected=\{size}, got=\{delta.length()}",
-          )
-        }
-        after
-      }
-      _ =>
-        raise @bit.GitError::PackfileError(
-          "Unknown packfile object type: \{type_id}",
-        )
-    }
-    offset = after
-    starts.push(start)
-    ends.push(after)
-  }
-  let trailer_offset = data.length() - 20
-  if offset != trailer_offset {
-    raise @bit.GitError::PackfileError("Packfile length mismatch")
-  }
-  let pack_bytes = Bytes::from_array(
-    FixedArray::makei(trailer_offset, i => data[i]),
-  )
-  let computed = @bit.sha1(pack_bytes)
-  let trailer = read_trailer_id(data, trailer_offset)
-  if computed != trailer {
-    raise @bit.GitError::HashMismatch(computed.to_hex(), trailer.to_hex())
-  }
-  (starts, ends)
-}
-
-///|
 fn compare_object_id(a : @bit.ObjectId, b : @bit.ObjectId) -> Int {
   for i in 0..<20 {
     let av = a.bytes[i].to_int()
@@ -426,6 +337,43 @@ fn compare_object_id(a : @bit.ObjectId, b : @bit.ObjectId) -> Int {
 }
 
 ///|
+let pack_crc32_poly : UInt = (Int::reinterpret_as_uint(237) << 24) |
+  (Int::reinterpret_as_uint(184) << 16) |
+  (Int::reinterpret_as_uint(131) << 8) |
+  Int::reinterpret_as_uint(32)
+
+///|
+fn build_pack_crc32_table() -> FixedArray[UInt] {
+  FixedArray::makei(256, fn(i) {
+    let mut c = i.reinterpret_as_uint()
+    for _ in 0..<8 {
+      if (c & Int::reinterpret_as_uint(1)) == Int::reinterpret_as_uint(1) {
+        c = (c >> 1) ^ pack_crc32_poly
+      } else {
+        c = c >> 1
+      }
+    }
+    c
+  })
+}
+
+///|
+let pack_crc32_table : FixedArray[UInt] = build_pack_crc32_table()
+
+///|
+fn crc32_bytes_range(data : Bytes, start : Int, end : Int) -> UInt {
+  let mut crc : UInt = Int::reinterpret_as_uint(-1)
+  for i = start; i < end; i = i + 1 {
+    let idx = UInt::reinterpret_as_int(
+      (crc ^ Int::reinterpret_as_uint(data[i].to_int())) &
+      Int::reinterpret_as_uint(255),
+    )
+    crc = (crc >> 8) ^ pack_crc32_table[idx]
+  }
+  crc ^ Int::reinterpret_as_uint(-1)
+}
+
+///|
 pub fn crc32_range(
   data : Bytes,
   start : Int,
@@ -434,10 +382,7 @@ pub fn crc32_range(
   if start < 0 || end < start || end > data.length() {
     raise @bit.GitError::PackfileError("Invalid CRC range")
   }
-  let slice = Bytes::from_array(
-    FixedArray::makei(end - start, i => data[start + i]),
-  )
-  @zlib.crc32(slice)
+  crc32_bytes_range(data, start, end)
 }
 
 ///|
@@ -464,6 +409,31 @@ fn push_u32_be_from_uint(out : Array[Byte], value : UInt) -> Unit {
   out.push(UInt::reinterpret_as_int(b1).to_byte())
   out.push(UInt::reinterpret_as_int(b2).to_byte())
   out.push(UInt::reinterpret_as_int(b3).to_byte())
+}
+
+///|
+/// Write a packfile and build its index in one step.
+/// Avoids the need for callers to parse + write separately.
+pub fn write_pack_and_index(
+  fs : &@bit.FileSystem,
+  git_dir : String,
+  pack : Bytes,
+  verify_checksum? : Bool = true,
+) -> Unit raise @bit.GitError {
+  if pack.length() < 20 {
+    raise @bit.GitError::PackfileError("Packfile too short")
+  }
+  let pack_dir = @bit.join_path(git_dir, "objects/pack")
+  fs.mkdir_p(pack_dir)
+  let trailer_offset = pack.length() - 20
+  let pack_id = read_trailer_id(pack, trailer_offset)
+  let base = "pack-\{pack_id.to_hex()}"
+  let pack_path = @bit.join_path(pack_dir, base + ".pack")
+  let idx_path = @bit.join_path(pack_dir, base + ".idx")
+  fs.write_file(pack_path, pack)
+  let objects = parse_packfile(pack, verify_checksum~)
+  let idx = build_pack_index_from_objects(pack, objects)
+  fs.write_file(idx_path, idx)
 }
 
 ///|
