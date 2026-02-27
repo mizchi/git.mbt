@@ -38,9 +38,18 @@ async fn run_add_hook(
 }
 
 ///|
+fn add_need_real_git() -> Bool {
+  let root = get_work_root()
+  need_real_git_for_filtering(root)
+}
+
+///|
 fn add_storage_runtime_delegate_args(
   args : Array[String],
 ) -> @runtime.StorageAddArgs? {
+  if add_need_real_git() {
+    return None
+  }
   let parsed = storage_runtime_parse_command("add", args) catch {
     _ => return None
   }

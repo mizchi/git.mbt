@@ -9,9 +9,18 @@ async fn show_status_command_help() -> Unit {
 }
 
 ///|
+fn status_need_real_git() -> Bool {
+  let root = get_work_root()
+  need_real_git_for_filtering(root)
+}
+
+///|
 fn status_storage_runtime_parsed_args(
   args : Array[String],
 ) -> @runtime.StorageStatusArgs? {
+  if status_need_real_git() {
+    return None
+  }
   let parsed = storage_runtime_parse_command("status", args) catch {
     _ => return None
   }

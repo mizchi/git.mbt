@@ -1,7 +1,16 @@
 ///|
+fn write_tree_need_real_git() -> Bool {
+  let root = get_work_root()
+  need_real_git_for_filtering(root)
+}
+
+///|
 fn write_tree_storage_runtime_delegate_args(
   args : Array[String],
 ) -> @runtime.StorageWriteTreeArgs? {
+  if write_tree_need_real_git() {
+    return None
+  }
   let parsed = storage_runtime_parse_command("write-tree", args) catch {
     _ => return None
   }
