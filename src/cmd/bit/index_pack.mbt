@@ -639,9 +639,9 @@ async fn handle_index_pack(args : Array[String]) -> Unit raise Error {
         )
         @sys.exit(1)
       }
-      if cfg.fix_thin {
+      if cfg.fix_thin && !cfg.stdin {
         @stdio.stderr.write(
-          "bit index-pack: --fix-thin is not supported in standalone mode\n",
+          "bit index-pack: --fix-thin requires --stdin\n",
         )
         @sys.exit(1)
       }
@@ -740,6 +740,12 @@ async fn handle_index_pack(args : Array[String]) -> Unit raise Error {
           @stdio.stderr.write("fatal: not a git repository\n")
           @sys.exit(1)
         }
+        let trace2_event = @sys.get_env_var("GIT_TRACE2_EVENT")
+        match trace2_event {
+          Some(path) =>
+            write_trace2_region_event(fs, path, "region_enter", "index-pack", "progress")
+          None => ()
+        }
         let bases = if cfg.fix_thin {
           @bitlib.load_all_objects_from_fs(fs, git_dir) catch {
             err if @async.is_cancellation_error(err) => raise err
@@ -773,6 +779,11 @@ async fn handle_index_pack(args : Array[String]) -> Unit raise Error {
         @pack.write_pack_index_from_objects(fs, idx_path, pack, objects)
         let keep_path = pack_dir + "/pack-" + hash_hex + ".keep"
         write_keep_file(fs, keep_path, cfg.keep_msg)
+        match trace2_event {
+          Some(path) =>
+            write_trace2_region_event(fs, path, "region_leave", "index-pack", "progress")
+          None => ()
+        }
         @stdio.stdout.write(hash_hex + "\n")
         return ()
       }
@@ -831,4 +842,22 @@ async fn handle_index_pack(args : Array[String]) -> Unit raise Error {
       @stdio.stdout.write(hash_hex + "\n")
     }
   }
+}
+
+///|
+fn write_trace2_region_event(
+  fs : OsFs,
+  trace2_path : String,
+  event : String,
+  category : String,
+  label : String,
+) -> Unit {
+  let json_line = "{\"event\":\"" +
+    event +
+    "\",\"category\":\"" +
+    category +
+    "\",\"label\":\"" +
+    label +
+    "\"}\n"
+  append_text_file(fs, trace2_path, json_line)
 }

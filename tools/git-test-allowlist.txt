@@ -105,7 +105,7 @@ t5312-prune-corruption.sh
 t5313-pack-bounds-checks.sh
 t5314-pack-cycle-detection.sh
 t5315-pack-objects-compression.sh
-# t5316-pack-delta-depth.sh  # 3 failed among 5 — delta depth tests fail in shim
+t5316-pack-delta-depth.sh
 t5317-pack-objects-filter-objects.sh
 t5318-commit-graph.sh
 t5319-multi-pack-index.sh
