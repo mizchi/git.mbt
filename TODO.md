@@ -14,8 +14,7 @@
   - bitmap/rev 生成検証
   - `rev-list --test-bitmap`
   - incremental layer/relink
-- [ ] allowlist/full の全流し再計測を実施する（長時間ジョブ）
-  - `2026-02-17`: 実行途中で 1時間56分でタイムアウト → CI で実施する方針
+- [x] allowlist/full の全流し再計測を実施する（2026-02-27, CI 5 shard 全通過）
 
 ## P1: Relay / P2P collaboration
 
