@@ -1362,80 +1362,78 @@ fn count_pack_reused_objects(
   if reuse_mode is Disabled {
     return (0, 0)
   }
-  // Try to read MIDX
+  // Try MIDX path first
   let midx_path = pack_dir + "/multi-pack-index"
-  let midx_data = fs.read_file(midx_path) catch { _ => return (0, 0) }
-  // Check for MIDX bitmap (reuse only works with bitmap)
-  let has_bitmap = has_midx_bitmap(fs, pack_dir)
-  if !has_bitmap {
-    return (0, 0)
-  }
-  // Read pack names from MIDX
-  let pack_info = midx_read_pack_usage_from_data(midx_data)
-  match pack_info {
-    None => return (0, 0)
-    Some((pack_names, _counts)) => {
-      // Read object -> (pack_idx, offset) mapping from MIDX
-      let obj_to_pack = midx_read_object_pack_mapping_with_offsets(midx_data)
-      // Determine eligible pack indices based on reuse mode
-      let eligible : Map[Int, Bool] = {}
-      match reuse_mode {
-        Single => {
-          let preferred = midx_read_preferred_pack_idx(
-            midx_data,
-            pack_names.length(),
-          )
-          match preferred {
-            Some(idx) => eligible[idx] = true
-            None => eligible[0] = true
-          }
-        }
-        Multi =>
-          for i in 0..<pack_names.length() {
-            eligible[i] = true
-          }
-        Disabled => ()
-      }
-      // Build per-pack set of offsets assigned by MIDX
-      let pack_assigned_offsets : Map[Int, Map[Int, Bool]] = {}
-      for entry in obj_to_pack {
-        let (_, (pidx, off)) = entry
-        if eligible.contains(pidx) {
-          match pack_assigned_offsets.get(pidx) {
-            Some(offsets) => offsets[off] = true
-            None => {
-              let m : Map[Int, Bool] = {}
-              m[off] = true
-              pack_assigned_offsets[pidx] = m
+  let midx_data = fs.read_file(midx_path) catch { _ => Bytes::new(0) }
+  if midx_data.length() > 0 && has_midx_bitmap(fs, pack_dir) {
+    let pack_info = midx_read_pack_usage_from_data(midx_data)
+    match pack_info {
+      Some((pack_names, _counts)) => {
+        // Read object -> (pack_idx, offset) mapping from MIDX
+        let obj_to_pack = midx_read_object_pack_mapping_with_offsets(midx_data)
+        // Determine eligible pack indices based on reuse mode
+        let eligible : Map[Int, Bool] = {}
+        match reuse_mode {
+          Single => {
+            let preferred = midx_read_preferred_pack_idx(
+              midx_data,
+              pack_names.length(),
+            )
+            match preferred {
+              Some(idx) => eligible[idx] = true
+              None => eligible[0] = true
             }
           }
+          Multi =>
+            for i in 0..<pack_names.length() {
+              eligible[i] = true
+            }
+          Disabled => ()
         }
-      }
-      // Cache pack file data for eligible packs (lazy load)
-      let pack_data_cache : Map[Int, Bytes] = {}
-      // Count reused objects, excluding OFS_DELTA with cross-pack base
-      let mut reused = 0
-      let packs_used : Map[Int, Bool] = {}
-      for obj in objects {
-        let hex = obj.id.to_hex()
-        match obj_to_pack.get(hex) {
-          Some((pack_idx, offset)) =>
-            if eligible.contains(pack_idx) {
-              if can_reuse_pack_object(
-                  fs, pack_dir, pack_names, pack_idx, offset, pack_assigned_offsets,
-                  pack_data_cache,
-                ) {
-                reused += 1
-                packs_used[pack_idx] = true
+        // Build per-pack set of offsets assigned by MIDX
+        let pack_assigned_offsets : Map[Int, Map[Int, Bool]] = {}
+        for entry in obj_to_pack {
+          let (_, (pidx, off)) = entry
+          if eligible.contains(pidx) {
+            match pack_assigned_offsets.get(pidx) {
+              Some(offsets) => offsets[off] = true
+              None => {
+                let m : Map[Int, Bool] = {}
+                m[off] = true
+                pack_assigned_offsets[pidx] = m
               }
             }
-          None => ()
+          }
         }
+        // Cache pack file data for eligible packs (lazy load)
+        let pack_data_cache : Map[Int, Bytes] = {}
+        // Count reused objects, excluding OFS_DELTA with cross-pack base
+        let mut reused = 0
+        let packs_used : Map[Int, Bool] = {}
+        for obj in objects {
+          let hex = obj.id.to_hex()
+          match obj_to_pack.get(hex) {
+            Some((pack_idx, offset)) =>
+              if eligible.contains(pack_idx) {
+                if can_reuse_pack_object(
+                    fs, pack_dir, pack_names, pack_idx, offset, pack_assigned_offsets,
+                    pack_data_cache,
+                  ) {
+                  reused += 1
+                  packs_used[pack_idx] = true
+                }
+              }
+            None => ()
+          }
+        }
+        let packs_count = packs_used.length()
+        return (reused, packs_count)
       }
-      let packs_count = packs_used.length()
-      (reused, packs_count)
+      None => ()
     }
   }
+  // Fallback: single-pack bitmap
+  count_single_pack_reused_objects(fs, pack_dir, objects)
 }
 
 ///|
@@ -1483,6 +1481,66 @@ fn can_reuse_pack_object(
     Some(offsets) => offsets.contains(base_offset)
     None => false
   }
+}
+
+///|
+/// Find a pack file that has a corresponding .bitmap file (non-MIDX).
+fn find_pack_with_bitmap(fs : OsFs, pack_dir : String) -> String? {
+  if !fs.is_dir(pack_dir) {
+    return None
+  }
+  let entries = fs.readdir(pack_dir) catch { _ => return None }
+  // Collect .bitmap files that are NOT multi-pack-index bitmaps
+  let bitmap_stems : Map[String, Bool] = {}
+  for entry in entries {
+    let name = normalize_dir_entry(entry)
+    if name.has_suffix(".bitmap") && !name.has_prefix("multi-pack-index") {
+      // e.g. "pack-abc123.bitmap" → "pack-abc123"
+      let stem = (try! name[:name.length() - 7]).to_string()
+      bitmap_stems[stem] = true
+    }
+  }
+  // Find the .pack file whose stem matches a bitmap
+  for entry in entries {
+    let name = normalize_dir_entry(entry)
+    if name.has_suffix(".pack") && !name.has_prefix(".") {
+      let stem = (try! name[:name.length() - 5]).to_string()
+      if bitmap_stems.contains(stem) {
+        return Some(name)
+      }
+    }
+  }
+  None
+}
+
+///|
+/// Fallback pack-reuse counting for single-pack bitmap (no MIDX).
+fn count_single_pack_reused_objects(
+  fs : OsFs,
+  pack_dir : String,
+  objects : Array[@bitcore.PackObject],
+) -> (Int, Int) {
+  let pack_name = match find_pack_with_bitmap(fs, pack_dir) {
+    Some(name) => name
+    None => return (0, 0)
+  }
+  let idx_path = pack_idx_path(pack_dir + "/" + pack_name)
+  // Read OIDs from the pack index
+  let entries = midx_read_pack_index(fs, idx_path, 0, 0)
+  if entries.length() == 0 {
+    return (0, 0)
+  }
+  let pack_oids : Map[String, Bool] = {}
+  for entry in entries {
+    pack_oids[entry.id.to_hex()] = true
+  }
+  let mut reused = 0
+  for obj in objects {
+    if pack_oids.contains(obj.id.to_hex()) {
+      reused += 1
+    }
+  }
+  (reused, if reused > 0 { 1 } else { 0 })
 }
 
 ///|

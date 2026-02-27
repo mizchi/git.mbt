@@ -11,10 +11,16 @@
   - [x] t5310 pack-bitmaps: --local/--honor-pack-keep, trace2, bitmap 破損検知（233/233）
   - [x] t5332 multi-pack-reuse: trace2 data イベント, OFS_DELTA クロスパック判定（14/14）
   - [x] t5316 delta-depth: index-pack --fix-thin 許可, trace2 region イベント（5/5）
-  - bitmap/rev 生成検証
+  - [x] bitmap/rev 生成検証: pack-reused カウント修正（単一パック bitmap フォールバック）
   - `rev-list --test-bitmap`
   - incremental layer/relink
 - [x] allowlist/full の全流し再計測を実施する（2026-02-27, CI 5 shard 全通過）
+- [x] SHIM_STRICT=1 known breakage 6→0 修正（2026-02-27）
+  - [x] t5300 #40: pack-objects sort + 1 MiB packSizeLimit clamp
+  - [x] t5302 #20/#23/#26: delta reuse / corruption propagation（type-only stable sort）
+  - [x] t5510 #187: index-pack --fix-thin に外部ベースオブジェクト追加 + pack_path 対応
+  - [x] t5510 #188: fix-thin パック再生成で REF_DELTA 解消
+  - [ ] lib-bitmap `setup midx with base from later pack` (2 tests) — デルタエンジンの方向制限、known-breakage 登録済み
 
 ## P1: Relay / P2P collaboration
 
