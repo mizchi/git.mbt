@@ -14,6 +14,13 @@ let bench_e2e_clone_source : String = bench_e2e_root + "/clone_source"
 let bench_e2e_clone_target : String = bench_e2e_root + "/clone_target"
 
 ///|
+let bench_e2e_bundle_path : String = bench_e2e_root + "/clone_source.bundle"
+
+///|
+let bench_e2e_bundle_clone_target : String = bench_e2e_root +
+  "/bundle_clone_target"
+
+///|
 let bench_e2e_fetch_source : String = bench_e2e_root + "/fetch_source"
 
 ///|
@@ -147,6 +154,18 @@ fn append_fetch_update_commit_for_e2e_bench(step : Int) -> Unit {
 }
 
 ///|
+fn ensure_bundle_for_e2e_bench() -> Unit {
+  ensure_clone_source_repo_for_e2e_bench()
+  e2e_reset_git_env()
+  @async.run_async_main(async fn() {
+    run_main_for_args([
+      "bit", "-C", bench_e2e_clone_source, "bundle", "create", bench_e2e_bundle_path,
+      "HEAD",
+    ])
+  })
+}
+
+///|
 test "bench e2e clone local medium repo" (b : @bench.T) {
   ensure_clone_source_repo_for_e2e_bench()
   let fs = OsFs::new()
@@ -159,6 +178,22 @@ test "bench e2e clone local medium repo" (b : @bench.T) {
       ])
     })
     b.keep(fs.is_dir(bench_e2e_clone_target + "/.git"))
+  })
+}
+
+///|
+test "bench e2e clone local bundle medium repo" (b : @bench.T) {
+  ensure_bundle_for_e2e_bench()
+  let fs = OsFs::new()
+  b.bench(fn() {
+    e2e_reset_git_env()
+    e2e_cleanup_tree(fs, bench_e2e_bundle_clone_target)
+    @async.run_async_main(async fn() {
+      run_main_for_args([
+        "bit", "clone", bench_e2e_bundle_path, bench_e2e_bundle_clone_target,
+      ])
+    })
+    b.keep(fs.is_dir(bench_e2e_bundle_clone_target + "/.git"))
   })
 }
 

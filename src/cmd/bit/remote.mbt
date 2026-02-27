@@ -1924,43 +1924,15 @@ async fn clone_local_repo(
       None => ()
     }
   }
-  let dest_git_dir = if bare {
-    @bitlib.init_repo_with_options_with_repo_fs(fs, fs, dest_path, {
-      default_branch,
-      bare: true,
-      separate_git_dir: None,
-      template_dir: None,
-      ref_format,
-      object_format: source_object_format,
-    })
-    dest_path
-  } else {
-    match separate_git_dir {
-      Some(path) => {
-        fs.mkdir_p(dest_path)
-        @bitlib.init_repo_with_options_with_repo_fs(fs, fs, dest_path, {
-          default_branch,
-          bare: false,
-          separate_git_dir: Some(path),
-          template_dir: None,
-          ref_format,
-          object_format: source_object_format,
-        })
-        path
-      }
-      None => {
-        @bitlib.init_repo_with_options_with_repo_fs(fs, fs, dest_path, {
-          default_branch,
-          bare: false,
-          separate_git_dir: None,
-          template_dir: None,
-          ref_format,
-          object_format: source_object_format,
-        })
-        dest_path + "/.git"
-      }
-    }
-  }
+  let dest_git_dir = init_clone_destination(
+    fs,
+    dest_path,
+    default_branch,
+    bare,
+    separate_git_dir~,
+    ref_format~,
+    object_format=source_object_format,
+  )
   // Copy object database
   @bitlib.copy_tree(fs, fs, src_git_dir + "/objects", dest_git_dir + "/objects")
   let alternates = collect_clone_alternates(
@@ -2014,27 +1986,7 @@ async fn clone_local_repo(
     None,
   )
   if not(bare) && not(detached_head) {
-    @bitlib.set_config_key(
-      fs, fs, dest_git_dir, "branch", default_branch, "remote", remote_name,
-    )
-    @bitlib.set_config_key(
-      fs,
-      fs,
-      dest_git_dir,
-      "branch",
-      default_branch,
-      "merge",
-      "refs/heads/" + default_branch,
-    )
-    match read_global_branch_autosetuprebase(fs) {
-      Some(mode) =>
-        if mode == "always" || mode == "true" || mode == "remote" {
-          @bitlib.set_config_key(
-            fs, fs, dest_git_dir, "branch", default_branch, "rebase", "true",
-          )
-        }
-      None => ()
-    }
+    setup_clone_branch_tracking(fs, dest_git_dir, default_branch, remote_name)
   }
   // Initialize remote-tracking refs and pack non-HEAD entries to match git clone layout.
   if not(mirror) {
@@ -2077,55 +2029,131 @@ async fn clone_local_repo(
   }
   // Populate working tree/index from the cloned commit snapshot.
   if not(bare) && not(no_checkout) {
-    match head_id {
-      Some(id) => {
-        let checkout_spec = if detached_head {
-          id.to_hex()
-        } else {
-          default_branch
-        }
-        let _ = run_checkout_with_sensitive_hooks(
-          fs,
-          fs,
-          dest_path,
-          checkout_spec,
-          detach=detached_head,
-          update_worktree=true,
-          update_index=true,
-        )
+    checkout_clone_head(fs, dest_path, head_id, default_branch, detached_head)
+  }
+}
+
+///|
+fn init_clone_destination(
+  fs : OsFs,
+  dest_path : String,
+  default_branch : String,
+  bare : Bool,
+  separate_git_dir? : String? = None,
+  ref_format? : String = "files",
+  object_format? : String = "sha1",
+) -> String raise Error {
+  if bare {
+    @bitlib.init_repo_with_options_with_repo_fs(fs, fs, dest_path, {
+      default_branch,
+      bare: true,
+      separate_git_dir: None,
+      template_dir: None,
+      ref_format,
+      object_format,
+    })
+    dest_path
+  } else {
+    match separate_git_dir {
+      Some(path) => {
+        fs.mkdir_p(dest_path)
+        @bitlib.init_repo_with_options_with_repo_fs(fs, fs, dest_path, {
+          default_branch,
+          bare: false,
+          separate_git_dir: Some(path),
+          template_dir: None,
+          ref_format,
+          object_format,
+        })
+        path
       }
-      None => ()
+      None => {
+        @bitlib.init_repo_with_options_with_repo_fs(fs, fs, dest_path, {
+          default_branch,
+          bare: false,
+          separate_git_dir: None,
+          template_dir: None,
+          ref_format,
+          object_format,
+        })
+        dest_path + "/.git"
+      }
     }
   }
 }
 
 ///|
-async fn clone_local_bundle(
+fn setup_clone_branch_tracking(
   fs : OsFs,
-  bundle_path : String,
-  dest_path : String,
-  remote_url : String,
-  bare : Bool,
-  no_checkout? : Bool = false,
-  separate_git_dir? : String? = None,
-  remote_name? : String = "origin",
-  ref_format? : String = "files",
+  git_dir : String,
+  default_branch : String,
+  remote_name : String,
 ) -> Unit raise Error {
-  let (_header, _prereqs, refs, pack_data) = parse_bundle_file(fs, bundle_path)
-  // Determine HEAD and default branch from bundle refs
-  let mut default_branch = "main"
+  @bitlib.set_config_key(
+    fs, fs, git_dir, "branch", default_branch, "remote", remote_name,
+  )
+  @bitlib.set_config_key(
+    fs,
+    fs,
+    git_dir,
+    "branch",
+    default_branch,
+    "merge",
+    "refs/heads/" + default_branch,
+  )
+  match read_global_branch_autosetuprebase(fs) {
+    Some(mode) =>
+      if mode == "always" || mode == "true" || mode == "remote" {
+        @bitlib.set_config_key(
+          fs, fs, git_dir, "branch", default_branch, "rebase", "true",
+        )
+      }
+    None => ()
+  }
+}
+
+///|
+async fn checkout_clone_head(
+  fs : OsFs,
+  dest_path : String,
+  head_id : @bitcore.ObjectId?,
+  default_branch : String,
+  detached_head : Bool,
+) -> Unit raise Error {
+  match head_id {
+    Some(id) => {
+      let checkout_spec = if detached_head {
+        id.to_hex()
+      } else {
+        default_branch
+      }
+      let _ = run_checkout_with_sensitive_hooks(
+        fs,
+        fs,
+        dest_path,
+        checkout_spec,
+        detach=detached_head,
+        update_worktree=true,
+        update_index=true,
+      )
+    }
+    None => ()
+  }
+}
+
+///|
+fn resolve_bundle_head(
+  refs : Array[(String, String)],
+) -> (@bitcore.ObjectId?, String, Bool) raise Error {
   let mut head_id : @bitcore.ObjectId? = None
+  let mut default_branch = "main"
   let mut head_refname : String? = None
   for item in refs {
     let (id_hex, name) = item
     if name == "HEAD" {
       head_id = Some(@bitcore.ObjectId::from_hex(id_hex))
-    }
-  }
-  // Find which branch HEAD points to
-  for item in refs {
-    let (id_hex, name) = item
-    if name.has_prefix("refs/heads/") {
+    } else if name.has_prefix("refs/heads/") {
+      // If HEAD matches this branch and we haven't picked one yet, use it
       match head_id {
         Some(hid) =>
           if hid.to_hex() == id_hex && head_refname is None {
@@ -2158,59 +2186,46 @@ async fn clone_local_bundle(
       }
     }
   }
+  let detached_head = head_refname is None && head_id is Some(_)
+  (head_id, default_branch, detached_head)
+}
+
+///|
+async fn clone_local_bundle(
+  fs : OsFs,
+  bundle_path : String,
+  dest_path : String,
+  remote_url : String,
+  bare : Bool,
+  no_checkout? : Bool = false,
+  separate_git_dir? : String? = None,
+  remote_name? : String = "origin",
+  ref_format? : String = "files",
+) -> Unit raise Error {
+  let (_header, _prereqs, refs, pack_data) = parse_bundle_file(fs, bundle_path)
+  let (head_id, default_branch, detached_head) = resolve_bundle_head(refs)
   // Initialize destination repository
-  let dest_git_dir = if bare {
-    @bitlib.init_repo_with_options_with_repo_fs(fs, fs, dest_path, {
-      default_branch,
-      bare: true,
-      separate_git_dir: None,
-      template_dir: None,
-      ref_format,
-      object_format: "sha1",
-    })
-    dest_path
-  } else {
-    match separate_git_dir {
-      Some(path) => {
-        fs.mkdir_p(dest_path)
-        @bitlib.init_repo_with_options_with_repo_fs(fs, fs, dest_path, {
-          default_branch,
-          bare: false,
-          separate_git_dir: Some(path),
-          template_dir: None,
-          ref_format,
-          object_format: "sha1",
-        })
-        path
-      }
-      None => {
-        @bitlib.init_repo_with_options_with_repo_fs(fs, fs, dest_path, {
-          default_branch,
-          bare: false,
-          separate_git_dir: None,
-          template_dir: None,
-          ref_format,
-          object_format: "sha1",
-        })
-        dest_path + "/.git"
-      }
-    }
-  }
+  let dest_git_dir = init_clone_destination(
+    fs,
+    dest_path,
+    default_branch,
+    bare,
+    separate_git_dir~,
+    ref_format~,
+  )
   // Write pack data from bundle
   let objects = @pack.parse_packfile(pack_data)
   @pack.write_packfile_with_index(fs, dest_git_dir, pack_data, objects)
   // Write refs from bundle
   match head_id {
     Some(id) =>
-      if head_refname is Some(_) {
+      if not(detached_head) {
         write_ref_file(fs, dest_git_dir, "refs/heads/" + default_branch, id)
       } else {
-        // Detached HEAD
         fs.write_string(dest_git_dir + "/HEAD", id.to_hex() + "\n")
       }
     None => ()
   }
-  let detached_head = head_refname is None && head_id is Some(_)
   // Set up remote-tracking refs and tags from bundle refs
   let branches : Array[(String, @bitcore.ObjectId)] = []
   for item in refs {
@@ -2245,29 +2260,8 @@ async fn clone_local_bundle(
     false,
     None,
   )
-  // Branch tracking config
   if not(bare) && not(detached_head) {
-    @bitlib.set_config_key(
-      fs, fs, dest_git_dir, "branch", default_branch, "remote", remote_name,
-    )
-    @bitlib.set_config_key(
-      fs,
-      fs,
-      dest_git_dir,
-      "branch",
-      default_branch,
-      "merge",
-      "refs/heads/" + default_branch,
-    )
-    match read_global_branch_autosetuprebase(fs) {
-      Some(mode) =>
-        if mode == "always" || mode == "true" || mode == "remote" {
-          @bitlib.set_config_key(
-            fs, fs, dest_git_dir, "branch", default_branch, "rebase", "true",
-          )
-        }
-      None => ()
-    }
+    setup_clone_branch_tracking(fs, dest_git_dir, default_branch, remote_name)
   }
   // Write remote HEAD symref
   if not(detached_head) && branches.length() > 0 {
@@ -2281,25 +2275,7 @@ async fn clone_local_bundle(
   pack_remote_tracking_refs(fs, dest_git_dir, remote_name)
   // Checkout working tree
   if not(bare) && not(no_checkout) {
-    match head_id {
-      Some(id) => {
-        let checkout_spec = if detached_head {
-          id.to_hex()
-        } else {
-          default_branch
-        }
-        let _ = run_checkout_with_sensitive_hooks(
-          fs,
-          fs,
-          dest_path,
-          checkout_spec,
-          detach=detached_head,
-          update_worktree=true,
-          update_index=true,
-        )
-      }
-      None => ()
-    }
+    checkout_clone_head(fs, dest_path, head_id, default_branch, detached_head)
   }
 }
 

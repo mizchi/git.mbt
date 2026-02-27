@@ -321,7 +321,7 @@ test_expect_success 'clone --ref-format=reftable is explicitly unsupported if SH
     grep -Eiq "standalone|not supported|reftable" err
 '
 
-test_expect_success 'clone from local bundle is explicitly unsupported if SHIM_REAL_GIT points to false' '
+test_expect_success 'clone from local bundle works even if SHIM_REAL_GIT points to false' '
     git_cmd init upstream &&
     (
         cd upstream &&
@@ -330,8 +330,9 @@ test_expect_success 'clone from local bundle is explicitly unsupported if SHIM_R
         git_cmd commit -m "first commit" &&
         git_cmd bundle create ../src.bundle HEAD
     ) &&
-    SHIM_REAL_GIT=false test_must_fail git_cmd clone src.bundle work >out 2>err &&
-    grep -Eiq "standalone|not supported|bundle" err
+    SHIM_REAL_GIT=false git_cmd clone src.bundle work &&
+    test_dir_exists work/.git &&
+    test_file_exists work/a.txt
 '
 
 test_expect_success 'fetch works even if SHIM_REAL_GIT is invalid' '
