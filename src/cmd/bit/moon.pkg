@@ -76,6 +76,8 @@ options(
     "describe.mbt": [ "native" ],
     "diff.mbt": [ "native" ],
     "doc.mbt": [ "native" ],
+    "fallback.mbt": [ "native" ],
+    "fallback_wbtest.mbt": [ "native" ],
     "fetch.mbt": [ "native" ],
     "fetch_serve_js.mbt": [ "js" ],
     "fetch_serve_native.mbt": [ "native" ],

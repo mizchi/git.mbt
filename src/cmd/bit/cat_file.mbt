@@ -29,6 +29,10 @@ async fn handle_cat_file(args : Array[String]) -> Unit raise Error {
     )
     @sys.exit(1)
   }
+  if cat_file_need_real_git_for_args(args) || need_real_git_for_filtering(root) {
+    ignore(run_real_git("cat-file", args))
+    return
+  }
   let mut show_type = false
   let mut show_size = false
   let mut pretty_print = false
@@ -2805,3 +2809,11 @@ async fn cat_file_usage_error(message : String) -> Unit raise Error {
 }
 
 ///|
+fn cat_file_need_real_git_for_args(args : Array[String]) -> Bool {
+  for arg in args {
+    if arg == "--textconv" || arg == "--filters" {
+      return true
+    }
+  }
+  false
+}
