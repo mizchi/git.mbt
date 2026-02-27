@@ -118,7 +118,8 @@ jobs:
           echo "Shard ${{ matrix.shard }}: $(echo "$tests" | wc -w | tr -d ' ') tests"
 
           SHIM_REAL_GIT="$real_git" SHIM_EXEC_PATH="$exec_path" \
-          SHIM_MOON="$(pwd)/tools/git-shim/moon" SHIM_CMDS="receive-pack upload-pack pack-objects index-pack" \
+          SHIM_MOON="$(pwd)/tools/git-shim/moon" \
+          SHIM_CMDS="receive-pack upload-pack pack-objects index-pack shell" SHIM_STRICT=1 \
           GIT_TEST_INSTALLED="$shim_dir" GIT_TEST_EXEC_PATH="$exec_path" \
           GIT_TEST_DEFAULT_HASH=sha1 \
           make -C third_party/git test T="$tests"
