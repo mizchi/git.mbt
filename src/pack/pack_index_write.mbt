@@ -22,16 +22,23 @@ pub fn build_pack_index_from_objects(
   pack : Bytes,
   objects : Array[@bit.PackObject],
 ) -> Bytes raise @bit.GitError {
-  // Check if any objects are missing metadata (offset < 0 means not from parsed pack)
+  // Validate that object offsets are plausible for this pack.
+  // Objects may carry stale offsets from a different (source) pack,
+  // so we check: offset >= 12 (after header) and < pack_data_end.
+  let pack_data_end = if pack.length() >= 20 {
+    pack.length() - 20
+  } else {
+    0
+  }
   let mut needs_parse = false
   for obj in objects {
-    if obj.offset < 0 {
+    if obj.offset < 12 || obj.offset >= pack_data_end {
       needs_parse = true
       break
     }
   }
 
-  // If objects are missing metadata, re-parse the pack to get correct values
+  // If objects have stale/invalid offsets, re-parse the pack to get correct values
   if needs_parse {
     return build_pack_index(pack)
   }
@@ -146,16 +153,21 @@ fn build_pack_index_v1_from_objects(
   pack : Bytes,
   objects : Array[@bit.PackObject],
 ) -> Bytes raise @bit.GitError {
-  // Check if any objects are missing metadata
+  // Validate that object offsets are plausible for this pack.
+  let pack_data_end = if pack.length() >= 20 {
+    pack.length() - 20
+  } else {
+    0
+  }
   let mut needs_parse = false
   for obj in objects {
-    if obj.offset < 0 {
+    if obj.offset < 12 || obj.offset >= pack_data_end {
       needs_parse = true
       break
     }
   }
 
-  // If objects are missing metadata, re-parse the pack to get correct values
+  // If objects have stale/invalid offsets, re-parse the pack to get correct values
   if needs_parse {
     let parsed = parse_packfile(pack)
     return build_pack_index_v1_from_objects(pack, parsed)

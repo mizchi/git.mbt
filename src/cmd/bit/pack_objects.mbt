@@ -1234,8 +1234,11 @@ fn get_pack_reuse_mode(git_dir : String) -> PackReuseMode {
 
 ///|
 /// Read MIDX to build object_hex -> pack_idx mapping
-fn midx_read_object_pack_mapping(data : Bytes) -> Map[String, Int] {
-  let out : Map[String, Int] = {}
+/// Read object -> (pack_idx, offset_in_pack) mapping from MIDX OIDL+OOFF chunks.
+fn midx_read_object_pack_mapping_with_offsets(
+  data : Bytes,
+) -> Map[String, (Int, Int)] {
+  let out : Map[String, (Int, Int)] = {}
   if data.length() < 12 {
     return out
   }
@@ -1259,7 +1262,8 @@ fn midx_read_object_pack_mapping(data : Bytes) -> Map[String, Int] {
       FixedArray::makei(20, fn(j) { data[oidl_offset + i * 20 + j] }),
     )
     let pack_idx = midx_read_u32(data, ooff_offset + i * 8)
-    out[oid.to_hex()] = pack_idx
+    let offset = midx_read_u32(data, ooff_offset + i * 8 + 4)
+    out[oid.to_hex()] = (pack_idx, offset)
   }
   out
 }
@@ -1305,7 +1309,6 @@ fn count_pack_reused_objects(
   let midx_path = pack_dir + "/multi-pack-index"
   let midx_data = fs.read_file(midx_path) catch { _ => return (0, 0) }
   // Check for MIDX bitmap (reuse only works with bitmap)
-  // Bitmap file is named multi-pack-index-<checksum>.bitmap
   let has_bitmap = has_midx_bitmap(fs, pack_dir)
   if !has_bitmap {
     return (0, 0)
@@ -1315,8 +1318,8 @@ fn count_pack_reused_objects(
   match pack_info {
     None => return (0, 0)
     Some((pack_names, _counts)) => {
-      // Read object -> pack_idx mapping from MIDX
-      let obj_to_pack_idx = midx_read_object_pack_mapping(midx_data)
+      // Read object -> (pack_idx, offset) mapping from MIDX
+      let obj_to_pack = midx_read_object_pack_mapping_with_offsets(midx_data)
       // Determine eligible pack indices based on reuse mode
       let eligible : Map[Int, Bool] = {}
       match reuse_mode {
@@ -1336,16 +1339,43 @@ fn count_pack_reused_objects(
           }
         Disabled => ()
       }
-      // Count reused objects
+      // Build per-pack set of offsets assigned by MIDX
+      let pack_assigned_offsets : Map[Int, Map[Int, Bool]] = {}
+      for entry in obj_to_pack {
+        let (_, (pidx, off)) = entry
+        if eligible.contains(pidx) {
+          match pack_assigned_offsets.get(pidx) {
+            Some(offsets) => offsets[off] = true
+            None => {
+              let m : Map[Int, Bool] = {}
+              m[off] = true
+              pack_assigned_offsets[pidx] = m
+            }
+          }
+        }
+      }
+      // Cache pack file data for eligible packs (lazy load)
+      let pack_data_cache : Map[Int, Bytes] = {}
+      // Count reused objects, excluding OFS_DELTA with cross-pack base
       let mut reused = 0
       let packs_used : Map[Int, Bool] = {}
       for obj in objects {
         let hex = obj.id.to_hex()
-        match obj_to_pack_idx.get(hex) {
-          Some(pack_idx) =>
+        match obj_to_pack.get(hex) {
+          Some((pack_idx, offset)) =>
             if eligible.contains(pack_idx) {
-              reused += 1
-              packs_used[pack_idx] = true
+              if can_reuse_pack_object(
+                fs,
+                pack_dir,
+                pack_names,
+                pack_idx,
+                offset,
+                pack_assigned_offsets,
+                pack_data_cache,
+              ) {
+                reused += 1
+                packs_used[pack_idx] = true
+              }
             }
           None => ()
         }
@@ -1353,6 +1383,55 @@ fn count_pack_reused_objects(
       let packs_count = packs_used.length()
       (reused, packs_count)
     }
+  }
+}
+
+///|
+/// Check if an object at the given offset in a pack can be reused.
+/// OFS_DELTA objects whose base is assigned to a different pack cannot be reused.
+fn can_reuse_pack_object(
+  fs : OsFs,
+  pack_dir : String,
+  pack_names : Array[String],
+  pack_idx : Int,
+  offset : Int,
+  pack_assigned_offsets : Map[Int, Map[Int, Bool]],
+  pack_data_cache : Map[Int, Bytes],
+) -> Bool {
+  // Lazily load pack data
+  let pack_data = match pack_data_cache.get(pack_idx) {
+    Some(data) => data
+    None => {
+      let pack_path = pack_dir + "/" + pack_names[pack_idx]
+      let data = fs.read_file(pack_path) catch { _ => return true }
+      pack_data_cache[pack_idx] = data
+      data
+    }
+  }
+  if offset >= pack_data.length() {
+    return true
+  }
+  // Decode type at this offset
+  let (type_id, _, header_end) = try {
+    @pack.decode_type_and_size_at(pack_data, offset)
+  } catch {
+    _ => return true
+  }
+  // Only OFS_DELTA (type 6) needs cross-pack base checking
+  if type_id != 6 {
+    return true
+  }
+  // Read the back-offset for this OFS_DELTA
+  let (back_offset, _) = try {
+    @pack.read_ofs_delta_offset(pack_data, header_end)
+  } catch {
+    _ => return true
+  }
+  let base_offset = offset - back_offset
+  // Check if the base offset is assigned to this same pack in MIDX
+  match pack_assigned_offsets.get(pack_idx) {
+    Some(offsets) => offsets.contains(base_offset)
+    None => false
   }
 }
 
@@ -2091,6 +2170,23 @@ async fn handle_pack_objects(args : Array[String]) -> Unit raise Error {
           err if @async.is_cancellation_error(err) => raise err
           _ => []
         }
+        // Sort refs: branch refs (refs/heads/) first, then others.
+        // This ensures the DFS traversal starts from branch tips (most
+        // recent commits), producing reverse-topological commit order
+        // in the output — matching git's pack-objects behavior.
+        refs.sort_by(fn(a, b) {
+          let (na, _) = a
+          let (nb, _) = b
+          let a_head = na.has_prefix("refs/heads/")
+          let b_head = nb.has_prefix("refs/heads/")
+          if a_head && !b_head {
+            -1
+          } else if !a_head && b_head {
+            1
+          } else {
+            na.compare(nb)
+          }
+        })
         let blocked : Map[String, Bool] = {}
         let seen : Map[String, Bool] = {}
         let out : Array[@bitcore.PackObject] = []
@@ -2473,13 +2569,10 @@ async fn handle_pack_objects(args : Array[String]) -> Unit raise Error {
           let pack_path = base_name + "-" + hash_hex + ".pack"
           let idx_path = base_name + "-" + hash_hex + ".idx"
           fs.write_file(pack_path, pack)
-          @pack.write_pack_index_from_objects_versioned(
-            fs,
-            idx_path,
-            pack,
-            group,
-            cfg.index_version,
-          )
+          // Always re-parse the newly created pack to compute correct
+          // offsets and CRC32 values for the index.  The `group` array
+          // carries stale metadata from the source packs.
+          @pack.write_pack_index(fs, idx_path, pack)
           if db.saw_corrupt_pack {
             corrupt_pack_file(fs, pack_path)
           }
