@@ -13,7 +13,7 @@
   - [x] t5316 delta-depth: index-pack --fix-thin 許可, trace2 region イベント（5/5）
   - [x] bitmap/rev 生成検証: pack-reused カウント修正（単一パック bitmap フォールバック）
   - [x] `rev-list --test-bitmap`: 単一パック bitmap フォールバック追加（2026-02-27）
-  - incremental layer/relink
+  - [x] incremental layer/relink（2026-02-27）
 - [x] allowlist/full の全流し再計測を実施する（2026-02-27, CI 5 shard 全通過）
 - [x] SHIM_STRICT=1 known breakage 6→0 修正（2026-02-27）
   - [x] t5300 #40: pack-objects sort + 1 MiB packSizeLimit clamp
