@@ -20,7 +20,7 @@
   - [x] t5302 #20/#23/#26: delta reuse / corruption propagation（type-only stable sort）
   - [x] t5510 #187: index-pack --fix-thin に外部ベースオブジェクト追加 + pack_path 対応
   - [x] t5510 #188: fix-thin パック再生成で REF_DELTA 解消
-  - [ ] lib-bitmap `setup midx with base from later pack` (2 tests) — デルタエンジンの方向制限、known-breakage 登録済み
+  - [x] lib-bitmap `setup midx with base from later pack` (2 tests) — size descending ソート追加で修正（2026-02-27）
 
 ## P1: Relay / P2P collaboration
 

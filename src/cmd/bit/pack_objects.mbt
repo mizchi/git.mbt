@@ -1156,15 +1156,17 @@ fn dedup_objects(
 
 ///|
 fn sort_stdin_object_mode_objects(objects : Array[@bitcore.PackObject]) -> Unit {
-  // Sort by type only, preserving input order within each type (stable sort).
-  // This matches git's behaviour where objects are grouped by type and
-  // ordered by name-hash locality.  Preserving the input order (typically
-  // from `git ls-tree`, which sorts by filename) keeps similarly-named
-  // files adjacent, improving delta base selection and pack splitting.
+  // Sort by type, then by size descending within same type.
+  // Larger objects first ensures smaller objects can delta against them
+  // (matching Git's pack-objects sorting behavior).
   objects.sort_by(fn(a, b) {
     let a_type = a.obj_type.to_packfile_type()
     let b_type = b.obj_type.to_packfile_type()
-    a_type - b_type
+    if a_type != b_type {
+      a_type - b_type
+    } else {
+      b.data.length() - a.data.length()
+    }
   })
 }
 
