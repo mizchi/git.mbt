@@ -18,6 +18,8 @@ pub struct ReceivePackRequest {
 pub struct ReceivePackResult {
   updated : Array[String]
   rejected : Array[(String, String)]
+  unpack_error : String?
+  connectivity_error_oid : String?
 }
 
 ///|
@@ -27,6 +29,7 @@ pub fn build_receive_pack_advertisement(
   root : String,
   agent? : String = "git/moonbit",
   protocol_version? : Int = 0,
+  extra_haves? : Array[@bit.ObjectId] = [],
 ) -> Bytes raise @bit.GitError {
   let git_dir = join_path(root, ".git")
   let refs = show_ref(fs, git_dir)
@@ -42,15 +45,19 @@ pub fn build_receive_pack_advertisement(
     let zero = @bit.ObjectId::zero().to_hex()
     let line = "\{zero} capabilities^{}\u0000\{caps}\n"
     receive_push_bytes(out, @protocol.pktline_encode(line))
-    receive_push_bytes(out, @protocol.pktline_flush())
-    return Bytes::from_array(FixedArray::makei(out.length(), i => out[i]))
+  } else {
+    let (first_name, first_id) = refs[0]
+    let first_line = "\{first_id.to_hex()} \{first_name}\u0000\{caps}\n"
+    receive_push_bytes(out, @protocol.pktline_encode(first_line))
+    for i in 1..<refs.length() {
+      let (name, id) = refs[i]
+      let line = "\{id.to_hex()} \{name}\n"
+      receive_push_bytes(out, @protocol.pktline_encode(line))
+    }
   }
-  let (first_name, first_id) = refs[0]
-  let first_line = "\{first_id.to_hex()} \{first_name}\u0000\{caps}\n"
-  receive_push_bytes(out, @protocol.pktline_encode(first_line))
-  for i in 1..<refs.length() {
-    let (name, id) = refs[i]
-    let line = "\{id.to_hex()} \{name}\n"
+  // Emit .have lines for alternate object stores
+  for oid in extra_haves {
+    let line = "\{oid.to_hex()} .have\n"
     receive_push_bytes(out, @protocol.pktline_encode(line))
   }
   receive_push_bytes(out, @protocol.pktline_flush())
@@ -128,11 +135,28 @@ pub fn apply_receive_pack(
   rfs : &@bit.RepoFileSystem,
   root : String,
   req : ReceivePackRequest,
+  skip_connectivity_check? : Bool = false,
 ) -> ReceivePackResult raise @bit.GitError {
   let git_dir = join_path(root, ".git")
+  let mut pack_objects : Array[@bit.PackObject] = []
   if req.pack.length() > 0 {
-    let objects = @pack.parse_packfile(req.pack)
-    @pack.write_packfile_with_index(fs, git_dir, req.pack, objects)
+    pack_objects = @pack.parse_packfile(req.pack)
+  }
+  // Connectivity check BEFORE writing pack to disk
+  if not(skip_connectivity_check) && pack_objects.length() > 0 {
+    let fail_oid = receive_connectivity_check(rfs, git_dir, pack_objects)
+    if fail_oid is Some(oid) {
+      return {
+        updated: [],
+        rejected: [],
+        unpack_error: Some("missing necessary objects"),
+        connectivity_error_oid: Some(oid),
+      }
+    }
+  }
+  // Write pack after connectivity check passes
+  if req.pack.length() > 0 && pack_objects.length() > 0 {
+    @pack.write_packfile_with_index(fs, git_dir, req.pack, pack_objects)
   }
   let db = ObjectDb::load(rfs, git_dir)
   let updated : Array[String] = []
@@ -178,7 +202,7 @@ pub fn apply_receive_pack(
     }
     updated.push(refname)
   }
-  { updated, rejected }
+  { updated, rejected, unpack_error: None, connectivity_error_oid: None }
 }
 
 ///|
@@ -187,16 +211,21 @@ pub fn receive_pack(
   rfs : &@bit.RepoFileSystem,
   root : String,
   data : Bytes,
+  skip_connectivity_check? : Bool = false,
 ) -> Bytes raise @bit.GitError {
   let req = parse_receive_pack_request(data)
-  let result = apply_receive_pack(fs, rfs, root, req)
+  let result = apply_receive_pack(fs, rfs, root, req, skip_connectivity_check~)
   receive_build_status_response(result)
 }
 
 ///|
-fn receive_build_status_response(result : ReceivePackResult) -> Bytes {
+pub fn receive_build_status_response(result : ReceivePackResult) -> Bytes {
   let out : Array[Byte] = []
-  receive_push_bytes(out, @protocol.pktline_encode("unpack ok\n"))
+  let unpack_line = match result.unpack_error {
+    Some(msg) => "unpack \{msg}\n"
+    None => "unpack ok\n"
+  }
+  receive_push_bytes(out, @protocol.pktline_encode(unpack_line))
   for refname in result.updated {
     receive_push_bytes(out, @protocol.pktline_encode("ok \{refname}\n"))
   }
@@ -422,4 +451,70 @@ fn receive_default_caps(agent : String) -> String {
     "agent=\{agent}",
   ]
   caps.join(" ")
+}
+
+///|
+/// Check connectivity of pack objects against existing repository.
+/// Returns Some(commit_hex) on failure, None on success.
+fn receive_connectivity_check(
+  rfs : &@bit.RepoFileSystem,
+  git_dir : String,
+  pack_objects : Array[@bit.PackObject],
+) -> String? raise @bit.GitError {
+  let pack_ids : Map[String, Bool] = {}
+  for obj in pack_objects {
+    pack_ids[obj.id.to_hex()] = true
+  }
+  // Load existing repo object database
+  let db = if rfs.is_dir(git_dir) {
+    Some(ObjectDb::load(rfs, git_dir))
+  } else {
+    None
+  }
+  let repo_cache : Map[String, Bool] = {}
+  for obj in pack_objects {
+    if obj.obj_type == @bit.ObjectType::Commit {
+      let info = @bit.parse_commit(obj.data)
+      // Check parents exist
+      for parent in info.parents {
+        let p_hex = parent.to_hex()
+        if not(pack_ids.contains(p_hex)) {
+          if not(receive_object_exists(rfs, db, repo_cache, parent)) {
+            return Some(obj.id.to_hex())
+          }
+        }
+      }
+      // Check tree exists
+      let t_hex = info.tree.to_hex()
+      if not(pack_ids.contains(t_hex)) {
+        if not(receive_object_exists(rfs, db, repo_cache, info.tree)) {
+          return Some(obj.id.to_hex())
+        }
+      }
+    }
+  }
+  None
+}
+
+///|
+fn receive_object_exists(
+  rfs : &@bit.RepoFileSystem,
+  db : ObjectDb?,
+  cache : Map[String, Bool],
+  id : @bit.ObjectId,
+) -> Bool raise @bit.GitError {
+  let hex = id.to_hex()
+  if cache.contains(hex) {
+    return cache[hex]
+  }
+  let exists = match db {
+    None => false
+    Some(objdb) =>
+      match objdb.get(rfs, id) {
+        Some(_) => true
+        None => false
+      }
+  }
+  cache[hex] = exists
+  exists
 }

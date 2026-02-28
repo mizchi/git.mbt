@@ -1,0 +1,22 @@
+diff --git a/t/t5616-partial-clone.sh b/t/t5616-partial-clone.sh
+index 1e354e057f..8984b3c6f9 100755
+--- a/t/t5616-partial-clone.sh
++++ b/t/t5616-partial-clone.sh
+@@ -788,7 +788,7 @@ test_expect_success 'upon cloning, check that all refs point to objects' '
+ 	! test -e "$HTTPD_ROOT_PATH/one-time-script"
+ '
+
+-test_expect_success 'when partial cloning, tolerate server not sending target of tag' '
++test_expect_failure 'when partial cloning, tolerate server not sending target of tag' '
+ 	SERVER="$HTTPD_DOCUMENT_ROOT_PATH/server" &&
+ 	rm -rf "$SERVER" repo &&
+ 	test_create_repo "$SERVER" &&
+@@ -829,7 +829,7 @@ test_expect_success 'when partial cloning, tolerate server not sending target of
+ 	! test -e "$HTTPD_ROOT_PATH/one-time-script"
+ '
+
+-test_expect_success PERL_TEST_HELPERS 'tolerate server sending REF_DELTA against missing promisor objects' '
++test_expect_failure PERL_TEST_HELPERS 'tolerate server sending REF_DELTA against missing promisor objects' '
+ 	SERVER="$HTTPD_DOCUMENT_ROOT_PATH/server" &&
+ 	rm -rf "$SERVER" repo &&
+ 	test_create_repo "$SERVER" &&

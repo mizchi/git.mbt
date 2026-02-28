@@ -16,11 +16,11 @@ pub fn append_reflog(&@types.FileSystem, &@types.RepoFileSystem, String, String,
 
 pub fn apply_config_overrides(Map[String, RemoteConfig], Map[String, BranchConfig], Array[(String, String)]) -> Unit
 
-pub fn apply_receive_pack(&@types.FileSystem, &@types.RepoFileSystem, String, ReceivePackRequest) -> ReceivePackResult raise @object.GitError
+pub fn apply_receive_pack(&@types.FileSystem, &@types.RepoFileSystem, String, ReceivePackRequest, skip_connectivity_check? : Bool) -> ReceivePackResult raise @object.GitError
 
 pub fn apply_template(&@types.FileSystem, &@types.RepoFileSystem, String, String) -> Unit raise @object.GitError
 
-pub fn build_receive_pack_advertisement(&@types.RepoFileSystem, String, agent? : String, protocol_version? : Int) -> Bytes raise @object.GitError
+pub fn build_receive_pack_advertisement(&@types.RepoFileSystem, String, agent? : String, protocol_version? : Int, extra_haves? : Array[@object.ObjectId]) -> Bytes raise @object.GitError
 
 pub fn build_upload_pack_advertisement(&@types.RepoFileSystem, String, agent? : String, protocol_version? : Int) -> Bytes raise @object.GitError
 
@@ -290,7 +290,9 @@ pub fn rebase_skip(&@types.FileSystem, &@types.RepoFileSystem, String) -> Rebase
 
 pub fn rebase_start(&@types.FileSystem, &@types.RepoFileSystem, String, @object.ObjectId) -> RebaseResult raise @object.GitError
 
-pub fn receive_pack(&@types.FileSystem, &@types.RepoFileSystem, String, Bytes) -> Bytes raise @object.GitError
+pub fn receive_build_status_response(ReceivePackResult) -> Bytes
+
+pub fn receive_pack(&@types.FileSystem, &@types.RepoFileSystem, String, Bytes, skip_connectivity_check? : Bool) -> Bytes raise @object.GitError
 
 pub fn receive_pack_info_refs_response(&@types.RepoFileSystem, String, String?, String, agent? : String) -> HttpResponse raise @object.GitError
 
@@ -716,6 +718,8 @@ pub struct ReceivePackRequest {
 pub struct ReceivePackResult {
   updated : Array[String]
   rejected : Array[(String, String)]
+  unpack_error : String?
+  connectivity_error_oid : String?
 }
 
 pub struct RefUpdate {

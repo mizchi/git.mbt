@@ -576,14 +576,21 @@ pub fn build_upload_pack_config_with_overrides(
   // Note: -c uploadpack.blobpackfileuri (without =) means key is present but empty
   // -c uploadpack.blobpackfileuri=anything means key has value
   let blob_packfile_uri = match overrides.get("uploadpack.blobpackfileuri") {
-    Some(v) =>
-      if v.length() > 0 {
-        Some(v)
-      } else {
-        // Empty value means key was present but no value - still enable the feature
-        // Actually git requires a non-empty value, so empty means disabled
+    Some(v) => {
+      // `-c key` (without =) → value is "true" from parse_global_options
+      // `-c key=anything` → value is the URI string
+      // Boolean-like values ("true", "false", "yes", "no") are not valid URIs
+      let lower = v.to_lower()
+      if v.length() == 0 ||
+        lower == "true" ||
+        lower == "false" ||
+        lower == "yes" ||
+        lower == "no" {
         None
+      } else {
+        Some(v)
       }
+    }
     None =>
       match
         read_config_value(fs, config_path, "uploadpack", "blobpackfileuri") {

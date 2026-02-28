@@ -83,7 +83,7 @@ async fn handle_upload_pack(args : Array[String]) -> Unit raise Error {
       let out = @bitlib.build_upload_pack_advertisement(
         fs,
         root,
-        agent=agent,
+        agent~,
         protocol_version=proto,
       )
       @stdio.stdout.write(out)
