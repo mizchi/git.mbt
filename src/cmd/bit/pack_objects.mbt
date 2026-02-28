@@ -1897,30 +1897,59 @@ fn collect_sparse_tree_objects(
   blocked : Map[String, Bool],
   seen : Map[String, Bool],
   out : Array[@bitcore.PackObject],
-) -> Unit {
+  allow_missing? : Bool = false,
+) -> Unit raise @bitcore.GitError {
   let hex = tree_id.to_hex()
   if seen.contains(hex) {
     return ()
   }
-  let obj = try db.get(fs, tree_id) catch {
-    _ => None
-  } noraise {
-    value => value
+  let obj = if allow_missing {
+    try db.get(fs, tree_id) catch {
+      _ => None
+    } noraise {
+      value => value
+    }
+  } else {
+    db.get(fs, tree_id) catch {
+      err => raise err
+    }
   }
   match obj {
     Some(o) if o.obj_type == @bitcore.ObjectType::Tree => {
-      let entries = @bitcore.parse_tree(o.data) catch { _ => return () }
+      let entries = if allow_missing {
+        @bitcore.parse_tree(o.data) catch {
+          _ => return ()
+        }
+      } else {
+        @bitcore.parse_tree(o.data) catch {
+          err => raise err
+        }
+      }
       let base_entries : Map[String, @bitcore.TreeEntry] = {}
       match base_tree_id {
         Some(base_id) => {
-          let base_obj = try db.get(fs, base_id) catch {
-            _ => None
-          } noraise {
-            value => value
+          let base_obj = if allow_missing {
+            try db.get(fs, base_id) catch {
+              _ => None
+            } noraise {
+              value => value
+            }
+          } else {
+            db.get(fs, base_id) catch {
+              err => raise err
+            }
           }
           match base_obj {
             Some(bo) if bo.obj_type == @bitcore.ObjectType::Tree => {
-              let base_list = @bitcore.parse_tree(bo.data) catch { _ => [] }
+              let base_list = if allow_missing {
+                @bitcore.parse_tree(bo.data) catch {
+                  _ => []
+                }
+              } else {
+                @bitcore.parse_tree(bo.data) catch {
+                  err => raise err
+                }
+              }
               for entry in base_list {
                 base_entries[entry.name] = entry
               }
@@ -1951,16 +1980,29 @@ fn collect_sparse_tree_objects(
             blocked,
             seen,
             out,
+            allow_missing~,
           )
         } else {
-          collect_blob_object_allow_missing(
-            db,
-            fs,
-            entry.id,
-            blocked,
-            seen,
-            out,
-          )
+          let blob_hex = entry.id.to_hex()
+          if !blocked.contains(blob_hex) && !seen.contains(blob_hex) {
+            seen[blob_hex] = true
+            let blob_obj = if allow_missing {
+              try db.get(fs, entry.id) catch {
+                _ => None
+              } noraise {
+                value => value
+              }
+            } else {
+              db.get(fs, entry.id) catch {
+                err => raise err
+              }
+            }
+            match blob_obj {
+              Some(bo) if bo.obj_type == @bitcore.ObjectType::Blob =>
+                out.push(bo)
+              _ => ()
+            }
+          }
         }
       }
       if has_change {
@@ -1981,7 +2023,8 @@ fn collect_sparse_commit_objects(
   blocked : Map[String, Bool],
   seen : Map[String, Bool],
   out : Array[@bitcore.PackObject],
-) -> Unit {
+  allow_missing? : Bool = false,
+) -> Unit raise @bitcore.GitError {
   let hex = commit_id.to_hex()
   if excluded.contains(hex) {
     return ()
@@ -1990,15 +2033,29 @@ fn collect_sparse_commit_objects(
     return ()
   }
   seen[hex] = true
-  let obj = try db.get(fs, commit_id) catch {
-    _ => None
-  } noraise {
-    value => value
+  let obj = if allow_missing {
+    try db.get(fs, commit_id) catch {
+      _ => None
+    } noraise {
+      value => value
+    }
+  } else {
+    db.get(fs, commit_id) catch {
+      err => raise err
+    }
   }
   match obj {
     Some(o) if o.obj_type == @bitcore.ObjectType::Commit => {
       out.push(o)
-      let info = @bitcore.parse_commit(o.data) catch { _ => return () }
+      let info = if allow_missing {
+        @bitcore.parse_commit(o.data) catch {
+          _ => return ()
+        }
+      } else {
+        @bitcore.parse_commit(o.data) catch {
+          err => raise err
+        }
+      }
       let base_tree = find_excluded_parent_tree(db, fs, info.parents, excluded)
       collect_sparse_tree_objects(
         db,
@@ -2008,10 +2065,18 @@ fn collect_sparse_commit_objects(
         blocked,
         seen,
         out,
+        allow_missing~,
       )
       for parent in info.parents {
         collect_sparse_commit_objects(
-          db, fs, parent, excluded, blocked, seen, out,
+          db,
+          fs,
+          parent,
+          excluded,
+          blocked,
+          seen,
+          out,
+          allow_missing~,
         )
       }
     }
@@ -2025,14 +2090,22 @@ fn collect_sparse_objects_from_commits(
   fs : OsFs,
   include_commits : Array[@bitcore.ObjectId],
   exclude_commits : Array[@bitcore.ObjectId],
-) -> Array[@bitcore.PackObject] {
+  allow_missing? : Bool = false,
+) -> Array[@bitcore.PackObject] raise @bitcore.GitError {
   let excluded = collect_excluded_commit_ids(db, fs, exclude_commits)
   let blocked : Map[String, Bool] = {}
   let seen : Map[String, Bool] = {}
   let out : Array[@bitcore.PackObject] = []
   for commit_id in include_commits {
     collect_sparse_commit_objects(
-      db, fs, commit_id, excluded, blocked, seen, out,
+      db,
+      fs,
+      commit_id,
+      excluded,
+      blocked,
+      seen,
+      out,
+      allow_missing~,
     )
   }
   out
@@ -2448,9 +2521,31 @@ async fn handle_pack_objects(args : Array[String]) -> Unit raise Error {
             }
         }
         if use_sparse {
-          objects = collect_sparse_objects_from_commits(
-            db, fs, include_commits, exclude_commits,
-          )
+          objects = if allow_missing_for_local {
+            try
+              collect_sparse_objects_from_commits(
+                db,
+                fs,
+                include_commits,
+                exclude_commits,
+                allow_missing=true,
+              )
+            catch {
+              _ => []
+            } noraise {
+              v => v
+            }
+          } else {
+            collect_sparse_objects_from_commits(
+              db, fs, include_commits, exclude_commits,
+            ) catch {
+              err if @async.is_cancellation_error(err) => raise err
+              err => {
+                report_collect_error(err)
+                []
+              }
+            }
+          }
         } else {
           let include_objects = if allow_missing_for_local {
             let blocked : Map[String, Bool] = {}
