@@ -390,25 +390,30 @@ fn write_partial_clone_refs(
 ) -> Unit raise @bit.GitError {
   // Write HEAD
   let head_path = @bit.join_path(git_dir, "HEAD")
-  fs.write_string(head_path, "ref: \{refname}\n")
-  // Write the ref - compute parent directory
-  let ref_path = @bit.join_path(git_dir, refname)
-  // Get parent directory by finding last /
-  let ref_dir = {
-    let mut last_slash = -1
-    for i, c in ref_path {
-      if c == '/' {
-        last_slash = i
+  if refname == "HEAD" {
+    // Detached HEAD: write the commit SHA directly
+    fs.write_string(head_path, commit_id.to_hex() + "\n")
+  } else {
+    fs.write_string(head_path, "ref: \{refname}\n")
+    // Write the ref - compute parent directory
+    let ref_path = @bit.join_path(git_dir, refname)
+    // Get parent directory by finding last /
+    let ref_dir = {
+      let mut last_slash = -1
+      for i, c in ref_path {
+        if c == '/' {
+          last_slash = i
+        }
+      }
+      if last_slash > 0 {
+        String::unsafe_substring(ref_path, start=0, end=last_slash)
+      } else {
+        git_dir
       }
     }
-    if last_slash > 0 {
-      String::unsafe_substring(ref_path, start=0, end=last_slash)
-    } else {
-      git_dir
-    }
+    fs.mkdir_p(ref_dir)
+    fs.write_string(ref_path, commit_id.to_hex() + "\n")
   }
-  fs.mkdir_p(ref_dir)
-  fs.write_string(ref_path, commit_id.to_hex() + "\n")
   // Write config with remote
   let config_path = @bit.join_path(git_dir, "config")
   let config = "[core]\n\trepositoryformatversion = 1\n\tfilemode = true\n\tbare = false\n\tlogallaliases = false\n[extensions]\n\tpartialclone = origin\n[remote \"origin\"]\n\turl = \{remote}\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n\tpromisor = true\n\tpartialclonefilter = \{filter.to_string()}\n"

@@ -1,14 +1,14 @@
 ///| Receive-pack (server-side) implementation
 
 ///|
-pub struct RefUpdate {
+pub(all) struct RefUpdate {
   old_id : @bit.ObjectId
   new_id : @bit.ObjectId
   refname : String
 }
 
 ///|
-pub struct ReceivePackRequest {
+pub(all) struct ReceivePackRequest {
   updates : Array[RefUpdate]
   capabilities : Array[String]
   pack : Bytes
@@ -18,11 +18,21 @@ pub struct ReceivePackRequest {
 }
 
 ///|
-pub struct ReceivePackResult {
+pub(all) struct ReceivePackResult {
   updated : Array[String]
   rejected : Array[(String, String)]
   unpack_error : String?
   connectivity_error_oid : String?
+}
+
+///|
+/// Result from a proc-receive hook for a single ref.
+pub(all) struct ReceivePackProcResult {
+  refname : String
+  old_id : String
+  new_id : String
+  status : String
+  message : String
 }
 
 ///|
@@ -390,6 +400,16 @@ pub fn receive_pack(
 
 ///|
 pub fn receive_build_status_response(result : ReceivePackResult) -> Bytes {
+  receive_build_status_response_with_proc(result, [])
+}
+
+///|
+/// Build receive-pack status response including proc-receive results.
+/// When use_v2 is true, uses report-status-v2 format.
+pub fn receive_build_status_response_with_proc(
+  result : ReceivePackResult,
+  proc_results : Array[ReceivePackProcResult],
+) -> Bytes {
   let out : Array[Byte] = []
   let unpack_line = match result.unpack_error {
     Some(msg) => "unpack \{msg}\n"
@@ -402,6 +422,18 @@ pub fn receive_build_status_response(result : ReceivePackResult) -> Bytes {
   for item in result.rejected {
     let (refname, msg) = item
     receive_push_bytes(out, @protocol.pktline_encode("ng \{refname} \{msg}\n"))
+  }
+  // Include proc-receive results
+  for pr in proc_results {
+    if pr.status == "ok" {
+      receive_push_bytes(out, @protocol.pktline_encode("ok \{pr.refname}\n"))
+    } else {
+      let msg = if pr.message.length() > 0 { pr.message } else { "failed" }
+      receive_push_bytes(
+        out,
+        @protocol.pktline_encode("ng \{pr.refname} \{msg}\n"),
+      )
+    }
   }
   receive_push_bytes(out, @protocol.pktline_flush())
   Bytes::from_array(FixedArray::makei(out.length(), i => out[i]))

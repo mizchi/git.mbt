@@ -258,6 +258,8 @@ pub fn read_config_content(&@types.RepoFileSystem, String) -> String
 
 pub fn read_config_value(&@types.RepoFileSystem, String, String, String) -> String?
 
+pub fn read_config_values(&@types.RepoFileSystem, String, String, String) -> Array[String]
+
 pub fn read_filter_commands(&@types.RepoFileSystem, String, String) -> (String?, String?)
 
 pub fn read_head_ref(&@types.RepoFileSystem, String) -> HeadRef raise @object.GitError
@@ -291,6 +293,8 @@ pub fn rebase_skip(&@types.FileSystem, &@types.RepoFileSystem, String) -> Rebase
 pub fn rebase_start(&@types.FileSystem, &@types.RepoFileSystem, String, @object.ObjectId) -> RebaseResult raise @object.GitError
 
 pub fn receive_build_status_response(ReceivePackResult) -> Bytes
+
+pub fn receive_build_status_response_with_proc(ReceivePackResult, Array[ReceivePackProcResult]) -> Bytes
 
 pub fn receive_pack(&@types.FileSystem, &@types.RepoFileSystem, String, Bytes, skip_connectivity_check? : Bool, git_dir_override? : String) -> Bytes raise @object.GitError
 
@@ -709,7 +713,15 @@ pub enum RebaseStatus {
   NothingToRebase
 }
 
-pub struct ReceivePackRequest {
+pub(all) struct ReceivePackProcResult {
+  refname : String
+  old_id : String
+  new_id : String
+  status : String
+  message : String
+}
+
+pub(all) struct ReceivePackRequest {
   updates : Array[RefUpdate]
   capabilities : Array[String]
   pack : Bytes
@@ -718,14 +730,14 @@ pub struct ReceivePackRequest {
   has_push_cert : Bool
 }
 
-pub struct ReceivePackResult {
+pub(all) struct ReceivePackResult {
   updated : Array[String]
   rejected : Array[(String, String)]
   unpack_error : String?
   connectivity_error_oid : String?
 }
 
-pub struct RefUpdate {
+pub(all) struct RefUpdate {
   old_id : @object.ObjectId
   new_id : @object.ObjectId
   refname : String

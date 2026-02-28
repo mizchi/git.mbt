@@ -1429,6 +1429,10 @@ fn read_head_checkout_spec_for_clone(fs : OsFs, git_dir : String) -> String {
   if head.has_prefix("ref: ") {
     return String::unsafe_substring(head, start=5, end=head.length())
   }
+  // HEAD contains a raw SHA (detached HEAD) - return it as-is for checkout
+  if head.length() >= 40 && is_hex_string(head) {
+    return head
+  }
   "HEAD"
 }
 

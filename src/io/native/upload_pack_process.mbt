@@ -1290,14 +1290,19 @@ fn write_partial_clone_metadata(
   fs.mkdir_p(@bit.join_path(git_dir, "objects/pack"))
   fs.mkdir_p(@bit.join_path(git_dir, "refs/heads"))
   fs.mkdir_p(@bit.join_path(git_dir, "refs/tags"))
-  fs.write_string(@bit.join_path(git_dir, "HEAD"), "ref: \{refname}\n")
-  let ref_path = @bit.join_path(git_dir, refname)
-  let ref_dir = match ref_path.rev_find("/") {
-    Some(idx) => String::unsafe_substring(ref_path, start=0, end=idx)
-    None => git_dir
+  if refname == "HEAD" {
+    // Detached HEAD: write the commit SHA directly
+    fs.write_string(@bit.join_path(git_dir, "HEAD"), commit_id.to_hex() + "\n")
+  } else {
+    fs.write_string(@bit.join_path(git_dir, "HEAD"), "ref: \{refname}\n")
+    let ref_path = @bit.join_path(git_dir, refname)
+    let ref_dir = match ref_path.rev_find("/") {
+      Some(idx) => String::unsafe_substring(ref_path, start=0, end=idx)
+      None => git_dir
+    }
+    fs.mkdir_p(ref_dir)
+    fs.write_string(ref_path, commit_id.to_hex() + "\n")
   }
-  fs.mkdir_p(ref_dir)
-  fs.write_string(ref_path, commit_id.to_hex() + "\n")
   let filter_value = filter.to_string()
   let config_path = @bit.join_path(git_dir, "config")
   let config =

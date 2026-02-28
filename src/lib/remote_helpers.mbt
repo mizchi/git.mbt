@@ -473,6 +473,56 @@ pub fn read_config_value(
 }
 
 ///|
+/// Read all values for a given section/key (multi-valued config support).
+pub fn read_config_values(
+  fs : &@bit.RepoFileSystem,
+  config_path : String,
+  section : String,
+  name : String,
+) -> Array[String] {
+  let result : Array[String] = []
+  guard fs.is_file(config_path) else { return result }
+  let content = try? fs.read_file(config_path)
+  guard content is Ok(content) else { return result }
+  let content_str = remote_decode_bytes_lossy(content)
+  let section_lower = section.to_lower()
+  let name_lower = name.to_lower()
+  let mut in_section = false
+  let lines = split_by_newline(content_str)
+  for line in lines {
+    let trimmed = remote_trim_string(line)
+    if trimmed.has_prefix("[") && trimmed.has_suffix("]") {
+      let sec = String::unsafe_substring(
+        trimmed,
+        start=1,
+        end=trimmed.length() - 1,
+      )
+      in_section = sec.to_lower() == section_lower
+    } else if in_section {
+      match trimmed.find("=") {
+        Some(idx) => {
+          let k = remote_trim_string(
+            String::unsafe_substring(trimmed, start=0, end=idx),
+          )
+          let v = remote_trim_string(
+            String::unsafe_substring(
+              trimmed,
+              start=idx + 1,
+              end=trimmed.length(),
+            ),
+          )
+          if k.to_lower() == name_lower {
+            result.push(v)
+          }
+        }
+        None => ()
+      }
+    }
+  }
+  result
+}
+
+///|
 pub fn read_config_bool(
   fs : &@bit.RepoFileSystem,
   config_path : String,

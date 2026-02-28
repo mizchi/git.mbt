@@ -74,11 +74,89 @@ async fn handle_receive_pack(args : Array[String]) -> Unit {
   if not(advertise) {
     let input = read_all_stdin()
     let req = @bitlib.parse_receive_pack_request(input)
+    // Determine client capabilities
+    let has_report_status_v2 = receive_has_capability(
+      req.capabilities,
+      "report-status-v2",
+    )
+    // Read receive.procReceiveRefs config
+    let proc_receive_refs_patterns = @bitlib.read_config_values(
+      fs, config_path, "receive", "procreceiverefs",
+    )
+    // Split updates into regular and proc-receive sets
+    let (regular_updates, proc_updates) = receive_split_updates_by_proc_receive(
+      req.updates,
+      proc_receive_refs_patterns,
+    )
+    // Run pre-receive hook
+    let pre_receive_ok = receive_run_hook(
+      fs,
+      git_dir,
+      root,
+      "pre-receive",
+      req.updates,
+      req.push_options,
+    )
+    if not(pre_receive_ok) {
+      // pre-receive rejected: report all refs as rejected
+      let result : @bitlib.ReceivePackResult = {
+        updated: [],
+        rejected: req.updates.map(fn(u) {
+          (u.refname, "pre-receive hook declined")
+        }),
+        unpack_error: None,
+        connectivity_error_oid: None,
+      }
+      let status = receive_build_status_with_version(
+        result,
+        [],
+        has_report_status_v2,
+      )
+      @stdio.stdout.write(status)
+      return ()
+    }
+    // Run proc-receive hook for matching refs
+    let proc_results : Array[@bitlib.ReceivePackProcResult] = if proc_updates.length() >
+      0 {
+      let hook_path = git_dir + "/hooks/proc-receive"
+      if fs.is_file(hook_path) {
+        receive_run_proc_receive_hook(
+          fs,
+          git_dir,
+          root,
+          proc_updates,
+          req.push_options,
+        )
+      } else {
+        // No proc-receive hook: reject all proc-receive refs
+        proc_updates.map(fn(u) {
+          (
+            {
+              refname: u.refname,
+              old_id: u.old_id.to_hex(),
+              new_id: u.new_id.to_hex(),
+              status: "ng",
+              message: "proc-receive hook not configured",
+            } : @bitlib.ReceivePackProcResult)
+        })
+      }
+    } else {
+      []
+    }
+    // Apply regular ref updates
+    let regular_req : @bitlib.ReceivePackRequest = {
+      updates: regular_updates,
+      capabilities: req.capabilities,
+      pack: req.pack,
+      push_options: req.push_options,
+      cert_push_options: req.cert_push_options,
+      has_push_cert: req.has_push_cert,
+    }
     let result = @bitlib.apply_receive_pack(
       fs,
       fs,
       root,
-      req,
+      regular_req,
       skip_connectivity_check~,
       git_dir_override=git_dir,
     )
@@ -92,7 +170,30 @@ async fn handle_receive_pack(args : Array[String]) -> Unit {
         )
       None => ()
     }
-    let status = @bitlib.receive_build_status_response(result)
+    // Run post-receive hook (only for successful updates)
+    let all_updated : Array[@bitlib.RefUpdate] = []
+    for upd in req.updates {
+      let was_updated = result.updated.contains(upd.refname)
+      let was_proc_ok = proc_results
+        .iter()
+        .any(fn(pr) { pr.refname == upd.refname && pr.status == "ok" })
+      if was_updated || was_proc_ok {
+        all_updated.push(upd)
+      }
+    }
+    if all_updated.length() > 0 {
+      let _ = receive_run_hook(
+        fs,
+        git_dir,
+        root,
+        "post-receive",
+        all_updated,
+        req.push_options,
+      )
+    }
+    let status = receive_build_status_with_version(
+      result, proc_results, has_report_status_v2,
+    )
     @stdio.stdout.write(status)
   }
 }
@@ -213,6 +314,416 @@ fn receive_generate_nonce(seed : String) -> String {
   let oid = state.finish()
   let hex = oid.to_hex()
   ts_str + "-" + hex
+}
+
+///|
+/// Check if a capability is present in the capabilities list.
+fn receive_has_capability(capabilities : Array[String], cap : String) -> Bool {
+  for c in capabilities {
+    if c == cap {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// Split ref updates into regular and proc-receive sets based on
+/// receive.procReceiveRefs config patterns.
+fn receive_split_updates_by_proc_receive(
+  updates : Array[@bitlib.RefUpdate],
+  patterns : Array[String],
+) -> (Array[@bitlib.RefUpdate], Array[@bitlib.RefUpdate]) {
+  if patterns.length() == 0 {
+    return (updates, [])
+  }
+  let regular : Array[@bitlib.RefUpdate] = []
+  let proc : Array[@bitlib.RefUpdate] = []
+  for upd in updates {
+    if receive_ref_matches_proc_patterns(upd.refname, patterns) {
+      proc.push(upd)
+    } else {
+      regular.push(upd)
+    }
+  }
+  (regular, proc)
+}
+
+///|
+/// Check if a refname matches any of the proc-receive patterns.
+/// Patterns support prefix match with : separator and ! negation.
+fn receive_ref_matches_proc_patterns(
+  refname : String,
+  patterns : Array[String],
+) -> Bool {
+  for pattern in patterns {
+    let (negated, pat) = if pattern.has_prefix("!") {
+      (true, String::unsafe_substring(pattern, start=1, end=pattern.length()))
+    } else {
+      (false, pattern)
+    }
+    let (is_prefix, prefix) = if pat.has_prefix(":") {
+      (true, String::unsafe_substring(pat, start=1, end=pat.length()))
+    } else {
+      (false, pat)
+    }
+    let matched = if is_prefix {
+      refname.has_prefix(prefix)
+    } else {
+      refname == prefix
+    }
+    if matched {
+      return not(negated)
+    }
+  }
+  false
+}
+
+///|
+/// Run a receive-pack hook (pre-receive or post-receive).
+/// Returns true if hook succeeded or doesn't exist, false if it rejected.
+async fn receive_run_hook(
+  fs : OsFs,
+  git_dir : String,
+  root : String,
+  hook_name : String,
+  updates : Array[@bitlib.RefUpdate],
+  push_options : Array[String],
+) -> Bool {
+  let hook_path = git_dir + "/hooks/" + hook_name
+  if not(fs.is_file(hook_path)) {
+    return true
+  }
+  // Build stdin data: "<old-oid> <new-oid> <refname>\n" for each update
+  let stdin_buf = StringBuilder::new()
+  for upd in updates {
+    stdin_buf.write_string(upd.old_id.to_hex())
+    stdin_buf.write_char(' ')
+    stdin_buf.write_string(upd.new_id.to_hex())
+    stdin_buf.write_char(' ')
+    stdin_buf.write_string(upd.refname)
+    stdin_buf.write_char('\n')
+  }
+  let stdin_data = stdin_buf.to_string()
+  let (stdin_input, stdin_writer) = @process.write_to_process() catch {
+    _ => return true
+  }
+  stdin_writer.write(stdin_data) catch {
+    _ => ()
+  }
+  stdin_writer.close()
+  let env : Map[String, String] = { "GIT_DIR": git_dir }
+  if push_options.length() > 0 {
+    env["GIT_PUSH_OPTION_COUNT"] = push_options.length().to_string()
+    for i, opt in push_options {
+      env["GIT_PUSH_OPTION_\{i}"] = opt
+    }
+  }
+  let code = @process.run(
+    hook_path,
+    [],
+    extra_env=env,
+    inherit_env=true,
+    stdin=stdin_input,
+    cwd=root,
+  ) catch {
+    _ => return true
+  }
+  code == 0
+}
+
+///|
+/// Run the proc-receive hook and parse its output.
+async fn receive_run_proc_receive_hook(
+  fs : OsFs,
+  git_dir : String,
+  root : String,
+  updates : Array[@bitlib.RefUpdate],
+  push_options : Array[String],
+) -> Array[@bitlib.ReceivePackProcResult] {
+  let hook_path = git_dir + "/hooks/proc-receive"
+  if not(fs.is_file(hook_path)) {
+    return updates.map(fn(u) {
+      (
+        {
+          refname: u.refname,
+          old_id: u.old_id.to_hex(),
+          new_id: u.new_id.to_hex(),
+          status: "ng",
+          message: "proc-receive hook not found",
+        } : @bitlib.ReceivePackProcResult)
+    })
+  }
+  // Build proc-receive protocol input:
+  // 1. version negotiation: "version=1\n" + flush
+  // 2. ref commands: "<old> <new> <refname>\n" per ref + flush
+  let input_buf : Array[Byte] = []
+  let version_pkt = @protocol.pktline_encode("version=1\n")
+  for b in version_pkt {
+    input_buf.push(b)
+  }
+  let flush = @protocol.pktline_flush()
+  for b in flush {
+    input_buf.push(b)
+  }
+  for upd in updates {
+    let line = upd.old_id.to_hex() +
+      " " +
+      upd.new_id.to_hex() +
+      " " +
+      upd.refname +
+      "\n"
+    let pkt = @protocol.pktline_encode(line)
+    for b in pkt {
+      input_buf.push(b)
+    }
+  }
+  for b in flush {
+    input_buf.push(b)
+  }
+  let input_bytes = Bytes::from_array(
+    FixedArray::makei(input_buf.length(), fn(i) { input_buf[i] }),
+  )
+  let (stdin_input, stdin_writer) = @process.write_to_process() catch {
+    _ =>
+      return updates.map(fn(u) {
+        (
+          {
+            refname: u.refname,
+            old_id: u.old_id.to_hex(),
+            new_id: u.new_id.to_hex(),
+            status: "ng",
+            message: "pipe creation failed",
+          } : @bitlib.ReceivePackProcResult)
+      })
+  }
+  stdin_writer.write(input_bytes) catch {
+    _ => ()
+  }
+  stdin_writer.close()
+  let env : Map[String, String] = { "GIT_DIR": git_dir }
+  if push_options.length() > 0 {
+    env["GIT_PUSH_OPTION_COUNT"] = push_options.length().to_string()
+    for i, opt in push_options {
+      env["GIT_PUSH_OPTION_\{i}"] = opt
+    }
+  }
+  let (code, stdout_data, _stderr) = @process.collect_output(
+    hook_path,
+    [],
+    extra_env=env,
+    inherit_env=true,
+    stdin=stdin_input,
+    cwd=root,
+  ) catch {
+    _ =>
+      return updates.map(fn(u) {
+        (
+          {
+            refname: u.refname,
+            old_id: u.old_id.to_hex(),
+            new_id: u.new_id.to_hex(),
+            status: "ng",
+            message: "hook execution failed",
+          } : @bitlib.ReceivePackProcResult)
+      })
+  }
+  if code != 0 {
+    return updates.map(fn(u) {
+      (
+        {
+          refname: u.refname,
+          old_id: u.old_id.to_hex(),
+          new_id: u.new_id.to_hex(),
+          status: "ng",
+          message: "hook exited with non-zero status",
+        } : @bitlib.ReceivePackProcResult)
+    })
+  }
+  let output_bytes = stdout_data.binary()
+  receive_parse_proc_receive_output(output_bytes, updates)
+}
+
+///|
+/// Parse proc-receive hook output (packet-line protocol).
+fn receive_parse_proc_receive_output(
+  data : Bytes,
+  updates : Array[@bitlib.RefUpdate],
+) -> Array[@bitlib.ReceivePackProcResult] {
+  let results : Array[@bitlib.ReceivePackProcResult] = []
+  if data.length() == 0 {
+    return updates.map(fn(u) {
+      (
+        {
+          refname: u.refname,
+          old_id: u.old_id.to_hex(),
+          new_id: u.new_id.to_hex(),
+          status: "ng",
+          message: "empty hook output",
+        } : @bitlib.ReceivePackProcResult)
+    })
+  }
+  let lines = @protocol.pktline_decode(data) catch {
+    _ =>
+      return updates.map(fn(u) {
+        (
+          {
+            refname: u.refname,
+            old_id: u.old_id.to_hex(),
+            new_id: u.new_id.to_hex(),
+            status: "ng",
+            message: "failed to parse hook output",
+          } : @bitlib.ReceivePackProcResult)
+      })
+  }
+  let mut skip_version = true
+  let mut current_ref : String = ""
+  let mut current_status : String = ""
+  let mut current_msg : String = ""
+  let mut current_old : String = ""
+  let mut current_new : String = ""
+  for item in lines {
+    let (line_bytes, is_flush) = item
+    if is_flush {
+      if skip_version {
+        skip_version = false
+        continue
+      }
+      if current_ref.length() > 0 {
+        results.push({
+          refname: current_ref,
+          old_id: current_old,
+          new_id: current_new,
+          status: current_status,
+          message: current_msg,
+        })
+        current_ref = ""
+      }
+      continue
+    }
+    if line_bytes.length() == 0 {
+      continue
+    }
+    let line = receive_proc_bytes_to_string(line_bytes)
+    let line = if line.has_suffix("\n") {
+      String::unsafe_substring(line, start=0, end=line.length() - 1)
+    } else {
+      line
+    }
+    if skip_version {
+      continue
+    }
+    // Handle option directives
+    if line.has_prefix("option ") {
+      if current_ref.length() > 0 {
+        let opt_content = String::unsafe_substring(
+          line,
+          start=7,
+          end=line.length(),
+        )
+        if opt_content.has_prefix("refname ") {
+          current_ref = String::unsafe_substring(
+            opt_content,
+            start=8,
+            end=opt_content.length(),
+          )
+        } else if opt_content.has_prefix("old-oid ") {
+          current_old = String::unsafe_substring(
+            opt_content,
+            start=8,
+            end=opt_content.length(),
+          )
+        } else if opt_content.has_prefix("new-oid ") {
+          current_new = String::unsafe_substring(
+            opt_content,
+            start=8,
+            end=opt_content.length(),
+          )
+        }
+      }
+      continue
+    }
+    // Commit previous result
+    if current_ref.length() > 0 {
+      results.push({
+        refname: current_ref,
+        old_id: current_old,
+        new_id: current_new,
+        status: current_status,
+        message: current_msg,
+      })
+      current_ref = ""
+      current_old = ""
+      current_new = ""
+      current_msg = ""
+    }
+    if line.has_prefix("ok ") {
+      let refname = String::unsafe_substring(line, start=3, end=line.length())
+      current_ref = refname
+      current_status = "ok"
+      current_msg = ""
+      for u in updates {
+        if u.refname == refname {
+          current_old = u.old_id.to_hex()
+          current_new = u.new_id.to_hex()
+          break
+        }
+      }
+    } else if line.has_prefix("ng ") {
+      let rest = String::unsafe_substring(line, start=3, end=line.length())
+      match rest.find(" ") {
+        Some(idx) => {
+          current_ref = String::unsafe_substring(rest, start=0, end=idx)
+          current_msg = String::unsafe_substring(
+            rest,
+            start=idx + 1,
+            end=rest.length(),
+          )
+        }
+        None => {
+          current_ref = rest
+          current_msg = "failed"
+        }
+      }
+      current_status = "ng"
+      for u in updates {
+        if u.refname == current_ref {
+          current_old = u.old_id.to_hex()
+          current_new = u.new_id.to_hex()
+          break
+        }
+      }
+    }
+  }
+  if current_ref.length() > 0 {
+    results.push({
+      refname: current_ref,
+      old_id: current_old,
+      new_id: current_new,
+      status: current_status,
+      message: current_msg,
+    })
+  }
+  results
+}
+
+///|
+fn receive_proc_bytes_to_string(data : Bytes) -> String {
+  let buf = StringBuilder::new()
+  for b in data {
+    buf.write_char(b.to_int().unsafe_to_char())
+  }
+  buf.to_string()
+}
+
+///|
+/// Build status response considering v1/v2 format and proc-receive results.
+fn receive_build_status_with_version(
+  result : @bitlib.ReceivePackResult,
+  proc_results : Array[@bitlib.ReceivePackProcResult],
+  _use_v2 : Bool,
+) -> Bytes {
+  @bitlib.receive_build_status_response_with_proc(result, proc_results)
 }
 
 ///|

@@ -2657,14 +2657,6 @@ async fn handle_pack_objects(args : Array[String]) -> Unit raise Error {
       let reuse_only = cfg.window == 0
       // Split objects into groups based on packSizeLimit (only for file output, not stdout)
       let effective_limit = if cfg.stdout { None } else { pack_size_limit }
-      // git clamps minimum pack size to 1 MiB
-      match effective_limit {
-        Some(sz) =>
-          if sz > 0L && sz < 1048576L {
-            @stdio.stderr.write("warning: minimum pack size limit is 1 MiB\n")
-          }
-        None => ()
-      }
       let object_groups = split_objects_by_size_limit(objects, effective_limit)
       let mut total_delta_count = 0
       for group in object_groups {
@@ -2742,8 +2734,7 @@ fn split_objects_by_size_limit(
       if max_size <= 0L {
         return [objects]
       }
-      // git clamps minimum pack size to 1 MiB
-      let effective_max = if max_size < 1048576L { 1048576L } else { max_size }
+      let effective_max = max_size
       let groups : Array[Array[@bitcore.PackObject]] = []
       let mut current_group : Array[@bitcore.PackObject] = []
       let mut current_size = 0L
