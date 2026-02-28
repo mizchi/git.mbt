@@ -2447,10 +2447,7 @@ async fn handle_pack_objects(args : Array[String]) -> Unit raise Error {
               None => default_sparse
             }
         }
-        // Sparse collection silently skips missing objects, so only use it
-        // when missing objects are allowed (allow_missing or local flags).
-        // Otherwise, use strict collection that detects missing objects.
-        if use_sparse && allow_missing_for_local {
+        if use_sparse {
           objects = collect_sparse_objects_from_commits(
             db, fs, include_commits, exclude_commits,
           )

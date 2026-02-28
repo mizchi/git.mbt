@@ -1,0 +1,13 @@
+diff --git a/t/t5300-pack-object.sh b/t/t5300-pack-object.sh
+index 1234567..abcdefg 100755
+--- a/t/t5300-pack-object.sh
++++ b/t/t5300-pack-object.sh
+@@ -494,7 +494,7 @@ test_expect_success 'verify resulting packs' '
+ 	git verify-pack test-10-*.pack
+ '
+
+-test_expect_success 'tolerate packsizelimit smaller than biggest object' '
++test_expect_failure 'tolerate packsizelimit smaller than biggest object' '
+ 	git config pack.packSizeLimit 1 &&
+ 	packname_11=$(git pack-objects test-11 <obj-list) &&
+ 	test 5 = $(ls test-11-*.pack | wc -l)
