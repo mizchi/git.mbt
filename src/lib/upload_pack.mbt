@@ -208,7 +208,25 @@ pub fn build_upload_pack_advertisement(
   for item in refs {
     all_refs.push(item)
   }
-  let caps = upload_default_caps(agent)
+  // Build symref capability when HEAD is a symbolic ref
+  let head_symref : String? = try {
+    let head_ref = read_head_ref(fs, git_dir)
+    match head_ref {
+      HeadRef::Branch(name) =>
+        if name.has_prefix("refs/") {
+          Some(name)
+        } else {
+          Some("refs/heads/" + name)
+        }
+      HeadRef::Detached(_) => None
+    }
+  } catch {
+    _ => None
+  }
+  let caps = match head_symref {
+    Some(target) => upload_default_caps(agent) + " symref=HEAD:" + target
+    None => upload_default_caps(agent)
+  }
   // Protocol v1: output version line before refs
   if protocol_version == 1 {
     upload_push_bytes(out, @protocol.pktline_encode("version 1\n"))
