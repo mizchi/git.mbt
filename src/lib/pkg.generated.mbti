@@ -294,7 +294,7 @@ pub fn rebase_start(&@types.FileSystem, &@types.RepoFileSystem, String, @object.
 
 pub fn receive_build_status_response(ReceivePackResult) -> Bytes
 
-pub fn receive_build_status_response_with_proc(ReceivePackResult, Array[ReceivePackProcResult]) -> Bytes
+pub fn receive_build_status_response_with_proc(ReceivePackResult, Array[ReceivePackProcResult], original_updates? : Array[RefUpdate]) -> Bytes
 
 pub fn receive_pack(&@types.FileSystem, &@types.RepoFileSystem, String, Bytes, skip_connectivity_check? : Bool, git_dir_override? : String) -> Bytes raise @object.GitError
 
@@ -715,10 +715,12 @@ pub enum RebaseStatus {
 
 pub(all) struct ReceivePackProcResult {
   refname : String
+  original_refname : String
   old_id : String
   new_id : String
   status : String
   message : String
+  fall_through : Bool
 }
 
 pub(all) struct ReceivePackRequest {

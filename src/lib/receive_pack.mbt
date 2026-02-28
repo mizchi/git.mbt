@@ -29,10 +29,12 @@ pub(all) struct ReceivePackResult {
 /// Result from a proc-receive hook for a single ref.
 pub(all) struct ReceivePackProcResult {
   refname : String
+  original_refname : String
   old_id : String
   new_id : String
   status : String
   message : String
+  fall_through : Bool
 }
 
 ///|
@@ -405,10 +407,13 @@ pub fn receive_build_status_response(result : ReceivePackResult) -> Bytes {
 
 ///|
 /// Build receive-pack status response including proc-receive results.
-/// When use_v2 is true, uses report-status-v2 format.
+/// When original_updates is provided, output status lines in the original
+/// push order (matching git's behavior). Otherwise fall back to the
+/// legacy order (updated, rejected, proc).
 pub fn receive_build_status_response_with_proc(
   result : ReceivePackResult,
   proc_results : Array[ReceivePackProcResult],
+  original_updates? : Array[RefUpdate] = [],
 ) -> Bytes {
   let out : Array[Byte] = []
   let unpack_line = match result.unpack_error {
@@ -416,23 +421,84 @@ pub fn receive_build_status_response_with_proc(
     None => "unpack ok\n"
   }
   receive_push_bytes(out, @protocol.pktline_encode(unpack_line))
-  for refname in result.updated {
-    receive_push_bytes(out, @protocol.pktline_encode("ok \{refname}\n"))
-  }
-  for item in result.rejected {
-    let (refname, msg) = item
-    receive_push_bytes(out, @protocol.pktline_encode("ng \{refname} \{msg}\n"))
-  }
-  // Include proc-receive results
-  for pr in proc_results {
-    if pr.status == "ok" {
-      receive_push_bytes(out, @protocol.pktline_encode("ok \{pr.refname}\n"))
-    } else {
-      let msg = if pr.message.length() > 0 { pr.message } else { "failed" }
+  if original_updates.length() > 0 {
+    // Output status in original push order
+    let seen : Map[String, Bool] = {}
+    for upd in original_updates {
+      let refname = upd.refname
+      // Check if this ref was updated (regular or fall-through)
+      if result.updated.contains(refname) {
+        receive_push_bytes(out, @protocol.pktline_encode("ok \{refname}\n"))
+        continue
+      }
+      // Check if this ref was rejected
+      let mut found_rejected = false
+      for item in result.rejected {
+        let (rname, msg) = item
+        if rname == refname {
+          receive_push_bytes(
+            out,
+            @protocol.pktline_encode("ng \{refname} \{msg}\n"),
+          )
+          found_rejected = true
+          break
+        }
+      }
+      if found_rejected {
+        continue
+      }
+      // Check proc-receive results by original_refname (deduplicate)
+      if seen.contains(refname) {
+        continue
+      }
+      let mut found_proc = false
+      for pr in proc_results {
+        if pr.original_refname == refname {
+          if not(found_proc) {
+            seen[refname] = true
+            found_proc = true
+          }
+          if pr.status == "ok" {
+            receive_push_bytes(
+              out,
+              @protocol.pktline_encode("ok \{pr.refname}\n"),
+            )
+          } else {
+            let msg = if pr.message.length() > 0 {
+              pr.message
+            } else {
+              "failed"
+            }
+            receive_push_bytes(
+              out,
+              @protocol.pktline_encode("ng \{pr.refname} \{msg}\n"),
+            )
+          }
+        }
+      }
+    }
+  } else {
+    // Legacy: output in result order
+    for refname in result.updated {
+      receive_push_bytes(out, @protocol.pktline_encode("ok \{refname}\n"))
+    }
+    for item in result.rejected {
+      let (refname, msg) = item
       receive_push_bytes(
         out,
-        @protocol.pktline_encode("ng \{pr.refname} \{msg}\n"),
+        @protocol.pktline_encode("ng \{refname} \{msg}\n"),
       )
+    }
+    for pr in proc_results {
+      if pr.status == "ok" {
+        receive_push_bytes(out, @protocol.pktline_encode("ok \{pr.refname}\n"))
+      } else {
+        let msg = if pr.message.length() > 0 { pr.message } else { "failed" }
+        receive_push_bytes(
+          out,
+          @protocol.pktline_encode("ng \{pr.refname} \{msg}\n"),
+        )
+      }
     }
   }
   receive_push_bytes(out, @protocol.pktline_flush())

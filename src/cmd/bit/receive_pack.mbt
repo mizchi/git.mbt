@@ -133,19 +133,40 @@ async fn handle_receive_pack(args : Array[String]) -> Unit {
           (
             {
               refname: u.refname,
+              original_refname: u.refname,
               old_id: u.old_id.to_hex(),
               new_id: u.new_id.to_hex(),
               status: "ng",
               message: "proc-receive hook not configured",
+              fall_through: false,
             } : @bitlib.ReceivePackProcResult)
         })
       }
     } else {
       []
     }
-    // Apply regular ref updates
+    // Handle fall-through: move fall-through refs back to regular updates
+    let remaining_proc : Array[@bitlib.ReceivePackProcResult] = []
+    let all_regular_updates : Array[@bitlib.RefUpdate] = []
+    for u in regular_updates {
+      all_regular_updates.push(u)
+    }
+    for pr in proc_results {
+      if pr.fall_through && pr.status == "ok" {
+        for u in proc_updates {
+          if u.refname == pr.original_refname {
+            all_regular_updates.push(u)
+            break
+          }
+        }
+      } else {
+        remaining_proc.push(pr)
+      }
+    }
+    let proc_results = remaining_proc
+    // Apply regular ref updates (including fall-through refs)
     let regular_req : @bitlib.ReceivePackRequest = {
-      updates: regular_updates,
+      updates: all_regular_updates,
       capabilities: req.capabilities,
       pack: req.pack,
       push_options: req.push_options,
@@ -170,15 +191,36 @@ async fn handle_receive_pack(args : Array[String]) -> Unit {
         )
       None => ()
     }
+    // Send status response BEFORE post-receive hook (matches git behavior)
+    let status = receive_build_status_with_version(
+      result,
+      proc_results,
+      has_report_status_v2,
+      original_updates=req.updates,
+    )
+    @stdio.stdout.write(status)
     // Run post-receive hook (only for successful updates)
+    // Use rewritten refname/OID from proc-receive for proc refs
     let all_updated : Array[@bitlib.RefUpdate] = []
     for upd in req.updates {
-      let was_updated = result.updated.contains(upd.refname)
-      let was_proc_ok = proc_results
-        .iter()
-        .any(fn(pr) { pr.refname == upd.refname && pr.status == "ok" })
-      if was_updated || was_proc_ok {
+      if result.updated.contains(upd.refname) {
+        // Regular update or fall-through: use original ref data
         all_updated.push(upd)
+      } else {
+        // Check proc-receive results for rewritten refs
+        for pr in proc_results {
+          if pr.original_refname == upd.refname && pr.status == "ok" {
+            all_updated.push({
+              old_id: @bitcore.ObjectId::from_hex(pr.old_id) catch {
+                _ => upd.old_id
+              },
+              new_id: @bitcore.ObjectId::from_hex(pr.new_id) catch {
+                _ => upd.new_id
+              },
+              refname: pr.refname,
+            })
+          }
+        }
       }
     }
     if all_updated.length() > 0 {
@@ -191,10 +233,6 @@ async fn handle_receive_pack(args : Array[String]) -> Unit {
         req.push_options,
       )
     }
-    let status = receive_build_status_with_version(
-      result, proc_results, has_report_status_v2,
-    )
-    @stdio.stdout.write(status)
   }
 }
 
@@ -447,10 +485,12 @@ async fn receive_run_proc_receive_hook(
       (
         {
           refname: u.refname,
+          original_refname: u.refname,
           old_id: u.old_id.to_hex(),
           new_id: u.new_id.to_hex(),
           status: "ng",
           message: "proc-receive hook not found",
+          fall_through: false,
         } : @bitlib.ReceivePackProcResult)
     })
   }
@@ -490,10 +530,12 @@ async fn receive_run_proc_receive_hook(
         (
           {
             refname: u.refname,
+            original_refname: u.refname,
             old_id: u.old_id.to_hex(),
             new_id: u.new_id.to_hex(),
             status: "ng",
             message: "pipe creation failed",
+            fall_through: false,
           } : @bitlib.ReceivePackProcResult)
       })
   }
@@ -508,12 +550,13 @@ async fn receive_run_proc_receive_hook(
       env["GIT_PUSH_OPTION_\{i}"] = opt
     }
   }
-  let (code, stdout_data, _stderr) = @process.collect_output(
+  let (code, stdout_data) = @process.collect_stdout(
     hook_path,
     [],
     extra_env=env,
     inherit_env=true,
     stdin=stdin_input,
+    stderr=@stdio.stderr,
     cwd=root,
   ) catch {
     _ =>
@@ -521,10 +564,12 @@ async fn receive_run_proc_receive_hook(
         (
           {
             refname: u.refname,
+            original_refname: u.refname,
             old_id: u.old_id.to_hex(),
             new_id: u.new_id.to_hex(),
             status: "ng",
             message: "hook execution failed",
+            fall_through: false,
           } : @bitlib.ReceivePackProcResult)
       })
   }
@@ -533,10 +578,12 @@ async fn receive_run_proc_receive_hook(
       (
         {
           refname: u.refname,
+          original_refname: u.refname,
           old_id: u.old_id.to_hex(),
           new_id: u.new_id.to_hex(),
           status: "ng",
           message: "hook exited with non-zero status",
+          fall_through: false,
         } : @bitlib.ReceivePackProcResult)
     })
   }
@@ -556,10 +603,12 @@ fn receive_parse_proc_receive_output(
       (
         {
           refname: u.refname,
+          original_refname: u.refname,
           old_id: u.old_id.to_hex(),
           new_id: u.new_id.to_hex(),
           status: "ng",
           message: "empty hook output",
+          fall_through: false,
         } : @bitlib.ReceivePackProcResult)
     })
   }
@@ -569,19 +618,23 @@ fn receive_parse_proc_receive_output(
         (
           {
             refname: u.refname,
+            original_refname: u.refname,
             old_id: u.old_id.to_hex(),
             new_id: u.new_id.to_hex(),
             status: "ng",
             message: "failed to parse hook output",
+            fall_through: false,
           } : @bitlib.ReceivePackProcResult)
       })
   }
   let mut skip_version = true
   let mut current_ref : String = ""
+  let mut current_original_ref : String = ""
   let mut current_status : String = ""
   let mut current_msg : String = ""
   let mut current_old : String = ""
   let mut current_new : String = ""
+  let mut current_fall_through : Bool = false
   for item in lines {
     let (line_bytes, is_flush) = item
     if is_flush {
@@ -592,10 +645,12 @@ fn receive_parse_proc_receive_output(
       if current_ref.length() > 0 {
         results.push({
           refname: current_ref,
+          original_refname: current_original_ref,
           old_id: current_old,
           new_id: current_new,
           status: current_status,
           message: current_msg,
+          fall_through: current_fall_through,
         })
         current_ref = ""
       }
@@ -639,7 +694,10 @@ fn receive_parse_proc_receive_output(
             start=8,
             end=opt_content.length(),
           )
+        } else if opt_content == "fall-through" {
+          current_fall_through = true
         }
+        // option forced-update is silently ignored (not needed for status)
       }
       continue
     }
@@ -647,19 +705,24 @@ fn receive_parse_proc_receive_output(
     if current_ref.length() > 0 {
       results.push({
         refname: current_ref,
+        original_refname: current_original_ref,
         old_id: current_old,
         new_id: current_new,
         status: current_status,
         message: current_msg,
+        fall_through: current_fall_through,
       })
       current_ref = ""
+      current_original_ref = ""
       current_old = ""
       current_new = ""
       current_msg = ""
+      current_fall_through = false
     }
     if line.has_prefix("ok ") {
       let refname = String::unsafe_substring(line, start=3, end=line.length())
       current_ref = refname
+      current_original_ref = refname
       current_status = "ok"
       current_msg = ""
       for u in updates {
@@ -685,6 +748,7 @@ fn receive_parse_proc_receive_output(
           current_msg = "failed"
         }
       }
+      current_original_ref = current_ref
       current_status = "ng"
       for u in updates {
         if u.refname == current_ref {
@@ -698,10 +762,12 @@ fn receive_parse_proc_receive_output(
   if current_ref.length() > 0 {
     results.push({
       refname: current_ref,
+      original_refname: current_original_ref,
       old_id: current_old,
       new_id: current_new,
       status: current_status,
       message: current_msg,
+      fall_through: current_fall_through,
     })
   }
   results
@@ -722,8 +788,13 @@ fn receive_build_status_with_version(
   result : @bitlib.ReceivePackResult,
   proc_results : Array[@bitlib.ReceivePackProcResult],
   _use_v2 : Bool,
+  original_updates? : Array[@bitlib.RefUpdate] = [],
 ) -> Bytes {
-  @bitlib.receive_build_status_response_with_proc(result, proc_results)
+  @bitlib.receive_build_status_response_with_proc(
+    result,
+    proc_results,
+    original_updates~,
+  )
 }
 
 ///|
