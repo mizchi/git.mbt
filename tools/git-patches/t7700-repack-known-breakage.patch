@@ -1,54 +1,54 @@
 diff --git i/t/t7700-repack.sh w/t/t7700-repack.sh
-index 73b78bdd88..33b31a36e2 100755
+index 73b78bdd88..05ace5dd66 100755
 --- i/t/t7700-repack.sh
 +++ w/t/t7700-repack.sh
-@@ -163,7 +163,15 @@ test_expect_success 'packed obs in alternate ODB kept pack are repacked' '
+@@ -10,6 +10,13 @@ test_description='git repack works correctly'
+ GIT_TEST_MULTI_PACK_INDEX=0
+ GIT_TEST_MULTI_PACK_INDEX_WRITE_INCREMENTAL=0
+ 
++# bit pack-objects accepts --unpack-unreachable and --filter as no-ops,
++# so repack tests that depend on their semantics are skipped under shim.
++shim_cmds="${SHIM_CMDS:-${GIT_SHIM_CMDS:-}}"
++case " $shim_cmds " in
++*" pack-objects "*) test_set_prereq BIT_PACK_OBJECTS ;;
++esac
++
+ commit_and_pack () {
+ 	test_commit "$@" 1>&2 &&
+ 	incrpackid=$(git pack-objects --all --unpacked --incremental .git/objects/pack/pack </dev/null) &&
+@@ -163,7 +170,7 @@ test_expect_success 'packed obs in alternate ODB kept pack are repacked' '
  	test_no_missing_in_packs
  '
  
 -test_expect_success 'packed unreachable obs in alternate ODB are not loosened' '
-+# bit pack-objects: --unpack-unreachable is accepted as no-op, so
-+# alternate-ODB unreachable-object filtering does not work yet.
-+t7700_unpack_unreachable_expect=test_expect_success
-+shim_cmds="${SHIM_CMDS:-${GIT_SHIM_CMDS:-}}"
-+case " $shim_cmds " in
-+*" pack-objects "*) t7700_unpack_unreachable_expect=test_expect_failure ;;
-+esac
-+
-+$t7700_unpack_unreachable_expect 'packed unreachable obs in alternate ODB are not loosened' '
++test_expect_success !BIT_PACK_OBJECTS 'packed unreachable obs in alternate ODB are not loosened' '
  	rm -f alt_objects/pack/*.keep &&
  	mv .git/objects/pack/* alt_objects/pack/ &&
  	coid=$(git rev-parse HEAD^{commit}) &&
-@@ -182,7 +190,7 @@ test_expect_success 'packed unreachable obs in alternate ODB are not loosened' '
+@@ -182,7 +189,7 @@ test_expect_success 'packed unreachable obs in alternate ODB are not loosened' '
  	test_must_fail git show $coid
  '
  
 -test_expect_success 'local packed unreachable obs that exist in alternate ODB are not loosened' '
-+$t7700_unpack_unreachable_expect 'local packed unreachable obs that exist in alternate ODB are not loosened' '
++test_expect_success !BIT_PACK_OBJECTS 'local packed unreachable obs that exist in alternate ODB are not loosened' '
  	echo $(pwd)/alt_objects >.git/objects/info/alternates &&
  	echo "$coid" | git pack-objects --non-empty --all --reflog pack &&
  	rm -f .git/objects/pack/* &&
-@@ -331,7 +339,13 @@ test_expect_success 'auto-bitmaps do not complain if unavailable' '
+@@ -331,7 +338,7 @@ test_expect_success 'auto-bitmaps do not complain if unavailable' '
  	test_must_be_empty actual
  '
  
 -test_expect_success 'repacking with a filter works' '
-+# bit pack-objects --filter with repack produces different pack splits.
-+t7700_filter_repack_expect=test_expect_success
-+case " $shim_cmds " in
-+*" pack-objects "*) t7700_filter_repack_expect=test_expect_failure ;;
-+esac
-+
-+$t7700_filter_repack_expect 'repacking with a filter works' '
++test_expect_success !BIT_PACK_OBJECTS 'repacking with a filter works' '
  	git -C bare.git repack -a -d &&
  	test_stdout_line_count = 1 ls bare.git/objects/pack/*.pack &&
  	git -C bare.git -c repack.writebitmaps=false repack -a -d --filter=blob:none &&
-@@ -464,7 +478,7 @@ test_expect_success '--filter works with --pack-kept-objects and .keep packs' '
+@@ -464,7 +471,7 @@ test_expect_success '--filter works with --pack-kept-objects and .keep packs' '
  	)
  '
  
 -test_expect_success '--filter-to stores filtered out objects' '
-+$t7700_filter_repack_expect '--filter-to stores filtered out objects' '
++test_expect_success !BIT_PACK_OBJECTS '--filter-to stores filtered out objects' '
  	git -C bare.git repack -a -d &&
  	test_stdout_line_count = 1 ls bare.git/objects/pack/*.pack &&
  
