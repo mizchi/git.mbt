@@ -65,10 +65,13 @@ t6004-rev-list-path-optim.sh
 t6005-rev-list-count.sh
 t6006-rev-list-format.sh
 t6007-rev-list-cherry-pick-file.sh
+t6008-rev-list-submodule.sh
+t6009-rev-list-parent.sh
 t6010-merge-base.sh
 t6011-rev-list-with-bad-commit.sh
 t6012-rev-list-simplify.sh
 t6014-rev-list-all.sh
+t6016-rev-list-graph-simplify-history.sh
 t6013-rev-list-reverse-parents.sh
 t6017-rev-list-stdin.sh
 t6018-rev-list-glob.sh
@@ -78,7 +81,9 @@ t6021-rev-list-exclude-hidden.sh
 t6022-rev-list-missing.sh
 t6030-bisect-porcelain.sh
 t6040-tracking-info.sh
+t6041-bisect-submodule.sh
 t6050-replace.sh
+t6060-merge-index.sh
 t6100-rev-list-in-order.sh
 t6101-rev-parse-parents.sh
 t6102-rev-list-unexpected-objects.sh
@@ -95,6 +100,7 @@ t6130-pathspec-noglob.sh
 t6131-pathspec-icase.sh
 t6132-pathspec-exclude.sh
 t6133-pathspec-rev-dwim.sh
+t6134-pathspec-in-submodule.sh
 t6135-pathspec-with-attrs.sh
 t6136-pathspec-in-bare.sh
 t6137-pathspec-wildcards-literal.sh
@@ -122,6 +128,7 @@ t6411-merge-filemode.sh
 t6412-merge-large-rename.sh
 t6413-merge-crlf.sh
 t6414-merge-rename-nocruft.sh
+t6415-merge-dir-to-symlink.sh
 t6416-recursive-corner-cases.sh
 t6417-merge-ours-theirs.sh
 t6418-merge-text-auto.sh
@@ -129,6 +136,7 @@ t6419-merge-ignorecase.sh
 t6421-merge-partial-clone.sh
 t6422-merge-rename-corner-cases.sh
 t6423-merge-rename-directories.sh
+t6424-merge-unrelated-index-changes.sh
 t6425-merge-rename-delete.sh
 t6426-merge-skip-unneeded-updates.sh
 t6427-diff3-conflict-markers.sh
@@ -137,9 +145,12 @@ t6429-merge-sequence-rename-caching.sh
 t6430-merge-recursive.sh
 t6431-merge-criscross.sh
 t6432-merge-recursive-space-options.sh
+t6433-merge-toplevel.sh
 t6434-merge-recursive-rename-options.sh
 t6435-merge-sparse.sh
 t6436-merge-overwrite.sh
+t6437-submodule-merge.sh
+t6438-submodule-directory-file-conflicts.sh
 t6439-merge-co-error-msgs.sh
 t6500-gc.sh
 t6501-freshen-objects.sh
@@ -152,6 +163,7 @@ t6700-tree-depth.sh
 # porcelain commands
 t7001-mv.sh
 t7002-mv-sparse-checkout.sh
+t7003-filter-branch.sh
 t7004-tag.sh
 t7005-editor.sh
 t7006-pager.sh
@@ -166,6 +178,7 @@ t7060-wtstatus.sh
 t7061-wtstatus-ignore.sh
 t7062-wtstatus-ignorecase.sh
 t7063-status-untracked-cache.sh
+t7064-wtstatus-pv2.sh
 t7101-reset-empty-subdirs.sh
 t7102-reset.sh
 t7103-reset-bare.sh
@@ -175,18 +188,40 @@ t7106-reset-unborn-branch.sh
 t7107-reset-pathspec-file.sh
 t7110-reset-merge.sh
 t7111-reset-table.sh
+t7112-reset-submodule.sh
 t7113-post-index-change-hook.sh
 t7201-co.sh
 t7300-clean.sh
 t7301-clean-interactive.sh
+t7400-submodule-basic.sh
+t7401-submodule-summary.sh
 t7402-submodule-rebase.sh
+t7403-submodule-sync.sh
+t7406-submodule-update.sh
+t7407-submodule-foreach.sh
+t7408-submodule-reference.sh
+t7409-submodule-detached-work-tree.sh
+t7411-submodule-config.sh
+t7412-submodule-absorbgitdirs.sh
+t7413-submodule-is-active.sh
 t7414-submodule-mistakes.sh
+t7416-submodule-dash-url.sh
+t7417-submodule-path-url.sh
+t7418-submodule-sparse-gitmodules.sh
+t7419-submodule-set-branch.sh
+t7420-submodule-set-url.sh
+t7421-submodule-summary-add.sh
+t7422-submodule-output.sh
+t7423-submodule-symlinks.sh
+t7424-submodule-mixed-ref-formats.sh
 t7500-commit-template-squash-signoff.sh
 t7501-commit-basic-functionality.sh
 t7502-commit-porcelain.sh
 t7503-pre-commit-and-pre-merge-commit-hooks.sh
 t7504-commit-msg-hook.sh
 t7505-prepare-commit-msg-hook.sh
+t7506-status-submodule.sh
+t7507-commit-verbose.sh
 t7508-status.sh
 t7509-commit-authorship.sh
 t7510-signed-commit.sh
@@ -210,17 +245,22 @@ t7528-signed-commit-ssh.sh
 # merge (porcelain)
 t7600-merge.sh
 t7601-merge-pull-config.sh
+t7602-merge-octopus-many.sh
+t7603-merge-reduce-heads.sh
 t7604-merge-custom-message.sh
 t7605-merge-resolve.sh
 t7606-merge-custom.sh
+t7607-merge-state.sh
 t7608-merge-messages.sh
 t7609-mergetool--lib.sh
+t7610-mergetool.sh
 t7611-merge-abort.sh
 t7612-merge-verify-signatures.sh
 t7614-merge-signoff.sh
 t7615-diff-algo-with-mergy-operations.sh
 
 # repack
+t7701-repack-unpack-unreachable.sh
 t7702-repack-cyclic-alternate.sh
 t7703-repack-geometric.sh
 t7704-repack-cruft.sh
@@ -232,6 +272,10 @@ t7812-grep-icase-non-ascii.sh
 t7813-grep-icase-iso.sh
 t7815-grep-binary.sh
 t7816-grep-binary-pattern.sh
+t7817-grep-sparse-checkout.sh
+
+# difftool
+t7800-difftool.sh
 
 # maintenance
 t7900-maintenance.sh

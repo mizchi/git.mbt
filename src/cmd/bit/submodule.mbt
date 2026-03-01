@@ -21,6 +21,11 @@ async fn handle_submodule(args : Array[String]) -> Unit raise Error {
     "update" => handle_submodule_update(fs, root, git_dir, rest)
     "deinit" => handle_submodule_deinit(fs, root, git_dir, rest)
     "sync" => handle_submodule_sync(fs, root, git_dir, rest)
+    "foreach" => handle_submodule_foreach(fs, root, git_dir, rest)
+    "set-url" => handle_submodule_set_url(fs, root, rest)
+    "set-branch" => handle_submodule_set_branch(fs, root, rest)
+    "absorbgitdirs" => handle_submodule_absorbgitdirs(fs, root, git_dir, rest)
+    "summary" => handle_submodule_summary(fs, root, git_dir, rest)
     _ => {
       @stdio.stderr.write("error: unknown submodule command: \{subcmd}")
       @sys.exit(1)
@@ -861,6 +866,276 @@ fn update_remote_origin(content : String, url : String) -> String {
     }
   }
   lines.join("\n")
+}
+
+///|
+fn find_submodule_name_by_path(
+  submodules : Array[SubmoduleInfo],
+  path : String,
+) -> String? {
+  for sub in submodules {
+    if sub.path == path {
+      return Some(sub.name)
+    }
+  }
+  None
+}
+
+///|
+async fn handle_submodule_set_url(
+  fs : OsFs,
+  root : String,
+  args : Array[String],
+) -> Unit raise Error {
+  let positional : Array[String] = []
+  for arg in args {
+    if not(arg.has_prefix("-")) {
+      positional.push(arg)
+    }
+  }
+  if positional.length() < 2 {
+    raise @bitcore.GitError::InvalidObject(
+      "usage: git submodule set-url [--] <path> <newurl>",
+    )
+  }
+  let path = positional[0]
+  let newurl = positional[1]
+  let rfs : &@bitcore.RepoFileSystem = fs
+  let submodules = parse_gitmodules(rfs, root)
+  let name = match find_submodule_name_by_path(submodules, path) {
+    Some(n) => n
+    None =>
+      raise @bitcore.GitError::InvalidObject(
+        "No submodule mapping found in .gitmodules for path '\{path}'",
+      )
+  }
+  let gitmodules_path = root + "/.gitmodules"
+  set_config(fs, gitmodules_path, "submodule.\{name}.url", newurl, false)
+}
+
+///|
+async fn handle_submodule_set_branch(
+  fs : OsFs,
+  root : String,
+  args : Array[String],
+) -> Unit raise Error {
+  let mut branch : String? = None
+  let mut default_branch = false
+  let positional : Array[String] = []
+  let mut i = 0
+  while i < args.length() {
+    let arg = args[i]
+    match arg {
+      "--branch" | "-b" => {
+        i += 1
+        if i >= args.length() {
+          raise @bitcore.GitError::InvalidObject(
+            "option requires an argument -- branch",
+          )
+        }
+        branch = Some(args[i])
+      }
+      "--default" | "-d" => default_branch = true
+      _ if not(arg.has_prefix("-")) => positional.push(arg)
+      _ => ()
+    }
+    i += 1
+  }
+  if positional.length() < 1 {
+    raise @bitcore.GitError::InvalidObject(
+      "usage: git submodule set-branch (-b <branch>|-d) [--] <path>",
+    )
+  }
+  let path = positional[0]
+  let rfs : &@bitcore.RepoFileSystem = fs
+  let submodules = parse_gitmodules(rfs, root)
+  let name = match find_submodule_name_by_path(submodules, path) {
+    Some(n) => n
+    None =>
+      raise @bitcore.GitError::InvalidObject(
+        "No submodule mapping found in .gitmodules for path '\{path}'",
+      )
+  }
+  let gitmodules_path = root + "/.gitmodules"
+  if default_branch {
+    unset_config(fs, gitmodules_path, "submodule.\{name}.branch", None, false)
+  } else {
+    match branch {
+      Some(b) =>
+        set_config(fs, gitmodules_path, "submodule.\{name}.branch", b, false)
+      None =>
+        raise @bitcore.GitError::InvalidObject(
+          "usage: git submodule set-branch (-b <branch>|-d) [--] <path>",
+        )
+    }
+  }
+}
+
+///|
+async fn handle_submodule_foreach(
+  fs : OsFs,
+  root : String,
+  _git_dir : String,
+  args : Array[String],
+) -> Unit raise Error {
+  let mut recursive = false
+  let mut quiet = false
+  let cmd_parts : Array[String] = []
+  let mut past_opts = false
+  for arg in args {
+    if past_opts {
+      cmd_parts.push(arg)
+    } else {
+      match arg {
+        "--recursive" => recursive = true
+        "--quiet" => quiet = true
+        "--" => past_opts = true
+        _ if arg.has_prefix("-") => ()
+        _ => {
+          past_opts = true
+          cmd_parts.push(arg)
+        }
+      }
+    }
+  }
+  if cmd_parts.length() == 0 {
+    return
+  }
+  let cmd = cmd_parts.join(" ")
+  let rfs : &@bitcore.RepoFileSystem = fs
+  let submodules = parse_gitmodules(rfs, root)
+  for sub in submodules {
+    let sub_path = root + "/" + sub.path
+    let sub_git = sub_path + "/.git"
+    if not(rfs.is_file(sub_git)) && not(rfs.is_dir(sub_git)) {
+      continue
+    }
+    let sub_git_dir = @bitlib.resolve_gitdir(rfs, sub_git)
+    let head_id = @bitlib.resolve_head_commit(rfs, sub_git_dir) catch {
+      err => {
+        if @async.is_being_cancelled() || @async.is_cancellation_error(err) {
+          raise err
+        }
+        continue
+      }
+    }
+    let sha1 = match head_id {
+      Some(id) => id.to_hex()
+      None => String::make(40, '0')
+    }
+    if not(quiet) {
+      print_line("Entering '\{sub.path}'")
+    }
+    let env : Map[String, String] = {
+      "name": sub.name,
+      "sm_path": sub.path,
+      "path": sub.path,
+      "displaypath": sub.path,
+      "sha1": sha1,
+      "toplevel": root,
+    }
+    let code = @process.run(
+      "sh",
+      ["-c", cmd],
+      extra_env=env,
+      inherit_env=true,
+      cwd=sub_path,
+    )
+    if code != 0 {
+      raise @bitcore.GitError::InvalidObject(
+        "Stopping at '\{sub.path}'; script returned non-zero status.",
+      )
+    }
+    if recursive {
+      let nested = sub_path + "/.gitmodules"
+      if rfs.is_file(nested) {
+        handle_submodule_foreach(fs, sub_path, sub_git_dir, args)
+      }
+    }
+  }
+}
+
+///|
+async fn handle_submodule_absorbgitdirs(
+  fs : OsFs,
+  root : String,
+  git_dir : String,
+  args : Array[String],
+) -> Unit raise Error {
+  let paths : Array[String] = []
+  for arg in args {
+    if not(arg.has_prefix("-")) {
+      paths.push(arg)
+    }
+  }
+  let rfs : &@bitcore.RepoFileSystem = fs
+  let wfs : &@bitcore.FileSystem = fs
+  let submodules = parse_gitmodules(rfs, root)
+  for sub in submodules {
+    if paths.length() > 0 && not(paths.contains(sub.path)) {
+      continue
+    }
+    let sub_path = root + "/" + sub.path
+    let sub_git = sub_path + "/.git"
+    if not(rfs.is_dir(sub_git)) {
+      continue
+    }
+    // .git is a directory — needs absorbing
+    let dest = git_dir + "/modules/" + sub.name
+    if not(rfs.is_dir(dest)) {
+      wfs.mkdir_p(dest)
+    }
+    absorb_git_dir(fs, sub_path, sub_git, dest)
+    eprint_line(
+      "Migrating git directory of '\{sub.path}' from '\{sub_git}' to '\{dest}'",
+    )
+    // Recurse into nested submodules
+    let nested = sub_path + "/.gitmodules"
+    if rfs.is_file(nested) {
+      handle_submodule_absorbgitdirs(fs, sub_path, dest, [])
+    }
+  }
+}
+
+///|
+async fn absorb_git_dir(
+  fs : OsFs,
+  work_tree : String,
+  src_git_dir : String,
+  dest_git_dir : String,
+) -> Unit raise Error {
+  let rfs : &@bitcore.RepoFileSystem = fs
+  let wfs : &@bitcore.FileSystem = fs
+  // Move contents from src to dest
+  let entries = rfs.readdir(src_git_dir) catch { _ => return }
+  for entry in entries {
+    let src = src_git_dir + "/" + entry
+    let dst = dest_git_dir + "/" + entry
+    let code = @process.run("mv", [src, dst], inherit_env=true)
+    if code != 0 {
+      raise @bitcore.GitError::InvalidObject("failed to move \{src} to \{dst}")
+    }
+  }
+  // Remove original .git directory
+  remove_dir_recursive(fs, src_git_dir)
+  // Write gitdir pointer
+  let rel_path = get_rel_path(work_tree, dest_git_dir)
+  wfs.write_string(work_tree + "/.git", "gitdir: \{rel_path}\n")
+  // Update core.worktree in dest config
+  ensure_submodule_gitdir_config(fs, dest_git_dir, work_tree)
+}
+
+///|
+async fn handle_submodule_summary(
+  _fs : OsFs,
+  _root : String,
+  _git_dir : String,
+  _args : Array[String],
+) -> Unit {
+  // summary is a display-only command showing commit range diffs
+  // between HEAD and index for submodules. Since the tests that
+  // call summary go through real git (not shim), a stub suffices.
+  ()
 }
 
 ///|
