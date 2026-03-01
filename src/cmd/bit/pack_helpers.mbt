@@ -274,6 +274,15 @@ fn is_pack_reuse_config_enabled(git_dir : String) -> Bool {
 }
 
 ///|
+/// Get pack.useSparse from git config (default: true, matching git)
+fn get_pack_use_sparse(git_dir : String) -> Bool {
+  match bit_config_get(git_dir, "pack", "useSparse") {
+    Some(value) => parse_bool_value(value).unwrap_or(true)
+    None => true
+  }
+}
+
+///|
 /// Get pack.packSizeLimit from git config
 fn get_pack_size_limit(git_dir : String) -> Int64? {
   match bit_config_get(git_dir, "pack", "packSizeLimit") {

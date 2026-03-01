@@ -29,6 +29,7 @@ priv struct PackObjectsConfig {
   cruft : Bool
   cruft_expiration : String?
   max_cruft_size : Int64?
+  sparse_mode : Bool? // None=config default, Some(true)=--sparse, Some(false)=--no-sparse
 }
 
 ///|
@@ -82,6 +83,7 @@ fn parse_pack_objects_args(args : Array[String]) -> PackObjectsParse {
   let mut cruft = false
   let mut cruft_expiration : String? = None
   let mut max_cruft_size : Int64? = None
+  let mut sparse_mode : Bool? = None
   let mut i = 0
   let mut in_opts = true
   let mut extra_args = 0
@@ -104,8 +106,8 @@ fn parse_pack_objects_args(args : Array[String]) -> PackObjectsParse {
         "--unpacked" => unpacked = true
         "--path-walk" => path_walk = true
         "--no-path-walk" => ()
-        "--sparse" => () // sparse is always enabled (same algorithm as non-sparse)
-        "--no-sparse" => ()
+        "--sparse" => sparse_mode = Some(true)
+        "--no-sparse" => sparse_mode = Some(false)
         "--non-empty" => has_unsupported_options = true
         "--reflog" => has_unsupported_options = true
         "--indexed-objects" => has_unsupported_options = true
@@ -397,6 +399,7 @@ fn parse_pack_objects_args(args : Array[String]) -> PackObjectsParse {
     cruft,
     cruft_expiration,
     max_cruft_size,
+    sparse_mode,
   })
 }
 
@@ -1825,6 +1828,345 @@ fn collect_blob_object_allow_missing(
 }
 
 ///|
+/// 2-phase sparse pack-objects algorithm (matches git's sparse behavior).
+///
+/// Phase 1: mark_trees_uninteresting_sparse - recursively marks UNINTERESTING
+/// trees/blobs by path-name grouping, with early exit when only one side exists.
+///
+/// Phase 2: collect objects from interesting commits, skipping UNINTERESTING
+/// subtrees entirely (producing a superset compared to non-sparse).
+fn collect_objects_sparse_algorithm(
+  db : @bitlib.ObjectDb,
+  fs : OsFs,
+  include_commits : Array[@bitcore.ObjectId],
+  exclude_commits : Array[@bitcore.ObjectId],
+  allow_missing_for_local : Bool,
+) -> Array[@bitcore.PackObject] {
+  // Step 1: Collect all exclude-side commit IDs via BFS
+  let exclude_set : Map[String, Bool] = {}
+  collect_exclude_commit_ids(db, fs, exclude_commits, exclude_set)
+  // Step 2: Walk include commits to find interesting and boundary commits
+  let interesting_commits : Array[@bitcore.ObjectId] = []
+  let boundary_tree_ids : Array[@bitcore.ObjectId] = []
+  let interesting_tree_ids : Array[@bitcore.ObjectId] = []
+  let commit_seen : Map[String, Bool] = {}
+  find_interesting_and_boundary_commits(
+    db, fs, include_commits, exclude_set, commit_seen, interesting_commits, interesting_tree_ids,
+    boundary_tree_ids,
+  )
+  // Step 3: Phase 1 - sparse UNINTERESTING marking
+  // Build initial tree OID set with their interesting/uninteresting status
+  let uninteresting : Map[String, Bool] = {}
+  for tid in boundary_tree_ids {
+    uninteresting[tid.to_hex()] = true
+  }
+  // Collect all root tree OIDs for the sparse marking pass
+  let root_tree_oids : Array[String] = []
+  let root_tree_set : Map[String, Bool] = {}
+  for tid in interesting_tree_ids {
+    let hex = tid.to_hex()
+    if !root_tree_set.contains(hex) {
+      root_tree_set[hex] = true
+      root_tree_oids.push(hex)
+    }
+  }
+  for tid in boundary_tree_ids {
+    let hex = tid.to_hex()
+    if !root_tree_set.contains(hex) {
+      root_tree_set[hex] = true
+      root_tree_oids.push(hex)
+    }
+  }
+  mark_trees_uninteresting_sparse(db, fs, root_tree_oids, uninteresting)
+  // Step 4: Phase 2 - collect objects skipping UNINTERESTING subtrees
+  let seen : Map[String, Bool] = {}
+  let out : Array[@bitcore.PackObject] = []
+  // Add commit objects
+  for commit_id in interesting_commits {
+    let hex = commit_id.to_hex()
+    if seen.contains(hex) {
+      continue
+    }
+    seen[hex] = true
+    let obj = try db.get(fs, commit_id) catch {
+      _ => None
+    } noraise {
+      value => value
+    }
+    match obj {
+      Some(o) if o.obj_type == @bitcore.ObjectType::Commit => out.push(o)
+      _ => ()
+    }
+  }
+  // Collect tree/blob objects from interesting commits' trees
+  for tid in interesting_tree_ids {
+    collect_tree_skip_uninteresting(
+      db, fs, tid, uninteresting, seen, out, allow_missing_for_local,
+    )
+  }
+  out
+}
+
+///|
+/// BFS to collect all commit IDs reachable from exclude roots.
+fn collect_exclude_commit_ids(
+  db : @bitlib.ObjectDb,
+  fs : OsFs,
+  exclude_commits : Array[@bitcore.ObjectId],
+  exclude_set : Map[String, Bool],
+) -> Unit {
+  let queue : Array[@bitcore.ObjectId] = []
+  for id in exclude_commits {
+    let hex = id.to_hex()
+    if !exclude_set.contains(hex) {
+      exclude_set[hex] = true
+      queue.push(id)
+    }
+  }
+  let mut qi = 0
+  while qi < queue.length() {
+    let cid = queue[qi]
+    qi += 1
+    let obj = try db.get(fs, cid) catch {
+      _ => None
+    } noraise {
+      value => value
+    }
+    match obj {
+      Some(o) if o.obj_type == @bitcore.ObjectType::Commit => {
+        let info = @bitcore.parse_commit(o.data) catch { _ => continue }
+        for parent in info.parents {
+          let phex = parent.to_hex()
+          if !exclude_set.contains(phex) {
+            exclude_set[phex] = true
+            queue.push(parent)
+          }
+        }
+      }
+      _ => ()
+    }
+  }
+}
+
+///|
+/// Walk include commits to classify as interesting or boundary.
+/// Interesting: commits reachable only from include side (not in exclude_set).
+/// Boundary: first commit on include path that IS in exclude_set (its tree is UNINTERESTING).
+fn find_interesting_and_boundary_commits(
+  db : @bitlib.ObjectDb,
+  fs : OsFs,
+  include_commits : Array[@bitcore.ObjectId],
+  exclude_set : Map[String, Bool],
+  commit_seen : Map[String, Bool],
+  interesting_commits : Array[@bitcore.ObjectId],
+  interesting_tree_ids : Array[@bitcore.ObjectId],
+  boundary_tree_ids : Array[@bitcore.ObjectId],
+) -> Unit {
+  let queue : Array[@bitcore.ObjectId] = []
+  for id in include_commits {
+    let hex = id.to_hex()
+    if !commit_seen.contains(hex) {
+      commit_seen[hex] = true
+      queue.push(id)
+    }
+  }
+  let mut qi = 0
+  while qi < queue.length() {
+    let cid = queue[qi]
+    qi += 1
+    let hex = cid.to_hex()
+    let obj = try db.get(fs, cid) catch {
+      _ => None
+    } noraise {
+      value => value
+    }
+    match obj {
+      Some(o) if o.obj_type == @bitcore.ObjectType::Commit => {
+        let info = @bitcore.parse_commit(o.data) catch { _ => continue }
+        if exclude_set.contains(hex) {
+          // Boundary commit: its tree is UNINTERESTING
+          boundary_tree_ids.push(info.tree)
+          // Don't recurse further
+        } else {
+          // Interesting commit
+          interesting_commits.push(cid)
+          interesting_tree_ids.push(info.tree)
+          // Check parents
+          for parent in info.parents {
+            let phex = parent.to_hex()
+            if !commit_seen.contains(phex) {
+              commit_seen[phex] = true
+              queue.push(parent)
+            }
+          }
+        }
+      }
+      _ => ()
+    }
+  }
+}
+
+///|
+/// Phase 1: Recursively mark UNINTERESTING trees by path-name grouping.
+/// This is the core of git's sparse optimization.
+///
+/// For each set of tree OIDs at the same path level:
+/// 1. Check if both interesting AND uninteresting trees exist
+/// 2. If only one side -> early return (the sparse optimization point)
+/// 3. If both -> parse trees, group children by name, propagate UNINTERESTING, recurse
+fn mark_trees_uninteresting_sparse(
+  db : @bitlib.ObjectDb,
+  fs : OsFs,
+  tree_oids : Array[String],
+  uninteresting : Map[String, Bool],
+) -> Unit {
+  // Check if we have both interesting and uninteresting trees
+  let mut has_interesting = false
+  let mut has_uninteresting = false
+  for oid in tree_oids {
+    if has_interesting && has_uninteresting {
+      break
+    }
+    if uninteresting.contains(oid) {
+      has_uninteresting = true
+    } else {
+      has_interesting = true
+    }
+  }
+  // Early return if only one side exists (git's sparse optimization)
+  if !has_interesting || !has_uninteresting {
+    return
+  }
+  // Group children by path name across all trees
+  // path_groups: Map[name, Array[child_tree_oid_hex]]
+  let path_groups : Map[String, Array[String]] = {}
+  for oid in tree_oids {
+    let is_uninteresting = uninteresting.contains(oid)
+    let obj_id = @bitcore.ObjectId::from_hex(oid) catch { _ => continue }
+    let obj = try db.get(fs, obj_id) catch {
+      _ => None
+    } noraise {
+      value => value
+    }
+    match obj {
+      Some(o) if o.obj_type == @bitcore.ObjectType::Tree => {
+        let entries = @bitcore.parse_tree(o.data) catch { _ => continue }
+        for entry in entries {
+          if entry.mode.has_prefix("40") {
+            // Tree entry
+            let child_hex = entry.id.to_hex()
+            if is_uninteresting {
+              // Propagate UNINTERESTING to child tree
+              uninteresting[child_hex] = true
+            }
+            if path_groups.contains(entry.name) {
+              path_groups[entry.name].push(child_hex)
+            } else {
+              path_groups[entry.name] = [child_hex]
+            }
+            // Blob entry: if parent is UNINTERESTING, mark blob
+          } else if is_uninteresting {
+            uninteresting[entry.id.to_hex()] = true
+          }
+        }
+      }
+      _ => ()
+    }
+  }
+  // Recurse into each path group
+  for _name, child_oids in path_groups {
+    mark_trees_uninteresting_sparse(db, fs, child_oids, uninteresting)
+  }
+}
+
+///|
+/// Phase 2: Collect tree objects, skipping UNINTERESTING subtrees entirely.
+fn collect_tree_skip_uninteresting(
+  db : @bitlib.ObjectDb,
+  fs : OsFs,
+  tree_id : @bitcore.ObjectId,
+  uninteresting : Map[String, Bool],
+  seen : Map[String, Bool],
+  out : Array[@bitcore.PackObject],
+  allow_missing : Bool,
+) -> Unit {
+  let hex = tree_id.to_hex()
+  // Skip entire subtree if UNINTERESTING
+  if uninteresting.contains(hex) {
+    return
+  }
+  if seen.contains(hex) {
+    return
+  }
+  seen[hex] = true
+  let obj = try db.get(fs, tree_id) catch {
+    _ => None
+  } noraise {
+    value => value
+  }
+  match obj {
+    Some(o) if o.obj_type == @bitcore.ObjectType::Tree => {
+      out.push(o)
+      let entries = @bitcore.parse_tree(o.data) catch { _ => return () }
+      for entry in entries {
+        if entry.mode.has_prefix("40") {
+          collect_tree_skip_uninteresting(
+            db,
+            fs,
+            entry.id,
+            uninteresting,
+            seen,
+            out,
+            allow_missing,
+          )
+        } else {
+          collect_blob_skip_uninteresting(
+            db,
+            fs,
+            entry.id,
+            uninteresting,
+            seen,
+            out,
+            allow_missing,
+          )
+        }
+      }
+    }
+    _ => ()
+  }
+}
+
+///|
+/// Phase 2 helper: Collect blob if not UNINTERESTING.
+fn collect_blob_skip_uninteresting(
+  db : @bitlib.ObjectDb,
+  fs : OsFs,
+  blob_id : @bitcore.ObjectId,
+  uninteresting : Map[String, Bool],
+  seen : Map[String, Bool],
+  out : Array[@bitcore.PackObject],
+  _allow_missing : Bool,
+) -> Unit {
+  let hex = blob_id.to_hex()
+  if uninteresting.contains(hex) {
+    return
+  }
+  if seen.contains(hex) {
+    return
+  }
+  seen[hex] = true
+  try db.get(fs, blob_id) catch {
+    _ => ()
+  } noraise {
+    value =>
+      match value {
+        Some(o) if o.obj_type == @bitcore.ObjectType::Blob => out.push(o)
+        _ => ()
+      }
+  }
+}
+
+///|
 async fn collect_objects_from_stdin_packs(
   fs : OsFs,
   git_dir : String,
@@ -2339,42 +2681,60 @@ async fn handle_pack_objects(args : Array[String]) -> Unit raise Error {
           cfg.honor_pack_keep ||
           cfg.incremental ||
           cfg.unpacked
-        let include_objects = if allow_missing_for_local {
-          let blocked : Map[String, Bool] = {}
-          collect_reachable_objects_from_commits_allow_missing(
-            db, fs, include_commits, blocked,
-          )
-        } else {
-          @bitlib.collect_reachable_objects_from_commits(
-            db, fs, include_commits,
-          ) catch {
-            err if @async.is_cancellation_error(err) => raise err
-            err => {
-              report_collect_error(err)
-              []
+        // Determine if sparse algorithm should be used
+        let use_sparse = match cfg.sparse_mode {
+          Some(v) => v
+          None =>
+            match @sys.get_env_var("GIT_TEST_PACK_SPARSE") {
+              Some(val) =>
+                parse_bool_value(val).unwrap_or(get_pack_use_sparse(git_dir))
+              None => get_pack_use_sparse(git_dir)
             }
-          }
         }
-        if exclude_commits.length() == 0 {
-          objects = include_objects
-        } else {
-          let blocked : Map[String, Bool] = {}
-          let exclude_objects = collect_reachable_objects_from_commits_allow_missing(
-            db, fs, exclude_commits, blocked,
+        if use_sparse && exclude_commits.length() > 0 {
+          // 2-phase sparse algorithm: produces superset output
+          objects = collect_objects_sparse_algorithm(
+            db, fs, include_commits, exclude_commits, allow_missing_for_local,
           )
-          let exclude_set : Map[String, Bool] = {}
-          for obj in exclude_objects {
-            let id = @bitcore.hash_object_content(obj.obj_type, obj.data)
-            exclude_set[id.to_hex()] = true
-          }
-          let filtered : Array[@bitcore.PackObject] = []
-          for obj in include_objects {
-            let id = @bitcore.hash_object_content(obj.obj_type, obj.data)
-            if !exclude_set.contains(id.to_hex()) {
-              filtered.push(obj)
+        } else {
+          // Non-sparse path (original behavior)
+          let include_objects = if allow_missing_for_local {
+            let blocked : Map[String, Bool] = {}
+            collect_reachable_objects_from_commits_allow_missing(
+              db, fs, include_commits, blocked,
+            )
+          } else {
+            @bitlib.collect_reachable_objects_from_commits(
+              db, fs, include_commits,
+            ) catch {
+              err if @async.is_cancellation_error(err) => raise err
+              err => {
+                report_collect_error(err)
+                []
+              }
             }
           }
-          objects = filtered
+          if exclude_commits.length() == 0 {
+            objects = include_objects
+          } else {
+            let blocked : Map[String, Bool] = {}
+            let exclude_objects = collect_reachable_objects_from_commits_allow_missing(
+              db, fs, exclude_commits, blocked,
+            )
+            let exclude_set : Map[String, Bool] = {}
+            for obj in exclude_objects {
+              let id = @bitcore.hash_object_content(obj.obj_type, obj.data)
+              exclude_set[id.to_hex()] = true
+            }
+            let filtered : Array[@bitcore.PackObject] = []
+            for obj in include_objects {
+              let id = @bitcore.hash_object_content(obj.obj_type, obj.data)
+              if !exclude_set.contains(id.to_hex()) {
+                filtered.push(obj)
+              }
+            }
+            objects = filtered
+          }
         }
         if explicit_tags.length() > 0 {
           objects.append(explicit_tags)
