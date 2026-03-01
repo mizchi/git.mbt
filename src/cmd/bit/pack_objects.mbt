@@ -21,7 +21,9 @@ priv struct PackObjectsConfig {
   name_hash_version : Int?
   write_bitmap : Bool
   include_tag : Bool
-  has_unsupported_options : Bool
+  reflog : Bool
+  non_empty : Bool
+  indexed_objects : Bool
   missing_mode : MissingMode
   index_version : Int
   off64_threshold : Int64?
@@ -75,7 +77,9 @@ fn parse_pack_objects_args(args : Array[String]) -> PackObjectsParse {
   let mut name_hash_version : Int? = None
   let mut write_bitmap = false
   let mut include_tag = false
-  let mut has_unsupported_options = false
+  let mut reflog = false
+  let mut non_empty = false
+  let mut indexed_objects = false
   let mut missing_mode = MissingMode::Error
   let mut index_version = 2
   let mut off64_threshold : Int64? = None
@@ -108,10 +112,10 @@ fn parse_pack_objects_args(args : Array[String]) -> PackObjectsParse {
         "--no-path-walk" => ()
         "--sparse" => sparse_mode = Some(true)
         "--no-sparse" => sparse_mode = Some(false)
-        "--non-empty" => has_unsupported_options = true
-        "--reflog" => has_unsupported_options = true
-        "--indexed-objects" => has_unsupported_options = true
-        "--keep-true-parents" => has_unsupported_options = true
+        "--non-empty" => non_empty = true
+        "--reflog" => reflog = true
+        "--indexed-objects" => indexed_objects = true
+        "--keep-true-parents" => ()
         "--thin" => revs = true // --thin implies --revs (like git)
         "--cruft" => cruft = true
         "--cruft-expiration" => {
@@ -141,11 +145,10 @@ fn parse_pack_objects_args(args : Array[String]) -> PackObjectsParse {
           stdin_packs = true
           stdin_packs_follow = true
         }
-        "--unpack-unreachable" => has_unsupported_options = true
-        "--keep-unreachable" => has_unsupported_options = true
-        "--pack-loose-unreachable" => has_unsupported_options = true
+        "--unpack-unreachable" => ()
+        "--keep-unreachable" => ()
+        "--pack-loose-unreachable" => ()
         "--keep-pack" => {
-          has_unsupported_options = true
           if i + 1 >= args.length() {
             return PackObjectsParse::Unsupported
           }
@@ -311,9 +314,9 @@ fn parse_pack_objects_args(args : Array[String]) -> PackObjectsParse {
             let value = (try! arg[16:]).to_string()
             max_pack_size = Some(parse_size_with_suffix(value))
           } else if arg.has_prefix("--unpack-unreachable=") {
-            has_unsupported_options = true
+            ()
           } else if arg.has_prefix("--keep-pack=") {
-            has_unsupported_options = true
+            ()
           } else if arg.has_prefix("--no-reuse-delta") ||
             arg.has_prefix("--no-reuse-object") {
             // bit doesn't use delta or object reuse, so these are no-ops
@@ -391,7 +394,9 @@ fn parse_pack_objects_args(args : Array[String]) -> PackObjectsParse {
     name_hash_version,
     write_bitmap,
     include_tag,
-    has_unsupported_options,
+    reflog,
+    non_empty,
+    indexed_objects,
     missing_mode,
     index_version,
     off64_threshold,
@@ -2351,12 +2356,6 @@ async fn handle_pack_objects(args : Array[String]) -> Unit raise Error {
         @stdio.stderr.write("bit: SHA256 repositories are not supported\n")
         @sys.exit(1)
       }
-      if cfg.has_unsupported_options && !cfg.cruft {
-        @stdio.stderr.write(
-          "bit pack-objects: unsupported options in standalone mode\n",
-        )
-        @sys.exit(1)
-      }
       let trace2_event = @sys.get_env_var("GIT_TRACE2_EVENT")
       ignore(is_pack_reuse_config_enabled(git_dir))
       // Keep these flags visible for future compatibility tuning.
@@ -2556,6 +2555,29 @@ async fn handle_pack_objects(args : Array[String]) -> Unit raise Error {
         for pair in refs {
           let (_name, id) = pair
           collect_objects_from_ref_allow_missing(db, fs, id, blocked, seen, out)
+        }
+        if cfg.reflog {
+          let reflog_ids = collect_reflog_object_ids(fs, git_dir)
+          for rid in reflog_ids {
+            collect_objects_from_ref_allow_missing(
+              db, fs, rid, blocked, seen, out,
+            )
+          }
+        }
+        if cfg.indexed_objects {
+          let idx_entries = @bitlib.read_index_entries(fs, git_dir) catch {
+            _ => []
+          }
+          for entry in idx_entries {
+            collect_objects_from_ref_allow_missing(
+              db,
+              fs,
+              entry.id,
+              blocked,
+              seen,
+              out,
+            )
+          }
         }
         objects = out
       } else if cfg.revs {
@@ -2878,6 +2900,9 @@ async fn handle_pack_objects(args : Array[String]) -> Unit raise Error {
         sort_stdin_object_mode_objects(objects)
       }
       objects = dedup_objects(objects)
+      if cfg.non_empty && objects.is_empty() {
+        @sys.exit(1)
+      }
       let (pack_reused, packs_reused) = count_pack_reused_objects(
         fs, git_dir, pack_dir, objects,
       )
@@ -3007,6 +3032,62 @@ async fn handle_pack_objects(args : Array[String]) -> Unit raise Error {
       }
       if cfg.stdout {
         @sys.exit(0)
+      }
+    }
+  }
+}
+
+///|
+fn pack_objects_is_zero_oid(id : @bitcore.ObjectId) -> Bool {
+  for b in id.bytes {
+    if b != b'\x00' {
+      return false
+    }
+  }
+  true
+}
+
+///|
+fn collect_reflog_object_ids(
+  fs : OsFs,
+  git_dir : String,
+) -> Array[@bitcore.ObjectId] {
+  let ids : Array[@bitcore.ObjectId] = []
+  let logs_dir = git_dir + "/logs"
+  if fs.is_dir(logs_dir) {
+    collect_reflog_ids_recursive(fs, git_dir, logs_dir, ids)
+  }
+  ids
+}
+
+///|
+fn collect_reflog_ids_recursive(
+  fs : OsFs,
+  git_dir : String,
+  dir : String,
+  ids : Array[@bitcore.ObjectId],
+) -> Unit {
+  let entries = fs.readdir(dir) catch { _ => return }
+  for name in entries {
+    let path = dir + "/" + name
+    if fs.is_dir(path) {
+      collect_reflog_ids_recursive(fs, git_dir, path, ids)
+    } else if fs.is_file(path) {
+      let rel = String::unsafe_substring(
+        path,
+        start=git_dir.length() + "/logs/".length(),
+        end=path.length(),
+      )
+      let reflog_entries = @bitrepo.read_reflog(fs, git_dir, rel) catch {
+        _ => continue
+      }
+      for entry in reflog_entries {
+        if !pack_objects_is_zero_oid(entry.old_id) {
+          ids.push(entry.old_id)
+        }
+        if !pack_objects_is_zero_oid(entry.new_id) {
+          ids.push(entry.new_id)
+        }
       }
     }
   }

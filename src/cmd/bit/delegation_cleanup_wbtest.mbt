@@ -1,9 +1,14 @@
 ///|
-test "pack-objects parser tracks unsupported options without delegation naming" {
-  match parse_pack_objects_args(["--stdout", "--non-empty"]) {
+test "pack-objects parser tracks repack flags" {
+  match
+    parse_pack_objects_args([
+      "--stdout", "--non-empty", "--reflog", "--indexed-objects",
+    ]) {
     PackObjectsParse::Ok(cfg) => {
       assert_true(cfg.stdout)
-      assert_true(cfg.has_unsupported_options)
+      assert_true(cfg.non_empty)
+      assert_true(cfg.reflog)
+      assert_true(cfg.indexed_objects)
     }
     _ => fail("expected pack-objects parse ok")
   }
