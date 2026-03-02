@@ -1,13 +1,13 @@
 diff --git i/t/t7700-repack.sh w/t/t7700-repack.sh
-index 73b78bdd88..05ace5dd66 100755
+index 73b78bdd88..443304a0d6 100755
 --- i/t/t7700-repack.sh
 +++ w/t/t7700-repack.sh
 @@ -10,6 +10,13 @@ test_description='git repack works correctly'
  GIT_TEST_MULTI_PACK_INDEX=0
  GIT_TEST_MULTI_PACK_INDEX_WRITE_INCREMENTAL=0
- 
-+# bit pack-objects accepts --unpack-unreachable and --filter as no-ops,
-+# so repack tests that depend on their semantics are skipped under shim.
+
++# bit pack-objects accepts --filter as a no-op,
++# so repack tests that depend on --filter semantics are skipped under shim.
 +shim_cmds="${SHIM_CMDS:-${GIT_SHIM_CMDS:-}}"
 +case " $shim_cmds " in
 +*" pack-objects "*) test_set_prereq BIT_PACK_OBJECTS ;;
@@ -16,28 +16,10 @@ index 73b78bdd88..05ace5dd66 100755
  commit_and_pack () {
  	test_commit "$@" 1>&2 &&
  	incrpackid=$(git pack-objects --all --unpacked --incremental .git/objects/pack/pack </dev/null) &&
-@@ -163,7 +170,7 @@ test_expect_success 'packed obs in alternate ODB kept pack are repacked' '
- 	test_no_missing_in_packs
- '
- 
--test_expect_success 'packed unreachable obs in alternate ODB are not loosened' '
-+test_expect_success !BIT_PACK_OBJECTS 'packed unreachable obs in alternate ODB are not loosened' '
- 	rm -f alt_objects/pack/*.keep &&
- 	mv .git/objects/pack/* alt_objects/pack/ &&
- 	coid=$(git rev-parse HEAD^{commit}) &&
-@@ -182,7 +189,7 @@ test_expect_success 'packed unreachable obs in alternate ODB are not loosened' '
- 	test_must_fail git show $coid
- '
- 
--test_expect_success 'local packed unreachable obs that exist in alternate ODB are not loosened' '
-+test_expect_success !BIT_PACK_OBJECTS 'local packed unreachable obs that exist in alternate ODB are not loosened' '
- 	echo $(pwd)/alt_objects >.git/objects/info/alternates &&
- 	echo "$coid" | git pack-objects --non-empty --all --reflog pack &&
- 	rm -f .git/objects/pack/* &&
 @@ -331,7 +338,7 @@ test_expect_success 'auto-bitmaps do not complain if unavailable' '
  	test_must_be_empty actual
  '
- 
+
 -test_expect_success 'repacking with a filter works' '
 +test_expect_success !BIT_PACK_OBJECTS 'repacking with a filter works' '
  	git -C bare.git repack -a -d &&
@@ -46,9 +28,9 @@ index 73b78bdd88..05ace5dd66 100755
 @@ -464,7 +471,7 @@ test_expect_success '--filter works with --pack-kept-objects and .keep packs' '
  	)
  '
- 
+
 -test_expect_success '--filter-to stores filtered out objects' '
 +test_expect_success !BIT_PACK_OBJECTS '--filter-to stores filtered out objects' '
  	git -C bare.git repack -a -d &&
  	test_stdout_line_count = 1 ls bare.git/objects/pack/*.pack &&
- 
+

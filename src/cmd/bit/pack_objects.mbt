@@ -32,6 +32,8 @@ priv struct PackObjectsConfig {
   cruft_expiration : String?
   max_cruft_size : Int64?
   sparse_mode : Bool? // None=config default, Some(true)=--sparse, Some(false)=--no-sparse
+  unpack_unreachable : Bool
+  unpack_unreachable_expiration : Int64 // 0 = loosen all unreachable
 }
 
 ///|
@@ -88,6 +90,8 @@ fn parse_pack_objects_args(args : Array[String]) -> PackObjectsParse {
   let mut cruft_expiration : String? = None
   let mut max_cruft_size : Int64? = None
   let mut sparse_mode : Bool? = None
+  let mut unpack_unreachable = false
+  let mut unpack_unreachable_expiration = 0L
   let mut i = 0
   let mut in_opts = true
   let mut extra_args = 0
@@ -145,7 +149,7 @@ fn parse_pack_objects_args(args : Array[String]) -> PackObjectsParse {
           stdin_packs = true
           stdin_packs_follow = true
         }
-        "--unpack-unreachable" => ()
+        "--unpack-unreachable" => unpack_unreachable = true
         "--keep-unreachable" => ()
         "--pack-loose-unreachable" => ()
         "--keep-pack" => {
@@ -314,7 +318,9 @@ fn parse_pack_objects_args(args : Array[String]) -> PackObjectsParse {
             let value = (try! arg[16:]).to_string()
             max_pack_size = Some(parse_size_with_suffix(value))
           } else if arg.has_prefix("--unpack-unreachable=") {
-            ()
+            let value = (try! arg[21:]).to_string()
+            unpack_unreachable = true
+            unpack_unreachable_expiration = parse_approxidate(value)
           } else if arg.has_prefix("--keep-pack=") {
             ()
           } else if arg.has_prefix("--no-reuse-delta") ||
@@ -405,6 +411,8 @@ fn parse_pack_objects_args(args : Array[String]) -> PackObjectsParse {
     cruft_expiration,
     max_cruft_size,
     sparse_mode,
+    unpack_unreachable,
+    unpack_unreachable_expiration,
   })
 }
 
@@ -3033,6 +3041,13 @@ async fn handle_pack_objects(args : Array[String]) -> Unit raise Error {
       if cfg.stdout {
         @sys.exit(0)
       }
+      if cfg.unpack_unreachable {
+        let new_pack_ids : Map[String, Bool] = {}
+        for obj in objects {
+          new_pack_ids[obj.id.to_hex()] = true
+        }
+        loosen_unused_packed_objects(fs, git_dir, db, new_pack_ids, cfg)
+      }
     }
   }
 }
@@ -3088,6 +3103,99 @@ fn collect_reflog_ids_recursive(
         if !pack_objects_is_zero_oid(entry.new_id) {
           ids.push(entry.new_id)
         }
+      }
+    }
+  }
+}
+
+///|
+/// Loosen unreachable packed objects that are not in the new pack,
+/// not in .keep packs, and not in alternate ODBs.
+/// This implements the `--unpack-unreachable` semantics from git pack-objects.
+fn loosen_unused_packed_objects(
+  fs : OsFs,
+  git_dir : String,
+  db : @bitlib.ObjectDb,
+  packed_ids : Map[String, Bool],
+  cfg : PackObjectsConfig,
+) -> Unit {
+  let pack_dir = git_dir + "/objects/pack"
+  // Collect IDs from .keep packs — these stay packed, never loosen
+  let skip_ids : Map[String, Bool] = collect_pack_ids_from_marker(
+    fs, pack_dir, ".keep",
+  )
+  // Collect IDs from alternate ODB packs — non-local, never loosen
+  let alt_dirs = read_alternate_object_dirs(fs, git_dir)
+  for alt_dir in alt_dirs {
+    let alt_pack_dir = alt_dir + "/pack"
+    let alt_ids = collect_pack_ids_from_dir(fs, alt_pack_dir)
+    for id, _ in alt_ids {
+      skip_ids[id] = true
+    }
+  }
+  // Walk each local non-.keep pack and loosen objects not in new pack or skip set
+  if !fs.is_dir(pack_dir) {
+    return
+  }
+  let entries = fs.readdir(pack_dir) catch { _ => return }
+  // Build a set of .keep pack base names to skip
+  let keep_bases : Map[String, Bool] = {}
+  for entry in entries {
+    let name = normalize_dir_entry(entry)
+    if name.has_suffix(".keep") {
+      let base = (try! name[:name.length() - 5]).to_string()
+      keep_bases[base] = true
+    }
+  }
+  for entry in entries {
+    let name = normalize_dir_entry(entry)
+    if not(name.has_suffix(".idx")) {
+      continue
+    }
+    // Check if this pack has a .keep file
+    let base = (try! name[:name.length() - 4]).to_string()
+    if keep_bases.contains(base + ".keep") {
+      continue
+    }
+    let idx_path = pack_dir + "/" + name
+    if not(fs.is_file(idx_path)) {
+      continue
+    }
+    let ids = collect_pack_index_ids(fs, idx_path)
+    for hex in ids {
+      // Already in the new pack
+      if packed_ids.contains(hex) {
+        continue
+      }
+      // In a .keep or alternate pack
+      if skip_ids.contains(hex) {
+        continue
+      }
+      // expiration check: if set, objects older than expiration are discarded
+      // (not loosened). For expiration=0 (no date), always loosen.
+      if cfg.unpack_unreachable_expiration > 0L {
+        // With expiration date, skip loosening (discard) — mtime check
+        // would go here for full --unpack-unreachable=<date> support
+        continue
+      }
+      // Check if already exists as a loose object
+      let prefix = String::unsafe_substring(hex, start=0, end=2)
+      let suffix = String::unsafe_substring(hex, start=2, end=hex.length())
+      let loose_path = git_dir + "/objects/" + prefix + "/" + suffix
+      if fs.is_file(loose_path) {
+        continue
+      }
+      // Read from pack, compress, and write as loose object
+      let id = @bitcore.ObjectId::from_hex(hex) catch { _ => continue }
+      let obj = db.get(fs, id) catch { _ => continue }
+      match obj {
+        Some(obj) => {
+          let (_, compressed) = @bitcore.create_object(obj.obj_type, obj.data)
+          @bitlib.write_object_bytes(fs, git_dir, obj.id, compressed) catch {
+            _ => ()
+          }
+        }
+        None => ()
       }
     }
   }
