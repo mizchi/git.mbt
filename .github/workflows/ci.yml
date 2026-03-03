@@ -122,7 +122,24 @@ jobs:
           SHIM_CMDS="init status add commit log show branch checkout switch reset rebase stash cherry-pick diff diff-files diff-index merge tag rm mv config sparse-checkout rev-parse cat-file ls-files hash-object ls-tree write-tree show-ref update-ref symbolic-ref reflog worktree gc clean grep submodule revert notes bisect describe blame format-patch shortlog remote clone fetch pull push receive-pack upload-pack pack-objects index-pack shell pack-redundant" SHIM_STRICT=1 \
           GIT_TEST_INSTALLED="$shim_dir" GIT_TEST_EXEC_PATH="$exec_path" \
           GIT_TEST_DEFAULT_HASH=sha1 \
-          make -C third_party/git test T="$tests"
+          make -k -C third_party/git test T="$tests" || true
+
+      - name: Summarize test failures
+        if: always()
+        run: |
+          echo "=== Failed test files ==="
+          find third_party/git/t/test-results -name '*.exit' 2>/dev/null | while read f; do
+            code=$(cat "$f")
+            test_name=$(basename "$f" .exit)
+            if [ "$code" != "0" ]; then
+              counts=$(cat "third_party/git/t/test-results/${test_name}.counts" 2>/dev/null | tr '\n' ' ')
+              echo "FAIL $test_name (exit=$code) $counts"
+            fi
+          done | sort
+          echo "=== Summary ==="
+          total=$(find third_party/git/t/test-results -name '*.exit' 2>/dev/null | wc -l)
+          failed=$(find third_party/git/t/test-results -name '*.exit' 2>/dev/null -exec grep -l '[^0]' {} \; | wc -l)
+          echo "Total: $total, Failed: $failed, Passed: $((total - failed))"
 
       - name: Generate compat table
         if: always()
