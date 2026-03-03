@@ -128,18 +128,20 @@ jobs:
           failed=0
           timing_log="test-timing-shard-${{ matrix.shard }}.tsv"
           echo "# test	seconds" > "$timing_log"
+          cd third_party/git/t
           for t in $tests; do
             t_start=$SECONDS
-            if make -C third_party/git test T="$t" 2>&1 | tail -5; then
+            if bash "./$t" 2>&1 | tail -5; then
               passed=$((passed + 1))
             else
               failed=$((failed + 1))
               failed_tests="$failed_tests $t"
             fi
             elapsed=$((SECONDS - t_start))
-            echo "$t	$elapsed" >> "$timing_log"
+            echo "$t	$elapsed" >> "$GITHUB_WORKSPACE/$timing_log"
             echo "::timing::$t	${elapsed}s"
           done
+          cd "$GITHUB_WORKSPACE"
           echo "=== Summary ==="
           echo "Passed: $passed, Failed: $failed"
           echo "=== Per-test timing ==="

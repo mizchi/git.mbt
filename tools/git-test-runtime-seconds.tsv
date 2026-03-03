@@ -1,9 +1,9 @@
 # Estimated per-script runtime weights (seconds) for git-compat sharding
 # Source run: https://github.com/bit-vcs/bit/actions/runs/22624499312
-# Generated: 2026-03-03 (shards 1,2,4,5 measured; shard 3 estimated)
+# Generated: 2026-03-03 (shards 1,2 measured from run 22629535739; shard 3 estimated)
 t0000-basic.sh	20
-t0001-init.sh	1500
-t1006-cat-file.sh	2000
+t0001-init.sh	9
+t1006-cat-file.sh	13
 t1007-hash-object.sh	3
 t1300-config.sh	21
 t1400-update-ref.sh	30
