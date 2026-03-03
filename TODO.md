@@ -63,7 +63,9 @@ allowlist: 906/927 テスト（97.7%）
 
 ### その他
 
-- [ ] `--unpack-unreachable` の実装（現在 no-op、t7700 テスト 10/11/20/25 が skip 状態）
+- [x] `--unpack-unreachable` の実装（2026-03-03, v0.26.3）
+  - t7700 テスト 20/25 の `!BIT_PACK_OBJECTS` prereq skip パッチ削除（`--filter` 実装済み）
+  - [ ] `--unpack-unreachable=<date>` の mtime チェック（t7700 では未テスト）
 - [ ] `--help` 移植: 外部 help テキスト実体の整備（必要コマンド分）
   - [x] spec 駆動化 / 回帰テスト / オプトイン外部読込 / shim fallback 判定（完了済み）
 
