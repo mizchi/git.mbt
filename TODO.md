@@ -3,7 +3,7 @@
 最終整理日: 2026-03-03
 方針: 完了ログは一旦外し、未完了タスクのみ管理する。
 現バージョン: v0.26.3
-allowlist: 906/927 テスト（97.7%）
+allowlist: 990 テスト
 
 ## P0: Git compatibility / 計測
 
@@ -50,15 +50,77 @@ allowlist: 906/927 テスト（97.7%）
 - [x] single lstat() FFI で worktree_entry_meta 置換（2026-02-22）
 - [x] checkout -b same commit で tree checkout スキップ（2026-02-22）
 - [x] incremental MIDX と worktree stat skip（2026-02-23）
+- [x] cat-file: lazy pack loading + `-t` early return (3.1x 改善, 2026-03-04)
 - [ ] 大規模リポジトリでのベンチマーク継続（clone/fetch/status/log）
+
+### pack-objects 高速化 (10-20x 遅い → 目標 2x 以内)
+
+ベースライン (2026-03-04): E2E で 500obj bit=1970ms vs git=101ms (19.5x)
+ベンチ: `bench_repack_wbtest.mbt`
+
+#### プロファイル結果 (2026-03-04, moon bench 内部計測)
+
+| 項目 | 115obj | 560obj | per-obj |
+|------|--------|--------|---------|
+| repack total | 30ms | 135ms | 0.24ms |
+| zlib round-trip | 14ms* | 75ms | 0.13ms |
+| SHA-1 | 0.6ms* | 2.9ms | 0.005ms |
+
+(*115obj は 560obj からの按分推定)
+
+- **zlib が全体の 55%** を占める（純粋MoonBit実装 `mizchi/zlib`）
+- SHA-1 はわずか 2%（skip_hash は効果なし）
+- E2E の 19.5x 差の大半は **MoonBit ランタイム起動 ~150ms** + zlib 速度差
+- スケーリングは **線形 O(n)**（O(n²) 問題なし）
+
+#### P2-0: zlib C FFI 化 → 不採用
+
+- pure MoonBit で動くことの方が価値が高いため、C FFI 化はしない
+
+#### P2-A: メモリ効率 (検証済み・効果なし)
+
+- [x] **result Array[Byte] の事前容量確保** → 効果なし (2026-03-04)
+  - 115obj で測定誤差内。配列再確保コストは小さい
+- [x] **delta 結果の Bytes 変換コスト削減** → 効果なし (2026-03-04)
+  - ボトルネックは Bytes 変換ではなく zlib
+
+#### P2-B: 圧縮の無駄削減 (安全・小効果)
+
+- [x] **zlib 二重圧縮の排除** → 既に「quick upper bound」最適化あり (packfile.mbt:398-423)
+  - デルタが raw 未圧縮サイズより小さければ raw 圧縮をスキップ
+
+- [ ] **RefDelta base SHA-1 キャッシュ**
+  - `packfile.mbt:412,440`: `hash_object_content` を毎回再計算
+  - 改善: PackObject.id を使う（SHA-1 全体の 2% なので低優先）
+
+#### P2-C: デルタ検索の改善 (品質向上・速度は副次的)
+
+- [ ] **オブジェクトのソート (type + size desc)**
+  - 現状: stdin 順序のまま処理
+  - git: type → size desc でソートし類似オブジェクトを隣接配置
+  - デルタ効率が向上し出力パックが小さくなる
+
+- [ ] **スライディングウィンドウ (--window)**
+  - 現状: `last_by_type[key]` で同型の直前 1 オブジェクトのみ
+  - git: window=10 で直近 10 オブジェクトを候補に
+  - 改善: `Map[Int, Array[(Int, PackObject)]]` で最大 window 個保持
+
+#### P2-D: デルタアルゴリズム改善 (効果中・慎重に)
+
+- [ ] **build_delta のブロックインデックス再利用**
+  - スライディングウィンドウで同じ base を複数 target に使う場合にキャッシュ
+
+- [ ] **find_best_match の候補数制限緩和**
+  - 現状: `checked > 64` で打ち切り → 128-256 に拡張
 
 ## P3: Git互換の残タスク
 
-### allowlist 残り（21 テスト）
+### allowlist 残り
 
 - t0: t0012, t0450（動的 `-h` テスト生成、shim コマンドの出力不一致でパッチ困難）
+- t4: t4137（apply submodule: replace submodule with file の安全チェック未実装、4/28 failures）
 - t7: t7450（test-tool submodule 依存、対応困難）
-- t9: svn/cvs/p4 (115 tests) は明示的にサポート外
+- t9: svn/cvs/p4 は明示的にサポート外
   - t9001/t9210/t9211: send-email/scalar — 未対応
 
 ### その他
@@ -72,8 +134,8 @@ allowlist: 906/927 テスト（97.7%）
 ## P3.5: realgit 委譲の削減
 
 方針: CI SHIM_STRICT=1 で bit に通すコマンドを段階的に増やす。
-現状 CI SHIM_CMDS: `receive-pack upload-pack pack-objects index-pack shell pack-redundant`（6個）
-full mode: 53 コマンド実装済み → 47 コマンドが CI 未検証で realgit フォールバック
+CI SHIM_CMDS: 53 コマンド全て有効化済み (2026-03-03, SHIM_STRICT=1)
+CI 全 906 テストパス済み。以下は未実装コマンドの新規実装候補。
 
 ### Step 1: 実装済みコマンドを CI SHIM_CMDS に追加（テスト頻度順）
 
