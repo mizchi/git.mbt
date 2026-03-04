@@ -322,7 +322,6 @@ fn commit_repo_requires_standalone_error(
   fs : &@bitcore.RepoFileSystem,
   git_dir : String,
 ) -> Bool {
-  is_reftable_repo(fs, git_dir) ||
   repo_object_format(fs, git_dir) != "sha1" ||
   (match repo_compat_object_format(fs, git_dir) {
     Some(format) => format != "sha1"

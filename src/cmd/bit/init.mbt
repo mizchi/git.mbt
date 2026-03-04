@@ -322,9 +322,17 @@ async fn bootstrap_reftable_head_table(
       return
     }
   }
+  // Write a proper reftable binary with HEAD as symref
+  let record : @reftable.RefRecord = {
+    refname: "HEAD",
+    update_index: 1UL,
+    value: @reftable.RefValue::Symref("refs/heads/" + branch),
+  }
+  let table_data = @reftable.write_reftable([record], 4096, 1UL, 1UL)
   let table_name = "0x000000000001-0x000000000001-00000000.ref"
   let table_path = reftable_dir + "/" + table_name
-  let payload = "bit-reftable-placeholder\nHEAD\trefs/heads/" + branch + "\n"
-  fs.write_string(table_path, payload)
+  @fs.write_bytes_to_file(table_path, table_data) catch {
+    _ => return
+  }
   fs.write_string(reftable_dir + "/tables.list", table_name + "\n")
 }

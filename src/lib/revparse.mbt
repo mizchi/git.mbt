@@ -561,6 +561,14 @@ pub fn show_ref(
   git_dir : String,
 ) -> Array[(String, @bit.ObjectId)] raise @bit.GitError {
   let out : Map[String, @bit.ObjectId] = {}
+  // Collect from reftable if present
+  if fs.is_dir(join_path(git_dir, "reftable")) {
+    let reftable_refs = @reftable.collect_reftable_refs(fs, git_dir)
+    for pair in reftable_refs {
+      let (name, id) = pair
+      out[name] = id
+    }
+  }
   let refs_dir = join_path(git_dir, "refs")
   if fs.is_dir(refs_dir) {
     ref_collect_loose(fs, git_dir, refs_dir, "refs", out)

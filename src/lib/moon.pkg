@@ -7,6 +7,7 @@ import {
   "mizchi/bit/pack" @pack,
   "mizchi/bit/protocol" @protocol,
   "mizchi/bit/ignore" @ignore,
+  "mizchi/bit/reftable" @reftable,
   "mizchi/zlib",
   "moonbitlang/core/bench" @bench,
   "moonbitlang/core/encoding/utf8",

@@ -11,12 +11,12 @@ priv struct IndexPackConfig {
   strict : Bool
   fsck_objects : Bool
   ignore_missing_email : Bool
-  has_unsupported_options : Bool
   index_version : Int
   off64_threshold : Int64?
   max_input_size : Int64?
   write_rev_index : Bool?
   verbose : Bool
+  threads_warning : Bool
 }
 
 ///|
@@ -49,12 +49,12 @@ fn parse_index_pack_args(args : Array[String]) -> IndexPackParse {
   let mut strict = false
   let mut fsck_objects = false
   let mut ignore_missing_email = false
-  let mut has_unsupported_options = false
   let mut index_version = 2
   let mut off64_threshold : Int64? = None
   let mut max_input_size : Int64? = None
   let mut write_rev_index : Bool? = None
   let mut verbose = false
+  let mut threads_warning = false
   let mut i = 0
   let mut in_opts = true
   let mut extra_args = 0
@@ -144,9 +144,9 @@ fn parse_index_pack_args(args : Array[String]) -> IndexPackParse {
             let value = (try! arg[17:]).to_string()
             max_input_size = Some(parse_size_with_suffix(value))
           } else if arg.has_prefix("--threads") {
-            has_unsupported_options = true
-          } else if arg.has_prefix("--object-format") ||
-            arg.has_prefix("--threads") {
+            // no threading support, accept and ignore (like git !HAVE_THREADS)
+            threads_warning = true
+          } else if arg.has_prefix("--object-format") {
             return IndexPackParse::Unsupported
           } else {
             return IndexPackParse::Unsupported
@@ -162,26 +162,24 @@ fn parse_index_pack_args(args : Array[String]) -> IndexPackParse {
     }
     i += 1
   }
-  if !has_unsupported_options {
-    if extra_args > 0 {
-      return IndexPackParse::Error("fatal: too many arguments")
-    }
-    if verify && verify_stat_only {
-      return IndexPackParse::Error(
-        "fatal: --verify-stat-only cannot be used with --verify",
-      )
-    }
-    if !stdin && !verify && !verify_stat_only && pack_path is None {
-      return IndexPackParse::Unsupported
-    }
-    if verify && pack_path is None {
-      return IndexPackParse::Error("fatal: --verify requires a pack file")
-    }
-    if verify_stat_only && pack_path is None {
-      return IndexPackParse::Error(
-        "fatal: --verify-stat-only requires a pack file",
-      )
-    }
+  if extra_args > 0 {
+    return IndexPackParse::Error("fatal: too many arguments")
+  }
+  if verify && verify_stat_only {
+    return IndexPackParse::Error(
+      "fatal: --verify-stat-only cannot be used with --verify",
+    )
+  }
+  if !stdin && !verify && !verify_stat_only && pack_path is None {
+    return IndexPackParse::Unsupported
+  }
+  if verify && pack_path is None {
+    return IndexPackParse::Error("fatal: --verify requires a pack file")
+  }
+  if verify_stat_only && pack_path is None {
+    return IndexPackParse::Error(
+      "fatal: --verify-stat-only requires a pack file",
+    )
   }
   IndexPackParse::Ok({
     stdin,
@@ -195,12 +193,12 @@ fn parse_index_pack_args(args : Array[String]) -> IndexPackParse {
     strict,
     fsck_objects,
     ignore_missing_email,
-    has_unsupported_options,
     index_version,
     off64_threshold,
     max_input_size,
     write_rev_index,
     verbose,
+    threads_warning,
   })
 }
 
@@ -728,11 +726,8 @@ async fn handle_index_pack(args : Array[String]) -> Unit raise Error {
       @sys.exit(1)
     }
     IndexPackParse::Ok(cfg) => {
-      if cfg.has_unsupported_options {
-        @stdio.stderr.write(
-          "bit index-pack: unsupported options in standalone mode\n",
-        )
-        @sys.exit(1)
+      if cfg.threads_warning {
+        @stdio.stderr.write("warning: no threads support, ignoring --threads\n")
       }
       if cfg.fix_thin && !cfg.stdin {
         @stdio.stderr.write("bit index-pack: --fix-thin requires --stdin\n")

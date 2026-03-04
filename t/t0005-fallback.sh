@@ -4,9 +4,16 @@
 
 source "$(dirname "$0")/test-lib-e2e.sh"
 
-test_expect_failure 'unsupported command fails with --no-git-fallback' '
-    git_cmd init &&
-    git_cmd blame README.md
+test_expect_success 'blame works with --no-git-fallback' '
+    git_cmd init repo &&
+    (
+        cd repo &&
+        echo hello >a.txt &&
+        git_cmd add a.txt &&
+        git_cmd commit -m "first commit" &&
+        git_cmd blame a.txt >actual &&
+        grep -q "hello" actual
+    )
 '
 
 test_expect_success 'version command works with --no-git-fallback' '
@@ -64,12 +71,16 @@ test_expect_success 'update-ref works even if SHIM_REAL_GIT is invalid' '
     )
 '
 
-test_expect_success 'update-ref on reftable is explicitly unsupported if SHIM_REAL_GIT points to false' '
+test_expect_success 'update-ref on reftable works if SHIM_REAL_GIT points to false' '
     git_cmd init --ref-format=reftable repo &&
     (
         cd repo &&
-        SHIM_REAL_GIT=false test_must_fail git_cmd update-ref refs/heads/smoke 0123456789012345678901234567890123456789 >out 2>err &&
-        grep -Eiq "standalone|not supported|reftable" err
+        echo hello >a.txt &&
+        git_cmd add a.txt &&
+        git_cmd commit -m "first commit" &&
+        head_oid="$(git_cmd rev-parse HEAD)" &&
+        SHIM_REAL_GIT=false git_cmd update-ref refs/heads/smoke "$head_oid" &&
+        test "$(git_cmd rev-parse refs/heads/smoke)" = "$head_oid"
     )
 '
 
@@ -547,21 +558,30 @@ test_expect_success 'multi-pack-index write --no-bitmap works and cleans stale f
     )
 '
 
-test_expect_success 'index-pack unsupported options are explicitly rejected in standalone mode' '
+test_expect_success 'index-pack --threads is accepted with warning in standalone mode' '
     git_cmd init repo &&
     (
         cd repo &&
-        SHIM_REAL_GIT=false test_must_fail git_cmd index-pack --threads=2 >out 2>err &&
-        grep -Eiq "standalone|not supported|unsupported|index-pack" err
+        echo hello >a.txt &&
+        git_cmd add a.txt &&
+        git_cmd commit -m "first commit" &&
+        git_cmd repack -ad &&
+        pack=$(ls .git/objects/pack/pack-*.pack | head -1) &&
+        SHIM_REAL_GIT=false git_cmd index-pack --threads=2 "$pack" 2>err &&
+        grep -q "no threads support" err
     )
 '
 
-test_expect_success 'pack-objects unsupported options are explicitly rejected in standalone mode' '
+test_expect_success 'pack-objects --threads is accepted with warning in standalone mode' '
     git_cmd init repo &&
     (
         cd repo &&
-        SHIM_REAL_GIT=false test_must_fail git_cmd pack-objects --threads=2 out >out 2>err &&
-        grep -Eiq "standalone|not supported|unsupported|pack-objects" err
+        echo hello >a.txt &&
+        git_cmd add a.txt &&
+        git_cmd commit -m "first commit" &&
+        head_oid="$(git_cmd rev-parse HEAD)" &&
+        echo "$head_oid" | SHIM_REAL_GIT=false git_cmd pack-objects --threads=2 --stdout >/dev/null 2>err &&
+        grep -q "no threads support" err
     )
 '
 

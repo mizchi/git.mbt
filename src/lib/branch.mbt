@@ -433,6 +433,13 @@ pub fn resolve_ref(
   git_dir : String,
   refname : String,
 ) -> @bit.ObjectId? raise @bit.GitError {
+  // Try reftable first if the repo uses reftable ref storage
+  if fs.is_dir(join_path(git_dir, "reftable")) {
+    match @reftable.resolve_ref_reftable(fs, git_dir, refname) {
+      Some(oid) => return Some(oid)
+      None => ()
+    }
+  }
   let normalized = normalize_repo_path(refname) catch { _ => return None }
   resolve_ref_inner(fs, git_dir, normalized, 0)
 }

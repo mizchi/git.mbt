@@ -71,10 +71,8 @@ async fn handle_update_ref(args : Array[String]) -> Unit raise Error {
   let rfs : &@bitcore.RepoFileSystem = fs
   let git_dir = resolve_git_dir(rfs, root)
   if is_reftable_repo(rfs, git_dir) {
-    eprint_line(
-      "fatal: update-ref on reftable repository is not supported in standalone mode",
-    )
-    @sys.exit(1)
+    handle_update_ref_reftable(fs, rfs, git_dir, args)
+    return
   }
   let is_bare = is_bare_repo_dir(root)
   if update_ref_should_use_storage_runtime_args(args) {
@@ -734,6 +732,98 @@ fn update_ref_stdin_base_args(
     None => ()
   }
   args
+}
+
+///|
+async fn handle_update_ref_reftable(
+  _fs : OsFs,
+  rfs : &@bitcore.RepoFileSystem,
+  git_dir : String,
+  args : Array[String],
+) -> Unit raise Error {
+  let mut delete_mode = false
+  let positional : Array[String] = []
+  let mut i = 0
+  while i < args.length() {
+    let arg = args[i]
+    match arg {
+      "-d" | "--delete" => delete_mode = true
+      "--create-reflog" | "--no-deref" => ()
+      "-m" if i + 1 < args.length() => i += 1
+      _ if not(arg.has_prefix("-")) => positional.push(arg)
+      _ => ()
+    }
+    i += 1
+  }
+  if positional.length() == 0 {
+    @stdio.stderr.write("fatal: update-ref requires a ref argument\n")
+    @sys.exit(1)
+  }
+  let refname = positional[0]
+  // Load existing tables to determine next update_index
+  let tables = @reftable.load_tables(rfs, git_dir)
+  let max_update_index = if tables.length() > 0 {
+    let last = tables[tables.length() - 1]
+    match @reftable.parse_header(last) {
+      Some(h) => h.max_update_index
+      None => 0UL
+    }
+  } else {
+    0UL
+  }
+  let next_index = max_update_index + 1UL
+  if not(delete_mode) && positional.length() < 2 {
+    @stdio.stderr.write("fatal: update-ref requires a value argument\n")
+    @sys.exit(1)
+  }
+  let value : @reftable.RefValue = if delete_mode {
+    @reftable.RefValue::Deletion
+  } else {
+    let oid = @bitcore.ObjectId::from_hex(positional[1])
+    @reftable.RefValue::Val1(oid)
+  }
+  let record : @reftable.RefRecord = {
+    refname,
+    update_index: next_index,
+    value,
+  }
+  let table_data = @reftable.write_reftable(
+    [record],
+    4096,
+    next_index,
+    next_index,
+  )
+  // Write table file
+  let reftable_dir = git_dir + "/reftable"
+  let table_name = reftable_make_table_name(next_index)
+  let table_path = reftable_dir + "/" + table_name
+  @fs.write_bytes_to_file(table_path, table_data)
+  // Update tables.list
+  let existing_names = @reftable.read_tables_list(rfs, git_dir)
+  existing_names.push(table_name)
+  let tables_list_content = existing_names.join("\n") + "\n"
+  @fs.write_string_to_file(reftable_dir + "/tables.list", tables_list_content)
+}
+
+///|
+fn reftable_make_table_name(update_index : UInt64) -> String {
+  let pad_hex = reftable_pad_hex12(update_index)
+  "0x" + pad_hex + "-0x" + pad_hex + "-00000000.ref"
+}
+
+///|
+fn reftable_pad_hex12(value : UInt64) -> String {
+  let hex_chars : FixedArray[Byte] = [
+    b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'a', b'b', b'c',
+    b'd', b'e', b'f',
+  ]
+  let buf = StringBuilder::new()
+  for i = 11; i >= 0; i = i - 1 {
+    let shift = i * 4
+    let nibble = ((value >> shift.to_uint64().to_int()) & 0xfUL).to_int()
+    buf.write_char(Int::unsafe_to_char(hex_chars[nibble].to_int()))
+  }
+  buf.to_string()
 }
 
 ///|

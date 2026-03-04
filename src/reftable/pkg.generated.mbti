@@ -1,0 +1,74 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "mizchi/bit/reftable"
+
+import {
+  "mizchi/bit/object",
+  "mizchi/bit/types",
+}
+
+// Values
+pub fn collect_reftable_refs(&@types.RepoFileSystem, String) -> Array[(String, @object.ObjectId)] raise @object.GitError
+
+pub fn decode_ref_record(Bytes, Int, String, ReftableHeader) -> (RefRecord, Int)?
+
+pub fn decode_varint(Bytes, Int) -> (UInt64, Int)
+
+pub fn encode_varint(Array[Byte], UInt64) -> Unit
+
+pub fn iter_refs(Array[Bytes], String) -> Array[RefRecord]
+
+pub fn load_tables(&@types.RepoFileSystem, String) -> Array[Bytes] raise @object.GitError
+
+pub fn lookup_ref(Bytes, String) -> RefRecord?
+
+pub fn lookup_ref_in_stack(Array[Bytes], String) -> RefRecord?
+
+pub fn parse_footer(Bytes) -> ReftableFooter?
+
+pub fn parse_header(Bytes) -> ReftableHeader?
+
+pub fn read_refs(Bytes) -> Array[RefRecord]?
+
+pub fn read_tables_list(&@types.RepoFileSystem, String) -> Array[String] raise @object.GitError
+
+pub fn resolve_ref_reftable(&@types.RepoFileSystem, String, String) -> @object.ObjectId? raise @object.GitError
+
+pub fn write_reftable(Array[RefRecord], Int, UInt64, UInt64) -> Bytes
+
+// Errors
+
+// Types and methods
+pub(all) struct RefRecord {
+  refname : String
+  update_index : UInt64
+  value : RefValue
+}
+pub impl Eq for RefRecord
+pub impl Show for RefRecord
+
+pub(all) enum RefValue {
+  Deletion
+  Val1(@object.ObjectId)
+  Val2(@object.ObjectId, @object.ObjectId)
+  Symref(String)
+}
+pub impl Eq for RefValue
+pub impl Show for RefValue
+
+type ReftableFooter
+pub impl Eq for ReftableFooter
+pub impl Show for ReftableFooter
+
+pub struct ReftableHeader {
+  version : Int
+  block_size : Int
+  min_update_index : UInt64
+  max_update_index : UInt64
+}
+pub impl Eq for ReftableHeader
+pub impl Show for ReftableHeader
+
+// Type aliases
+
+// Traits
+

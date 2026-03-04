@@ -789,6 +789,11 @@ pub fn update_head_ref(
   git_dir : String,
   commit_id : @bit.ObjectId,
 ) -> Unit raise @bit.GitError {
+  // Check if this is a reftable repository
+  if rfs.is_dir(join_path(git_dir, "reftable")) {
+    update_head_ref_reftable(fs, rfs, git_dir, commit_id)
+    return
+  }
   let head_path = join_path(git_dir, "HEAD")
   let head = read_head_ref(rfs, git_dir) catch {
     _ => HeadRef::Detached(commit_id)
@@ -802,6 +807,71 @@ pub fn update_head_ref(
     }
     Detached(_) => fs.write_string(head_path, commit_id.to_hex() + "\n")
   }
+}
+
+///|
+fn update_head_ref_reftable(
+  fs : &@bit.FileSystem,
+  rfs : &@bit.RepoFileSystem,
+  git_dir : String,
+  commit_id : @bit.ObjectId,
+) -> Unit raise @bit.GitError {
+  let head = read_head_ref(rfs, git_dir) catch {
+    _ => HeadRef::Detached(commit_id)
+  }
+  let refname = match head {
+    Branch(name) => "refs/heads/" + name
+    Detached(_) => "HEAD"
+  }
+  // Determine next update_index
+  let tables = @reftable.load_tables(rfs, git_dir)
+  let max_index = if tables.length() > 0 {
+    let last = tables[tables.length() - 1]
+    match @reftable.parse_header(last) {
+      Some(h) => h.max_update_index
+      None => 0UL
+    }
+  } else {
+    0UL
+  }
+  let next_index = max_index + 1UL
+  let record : @reftable.RefRecord = {
+    refname,
+    update_index: next_index,
+    value: @reftable.RefValue::Val1(commit_id),
+  }
+  let table_data = @reftable.write_reftable(
+    [record],
+    4096,
+    next_index,
+    next_index,
+  )
+  // Write table file
+  let reftable_dir = git_dir + "/reftable"
+  let pad_hex = reftable_index_to_hex12(next_index)
+  let table_name = "0x" + pad_hex + "-0x" + pad_hex + "-00000000.ref"
+  let table_path = reftable_dir + "/" + table_name
+  fs.write_file(table_path, table_data)
+  // Update tables.list
+  let existing_names = @reftable.read_tables_list(rfs, git_dir)
+  existing_names.push(table_name)
+  let tables_list = existing_names.join("\n") + "\n"
+  fs.write_string(reftable_dir + "/tables.list", tables_list)
+}
+
+///|
+fn reftable_index_to_hex12(value : UInt64) -> String {
+  let hex_chars : FixedArray[Byte] = [
+    b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'a', b'b', b'c',
+    b'd', b'e', b'f',
+  ]
+  let buf = StringBuilder::new()
+  for i = 11; i >= 0; i = i - 1 {
+    let shift = i * 4
+    let nibble = ((value >> shift.to_uint64().to_int()) & 0xfUL).to_int()
+    buf.write_char(Int::unsafe_to_char(hex_chars[nibble].to_int()))
+  }
+  buf.to_string()
 }
 
 ///|

@@ -125,6 +125,22 @@ pub fn list_refs_with_ids(
   filter_prefix : String?,
 ) -> Map[String, @bit.ObjectId] {
   let out : Map[String, @bit.ObjectId] = {}
+  // Collect from reftable if present
+  if fs.is_dir(git_dir + "/reftable") {
+    let reftable_refs = @reftable.collect_reftable_refs(fs, git_dir) catch {
+      _ => []
+    }
+    for pair in reftable_refs {
+      let (name, id) = pair
+      let matches = match filter_prefix {
+        Some(p) => name.has_prefix(p)
+        None => true
+      }
+      if matches {
+        out[name] = id
+      }
+    }
+  }
   let refs_dir = git_dir + "/refs"
   collect_loose_ref_ids(fs, refs_dir, "refs", out, filter_prefix)
   collect_packed_ref_ids(fs, git_dir, out, filter_prefix)

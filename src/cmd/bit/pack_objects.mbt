@@ -34,6 +34,7 @@ priv struct PackObjectsConfig {
   sparse_mode : Bool? // None=config default, Some(true)=--sparse, Some(false)=--no-sparse
   unpack_unreachable : Bool
   unpack_unreachable_expiration : Int64 // 0 = loosen all unreachable
+  threads_warning : Bool
 }
 
 ///|
@@ -92,6 +93,7 @@ fn parse_pack_objects_args(args : Array[String]) -> PackObjectsParse {
   let mut sparse_mode : Bool? = None
   let mut unpack_unreachable = false
   let mut unpack_unreachable_expiration = 0L
+  let mut threads_warning = false
   let mut i = 0
   let mut in_opts = true
   let mut extra_args = 0
@@ -327,9 +329,11 @@ fn parse_pack_objects_args(args : Array[String]) -> PackObjectsParse {
             arg.has_prefix("--no-reuse-object") {
             // bit doesn't use delta or object reuse, so these are no-ops
             ()
+          } else if arg.has_prefix("--threads") {
+            // no threading support, accept and ignore (like git !HAVE_THREADS)
+            threads_warning = true
           } else if arg.has_prefix("--stdin-packs") ||
             arg.has_prefix("--write-bitmap-index") ||
-            arg.has_prefix("--threads") ||
             arg.has_prefix("--revs=") ||
             arg.has_prefix("--keep") ||
             arg.has_prefix("--reuse") ||
@@ -413,6 +417,7 @@ fn parse_pack_objects_args(args : Array[String]) -> PackObjectsParse {
     sparse_mode,
     unpack_unreachable,
     unpack_unreachable_expiration,
+    threads_warning,
   })
 }
 
@@ -2350,6 +2355,9 @@ async fn handle_pack_objects(args : Array[String]) -> Unit raise Error {
       @sys.exit(1)
     }
     PackObjectsParse::Ok(cfg) => {
+      if cfg.threads_warning {
+        @stdio.stderr.write("warning: no threads support, ignoring --threads\n")
+      }
       let fs = OsFs::new()
       let git_dir = find_git_dir(fs)
       match @sys.get_env_var("GIT_TEST_NAME_HASH_VERSION") {
