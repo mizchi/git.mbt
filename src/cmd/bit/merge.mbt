@@ -150,6 +150,7 @@ async fn handle_merge(args : Array[String]) -> Unit raise Error {
   guard target_ref is Some(refspec) else {
     raise @bitcore.GitError::InvalidObject("No commit to merge specified")
   }
+  validate_current_branch_mergeoptions(rfs, git_dir)
   // Check if subdir-clone and handle specially
   match get_subdir_info(fs, git_dir) {
     Some((_, subdir_path, _)) => {
@@ -303,6 +304,58 @@ async fn handle_merge(args : Array[String]) -> Unit raise Error {
       print_line("Automatic merge failed; fix conflicts and then commit.")
     }
   }
+}
+
+///|
+async fn validate_current_branch_mergeoptions(
+  rfs : &@bitcore.RepoFileSystem,
+  git_dir : String,
+) -> Unit raise Error {
+  let head_path = git_dir + "/HEAD"
+  if not(rfs.is_file(head_path)) {
+    return
+  }
+  let head = decode_bytes(rfs.read_file(head_path) catch { _ => return })
+    |> trim_string
+  if not(head.has_prefix("ref: refs/heads/")) {
+    return
+  }
+  let branch_name = String::unsafe_substring(head, start=16, end=head.length())
+  let merge_key = "branch." + branch_name + ".mergeoptions"
+  match get_config_value(rfs, git_dir + "/config", merge_key, None, false) {
+    Some(value) =>
+      if split_cmdline_has_unclosed_quote(value) {
+        eprint_line("fatal: bad " + merge_key + " string: unclosed quote")
+        @sys.exit(128)
+      }
+    None => ()
+  }
+}
+
+///|
+fn split_cmdline_has_unclosed_quote(value : String) -> Bool {
+  let mut in_single = false
+  let mut in_double = false
+  let mut escape = false
+  for c in value {
+    if escape {
+      escape = false
+      continue
+    }
+    if c == '\\' && not(in_single) {
+      escape = true
+      continue
+    }
+    if c == '\'' && not(in_double) {
+      in_single = not(in_single)
+      continue
+    }
+    if c == '"' && not(in_single) {
+      in_double = not(in_double)
+      continue
+    }
+  }
+  in_single || in_double
 }
 
 ///|

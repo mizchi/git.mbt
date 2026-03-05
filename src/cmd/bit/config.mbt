@@ -7,6 +7,11 @@ async fn handle_config(args : Array[String]) -> Unit raise Error {
   let mut get_all_mode = false
   let mut get_bool = false
   let mut get_int = false
+  let mut get_bool_or_int = false
+  let mut get_path = false
+  let mut get_expiry_date = false
+  let mut get_color = false
+  let mut get_color_mode = false
   let mut get_regexp_mode = false
   let mut list_mode = false
   let mut unset_mode = false
@@ -29,9 +34,14 @@ async fn handle_config(args : Array[String]) -> Unit raise Error {
   let mut expect_default_value = false
   let mut comment : String? = None
   let mut expect_comment = false
+  let mut expect_value_pattern = false
+  let mut expect_type_value = false
+  let mut config_type_spec : String? = None
   let mut key : String? = None
   let mut value : String? = None
   let mut value_pattern : String? = None
+  let mut saw_get_mode = false
+  let mut saw_get_all_mode = false
   for arg in normalized_args {
     if expect_config_path {
       config_path_override = Some(arg)
@@ -46,6 +56,16 @@ async fn handle_config(args : Array[String]) -> Unit raise Error {
     if expect_comment {
       comment = Some(arg)
       expect_comment = false
+      continue
+    }
+    if expect_value_pattern {
+      value_pattern = Some(arg)
+      expect_value_pattern = false
+      continue
+    }
+    if expect_type_value {
+      config_type_spec = Some(merge_config_type_spec(config_type_spec, arg))
+      expect_type_value = false
       continue
     }
     match arg {
@@ -68,14 +88,55 @@ async fn handle_config(args : Array[String]) -> Unit raise Error {
         comment = Some(
           String::unsafe_substring(arg, start=10, end=arg.length()),
         )
-      "--get" => get_mode = true
+      "--value" => expect_value_pattern = true
+      _ if arg.has_prefix("--value=") =>
+        value_pattern = Some(
+          String::unsafe_substring(arg, start=8, end=arg.length()),
+        )
+      "--get" => {
+        get_mode = true
+        saw_get_mode = true
+      }
       "--get-all" => {
         get_mode = true
         get_all_mode = true
+        saw_get_all_mode = true
       }
       "--get-regexp" => get_regexp_mode = true
-      "--bool" => get_bool = true
-      "--int" => get_int = true
+      "--bool" =>
+        config_type_spec = Some(
+          merge_config_type_spec(config_type_spec, "bool"),
+        )
+      "--int" =>
+        config_type_spec = Some(merge_config_type_spec(config_type_spec, "int"))
+      "--bool-or-int" =>
+        config_type_spec = Some(
+          merge_config_type_spec(config_type_spec, "bool-or-int"),
+        )
+      "--path" =>
+        config_type_spec = Some(
+          merge_config_type_spec(config_type_spec, "path"),
+        )
+      "--expiry-date" =>
+        config_type_spec = Some(
+          merge_config_type_spec(config_type_spec, "expiry-date"),
+        )
+      "--type" => expect_type_value = true
+      _ if arg.has_prefix("--type=") =>
+        config_type_spec = Some(
+          merge_config_type_spec(
+            config_type_spec,
+            String::unsafe_substring(arg, start=7, end=arg.length()),
+          ),
+        )
+      "--no-type" => config_type_spec = None
+      "--get-color" => {
+        get_mode = true
+        get_color_mode = true
+        config_type_spec = Some(
+          merge_config_type_spec(config_type_spec, "color"),
+        )
+      }
       "--list" | "-l" => list_mode = true
       "--unset" => unset_mode = true
       "--unset-all" => unset_all = true
@@ -87,6 +148,10 @@ async fn handle_config(args : Array[String]) -> Unit raise Error {
       "--name-only" => name_only = true
       "--null" | "-z" => null_terminator = true
       "-e" | "--edit" | "edit" => edit_mode = true
+      "--no-get" => {
+        eprint_line("error: unknown option `no-get'")
+        @sys.exit(129)
+      }
       _ if arg.has_prefix("-") =>
         if key is Some(_) && value is None {
           // `git config <key> -value` treats `-value` as a value.
@@ -117,6 +182,37 @@ async fn handle_config(args : Array[String]) -> Unit raise Error {
       "option '--comment' requires a value",
     )
   }
+  if expect_value_pattern {
+    raise @bitcore.GitError::InvalidObject("option '--value' requires a value")
+  }
+  if expect_type_value {
+    raise @bitcore.GitError::InvalidObject("option '--type' requires a value")
+  }
+  get_bool = false
+  get_int = false
+  get_bool_or_int = false
+  get_path = false
+  get_expiry_date = false
+  get_color = false
+  match config_type_spec {
+    Some("bool") => get_bool = true
+    Some("int") => get_int = true
+    Some("bool-or-int") => get_bool_or_int = true
+    Some("path") => get_path = true
+    Some("expiry-date") => get_expiry_date = true
+    Some("color") => get_color = true
+    _ => ()
+  }
+  if get_expiry_date {
+    delegate_config_to_real_git(args)
+    return
+  }
+  if saw_get_mode && saw_get_all_mode {
+    eprint_line(
+      "error: options '--get-all' and '--get' cannot be used together",
+    )
+    @sys.exit(129)
+  }
   match comment {
     Some(c) =>
       if c.contains("\n") {
@@ -142,7 +238,7 @@ async fn handle_config(args : Array[String]) -> Unit raise Error {
     )
   }
   let config_path = match config_path_override {
-    Some(path) => resolve_in_cwd(path)
+    Some(path) => if path == "-" { "-" } else { resolve_in_cwd(path) }
     None =>
       if global_mode {
         match @sys.get_env_var("GIT_CONFIG_GLOBAL") {
@@ -158,7 +254,7 @@ async fn handle_config(args : Array[String]) -> Unit raise Error {
       } else {
         // GIT_CONFIG environment variable overrides default path
         match @sys.get_env_var("GIT_CONFIG") {
-          Some(path) => resolve_in_cwd(path)
+          Some(path) => if path == "-" { "-" } else { resolve_in_cwd(path) }
           None => {
             let rfs : &@bitcore.RepoFileSystem = fs
             let root = get_work_root()
@@ -172,6 +268,18 @@ async fn handle_config(args : Array[String]) -> Unit raise Error {
         }
       }
   }
+  let write_to_config = edit_mode ||
+    rename_section_mode ||
+    remove_section_mode ||
+    replace_all_mode ||
+    unset_mode ||
+    unset_all ||
+    (not(get_mode) && value is Some(_))
+  if config_path == "-" && write_to_config {
+    eprint_line("fatal: writing to stdin is not supported")
+    @sys.exit(1)
+  }
+  let mut stdin_content : String? = None
   // Handle --edit
   if edit_mode {
     // Editor precedence: GIT_EDITOR > core.editor > VISUAL > EDITOR > vi
@@ -211,15 +319,32 @@ async fn handle_config(args : Array[String]) -> Unit raise Error {
     )
     @sys.exit(status)
   }
-  // Validate config file syntax for read operations
+  // Validate config syntax for read operations
   let rfs2 : &@bitcore.RepoFileSystem = fs
-  if (list_mode || get_mode || get_regexp_mode) && rfs2.is_file(config_path) {
-    let raw_content = decode_bytes(rfs2.read_file(config_path))
-    validate_config_file(config_path, raw_content)
+  if list_mode || get_mode || get_regexp_mode {
+    if config_path == "-" {
+      let raw_content = decode_bytes(read_all_stdin())
+      validate_config_file("standard input", raw_content)
+      stdin_content = Some(raw_content)
+    } else if rfs2.is_file(config_path) {
+      let raw_content = decode_bytes(rfs2.read_file(config_path))
+      validate_config_file(config_path, raw_content)
+    }
   }
   // Handle --list
   if list_mode {
-    if fs.is_file(config_path) {
+    if fixed_value_mode {
+      raise @bitcore.GitError::InvalidObject(
+        "--fixed-value is not supported for --list",
+      )
+    }
+    if config_path == "-" {
+      match stdin_content {
+        Some(content) =>
+          list_config_from_content(content, name_only, null_terminator)
+        None => @sys.exit(1)
+      }
+    } else if fs.is_file(config_path) {
       list_config(fs, config_path, name_only, null_terminator)
     } else if config_path_override is Some(_) {
       @sys.exit(1)
@@ -231,9 +356,28 @@ async fn handle_config(args : Array[String]) -> Unit raise Error {
     guard key is Some(k) else {
       raise @bitcore.GitError::InvalidObject("key pattern required")
     }
-    if fs.is_file(config_path) {
+    let vp = match value_pattern {
+      Some(p) => Some(p)
+      None => value
+    }
+    if fixed_value_mode && vp is None {
+      raise @bitcore.GitError::InvalidObject("value required for --fixed-value")
+    }
+    if config_path == "-" {
+      let found = match stdin_content {
+        Some(content) =>
+          get_regexp_config_from_content(
+            content, k, vp, fixed_value_mode, get_bool, get_int, name_only, null_terminator,
+            "standard input",
+          )
+        None => false
+      }
+      if not(found) {
+        @sys.exit(1)
+      }
+    } else if fs.is_file(config_path) {
       let found = get_regexp_config(
-        fs, config_path, k, get_bool, get_int, name_only, null_terminator,
+        fs, config_path, k, vp, fixed_value_mode, get_bool, get_int, name_only, null_terminator,
       )
       if not(found) {
         @sys.exit(1)
@@ -245,6 +389,11 @@ async fn handle_config(args : Array[String]) -> Unit raise Error {
   }
   // Handle --rename-section
   if rename_section_mode {
+    if fixed_value_mode {
+      raise @bitcore.GitError::InvalidObject(
+        "--fixed-value is not supported for --rename-section",
+      )
+    }
     guard key is Some(old_name) else {
       raise @bitcore.GitError::InvalidObject("section name required")
     }
@@ -255,11 +404,25 @@ async fn handle_config(args : Array[String]) -> Unit raise Error {
     return
   }
   if remove_section_mode {
+    if fixed_value_mode {
+      raise @bitcore.GitError::InvalidObject(
+        "--fixed-value is not supported for --remove-section",
+      )
+    }
     guard key is Some(section_key) else {
       raise @bitcore.GitError::InvalidObject("section name required")
     }
     remove_config_section_file(fs, config_path, section_key)
     return
+  }
+  if get_color_mode && default_value is None && value_pattern is None {
+    match value {
+      Some(v) => {
+        default_value = Some(v)
+        value = None
+      }
+      None => ()
+    }
   }
   guard key is Some(k) else {
     // No key given: check if any action mode was specified
@@ -282,48 +445,116 @@ async fn handle_config(args : Array[String]) -> Unit raise Error {
     guard value is Some(v) else {
       raise @bitcore.GitError::InvalidObject("value required for --replace-all")
     }
+    if fixed_value_mode && value_pattern is None {
+      raise @bitcore.GitError::InvalidObject("value required for --fixed-value")
+    }
     let write_value = if get_bool {
       format_bool_for_write(v)
+    } else if get_bool_or_int {
+      format_bool_or_int_for_write(v)
     } else if get_int {
       format_int_for_write(v)
+    } else if get_color {
+      format_color_for_write(v)
     } else {
       v
     }
-    replace_all_config(fs, config_path, k, write_value, value_pattern, comment)
+    replace_all_config(
+      fs, config_path, k, write_value, value_pattern, fixed_value_mode, comment,
+    )
     return
   }
   // Handle --unset / --unset-all
   if unset_mode || unset_all {
+    let pattern_arg = match value_pattern {
+      Some(p) => Some(p)
+      None => value
+    }
     let vp : String? = if fixed_value_mode {
-      if value is None {
+      if pattern_arg is None {
         raise @bitcore.GitError::InvalidObject(
           "value required for --fixed-value",
         )
       }
-      value
+      pattern_arg
     } else {
-      value
+      pattern_arg
     }
     unset_config(fs, config_path, k, vp, fixed_value_mode, unset_all)
     return
   }
   if get_mode || value is None {
     // Read config
+    if fixed_value_mode {
+      let has_pattern = value_pattern is Some(_) || value is Some(_)
+      if not(has_pattern) {
+        raise @bitcore.GitError::InvalidObject(
+          "value required for --fixed-value",
+        )
+      }
+    }
     if get_all_mode {
-      let vp : String? = if get_mode { value } else { None }
-      let result = if fs.is_file(config_path) {
+      let vp : String? = if get_mode && not(get_color_mode) {
+        match value_pattern {
+          Some(p) => Some(p)
+          None => value
+        }
+      } else {
+        None
+      }
+      let result = if config_path == "-" {
+        match stdin_content {
+          Some(content) =>
+            get_all_config_values_from_content(content, k, vp, fixed_value_mode)
+          None => []
+        }
+      } else if fs.is_file(config_path) {
         get_all_config_values(fs, config_path, k, vp, fixed_value_mode)
       } else {
         []
       }
       if result.length() == 0 {
         match default_value {
-          Some(def) => print_line(def)
+          Some(def) => {
+            let formatted = format_config_output_value(
+              def,
+              get_bool,
+              get_int,
+              get_bool_or_int,
+              get_path,
+              get_expiry_date,
+              get_color,
+              Some(k),
+              (None : String?),
+              (None : Int?),
+            )
+            if null_terminator {
+              print_nul_terminated(formatted)
+            } else {
+              print_line(formatted)
+            }
+          }
           None => @sys.exit(1)
         }
       } else {
         for v in result {
-          let formatted = format_config_output_value(v, get_bool, get_int)
+          let source_name : String? = if config_path == "-" {
+            Some("standard input")
+          } else {
+            Some(config_path)
+          }
+          let formatted = format_config_output_value(
+            v,
+            get_bool,
+            get_int,
+            get_bool_or_int,
+            get_path,
+            get_expiry_date,
+            get_color,
+            Some(k),
+            source_name,
+            (None : Int?),
+          )
           if null_terminator {
             print_nul_terminated(formatted)
           } else {
@@ -332,11 +563,27 @@ async fn handle_config(args : Array[String]) -> Unit raise Error {
         }
       }
     } else {
-      let vp : String? = if get_mode { value } else { None }
+      let vp : String? = if get_mode && not(get_color_mode) {
+        match value_pattern {
+          Some(p) => Some(p)
+          None => value
+        }
+      } else {
+        None
+      }
+      let mut value_source : String? = None
       let result = match get_config_override(k) {
         Some(v) => Some(v)
         None =>
-          if fs.is_file(config_path) {
+          if config_path == "-" {
+            value_source = Some("standard input")
+            match stdin_content {
+              Some(content) =>
+                get_config_value_from_content(content, k, vp, fixed_value_mode)
+              None => (None : String?)
+            }
+          } else if fs.is_file(config_path) {
+            value_source = Some(config_path)
             get_config_value(fs, config_path, k, vp, fixed_value_mode)
           } else {
             (None : String?)
@@ -344,7 +591,38 @@ async fn handle_config(args : Array[String]) -> Unit raise Error {
       }
       match result {
         Some(val) => {
-          let formatted = format_config_output_value(val, get_bool, get_int)
+          let line_hint : Int? = if get_path && is_config_novalue(val) {
+            match value_source {
+              Some(src) =>
+                if src == "standard input" {
+                  match stdin_content {
+                    Some(content) =>
+                      find_config_key_line_from_content(content, k)
+                    None => (None : Int?)
+                  }
+                } else if fs.is_file(src) {
+                  let raw = decode_bytes(fs.read_file(src))
+                  find_config_key_line_from_content(raw, k)
+                } else {
+                  (None : Int?)
+                }
+              None => (None : Int?)
+            }
+          } else {
+            (None : Int?)
+          }
+          let formatted = format_config_output_value(
+            val,
+            get_bool,
+            get_int,
+            get_bool_or_int,
+            get_path,
+            get_expiry_date,
+            get_color,
+            Some(k),
+            value_source,
+            line_hint,
+          )
           if null_terminator {
             print_nul_terminated(formatted)
           } else {
@@ -353,7 +631,25 @@ async fn handle_config(args : Array[String]) -> Unit raise Error {
         }
         None =>
           match default_value {
-            Some(def) => print_line(def)
+            Some(def) => {
+              let formatted = format_config_output_value(
+                def,
+                get_bool,
+                get_int,
+                get_bool_or_int,
+                get_path,
+                get_expiry_date,
+                get_color,
+                Some(k),
+                (None : String?),
+                (None : Int?),
+              )
+              if null_terminator {
+                print_nul_terminated(formatted)
+              } else {
+                print_line(formatted)
+              }
+            }
             None =>
               // Key not found - exit silently with code 1 (git behavior)
               @sys.exit(1)
@@ -362,17 +658,35 @@ async fn handle_config(args : Array[String]) -> Unit raise Error {
     }
   } else {
     // Write config
+    if add_mode && fixed_value_mode {
+      raise @bitcore.GitError::InvalidObject(
+        "--fixed-value is not supported for --add",
+      )
+    }
+    if fixed_value_mode && value_pattern is None {
+      raise @bitcore.GitError::InvalidObject("value required for --fixed-value")
+    }
     guard value is Some(v) else { return }
     let write_value = if get_bool {
       format_bool_for_write(v)
+    } else if get_bool_or_int {
+      format_bool_or_int_for_write(v)
     } else if get_int {
       format_int_for_write(v)
+    } else if get_color {
+      format_color_for_write(v)
     } else {
       v
     }
-    set_config(
-      fs, config_path, k, write_value, add_mode, comment, value_pattern,
-    )
+    if fixed_value_mode {
+      set_config_with_fixed_value(
+        fs, config_path, k, write_value, add_mode, comment, value_pattern, fixed_value_mode,
+      )
+    } else {
+      set_config(
+        fs, config_path, k, write_value, add_mode, comment, value_pattern,
+      )
+    }
   }
 }
 
@@ -426,12 +740,8 @@ fn normalize_config_args(args : Array[String]) -> Array[String] {
         } else if arg == "--show-names" {
           has_show_names = true
         } else if arg.has_prefix("--value=") {
-          // Extract value pattern
-          normalized.push(
-            String::unsafe_substring(arg, start=8, end=arg.length()),
-          )
+          normalized.push(arg)
         } else if arg == "--value" {
-          // Next arg is value pattern - pass through
           normalized.push(arg)
         } else {
           normalized.push(arg)
@@ -472,6 +782,27 @@ fn normalize_config_args(args : Array[String]) -> Array[String] {
       }
       normalized
     }
+    "rename-section" => {
+      let result : Array[String] = ["--rename-section"]
+      for i in 1..<args.length() {
+        result.push(args[i])
+      }
+      result
+    }
+    "remove-section" => {
+      let result : Array[String] = ["--remove-section"]
+      for i in 1..<args.length() {
+        result.push(args[i])
+      }
+      result
+    }
+    "edit" => {
+      let result : Array[String] = ["--edit"]
+      for i in 1..<args.length() {
+        result.push(args[i])
+      }
+      result
+    }
     _ => args
   }
 }
@@ -486,6 +817,39 @@ fn config_novalue() -> String {
 ///|
 fn is_config_novalue(s : String) -> Bool {
   s == config_novalue()
+}
+
+///|
+fn normalize_config_type_name(name : String) -> String raise Error {
+  match name.to_lower() {
+    "bool" => "bool"
+    "int" => "int"
+    "bool-or-int" => "bool-or-int"
+    "path" => "path"
+    "expiry-date" => "expiry-date"
+    "color" => "color"
+    other =>
+      raise @bitcore.GitError::InvalidObject(
+        "unrecognized --type argument '\{other}'",
+      )
+  }
+}
+
+///|
+fn merge_config_type_spec(
+  current : String?,
+  next_name : String,
+) -> String raise Error {
+  let normalized = normalize_config_type_name(next_name)
+  match current {
+    None => normalized
+    Some(cur) =>
+      if cur == normalized {
+        cur
+      } else {
+        raise @bitcore.GitError::InvalidObject("only one type at a time")
+      }
+  }
 }
 
 ///|
@@ -519,6 +883,22 @@ fn code_in_string(c : UInt16, s : String) -> Bool {
     }
   }
   false
+}
+
+///|
+fn split_config_lines_preserve_cr(content : String) -> Array[String] {
+  let lines : Array[String] = []
+  let mut start = 0
+  for i, c in content {
+    if c == '\n' {
+      lines.push(String::unsafe_substring(content, start~, end=i))
+      start = i + 1
+    }
+  }
+  if start <= content.length() {
+    lines.push(String::unsafe_substring(content, start~, end=content.length()))
+  }
+  lines
 }
 
 ///|
@@ -601,13 +981,16 @@ fn is_valid_section_name(name : String) -> Bool {
 /// Validate a config file and exit(128) with error if syntax is invalid.
 /// Checks: unclosed section headers, unclosed quotes, bare keys without =.
 async fn validate_config_file(config_path : String, content : String) -> Unit {
-  let raw_lines : Array[String] = []
-  for lv in content.split("\n") {
-    raw_lines.push(lv.to_string())
+  let raw_lines = split_config_lines_preserve_cr(content)
+  let lines = preprocess_config_lines_with_line_numbers(raw_lines)
+  let location = if config_path == "standard input" {
+    "standard input"
+  } else {
+    "file " + config_path
   }
   let mut in_section = false
-  for i, line in raw_lines {
-    let line_num = i + 1
+  for line_info in lines {
+    let (line, line_num) = line_info
     let trimmed = trim_string(line)
     // Skip empty lines and comments
     if trimmed.length() == 0 || trimmed[0] == '#' || trimmed[0] == ';' {
@@ -617,9 +1000,7 @@ async fn validate_config_file(config_path : String, content : String) -> Unit {
     if trimmed[0] == '[' {
       match trimmed.find("]") {
         None => {
-          eprint_line(
-            "fatal: bad config line \{line_num} in file \{config_path}",
-          )
+          eprint_line("fatal: bad config line \{line_num} in \{location}")
           @sys.exit(128)
         }
         Some(_) => {
@@ -630,7 +1011,7 @@ async fn validate_config_file(config_path : String, content : String) -> Unit {
     }
     if not(in_section) {
       // Line outside any section — syntax error
-      eprint_line("fatal: bad config line \{line_num} in file \{config_path}")
+      eprint_line("fatal: bad config line \{line_num} in \{location}")
       @sys.exit(128)
     }
     // Check for unclosed quotes in value
@@ -654,9 +1035,7 @@ async fn validate_config_file(config_path : String, content : String) -> Unit {
           }
         }
         if not(valid_key) {
-          eprint_line(
-            "fatal: bad config line \{line_num} in file \{config_path}",
-          )
+          eprint_line("fatal: bad config line \{line_num} in \{location}")
           @sys.exit(128)
         }
       }
@@ -689,9 +1068,7 @@ async fn validate_config_file(config_path : String, content : String) -> Unit {
         // Check if continuation line (escaped newline at end)
         if in_quote && not(escaped) && not(val_part.has_suffix("\\")) {
           // Unclosed quote without continuation
-          eprint_line(
-            "fatal: bad config line \{line_num} in file \{config_path}",
-          )
+          eprint_line("fatal: bad config line \{line_num} in \{location}")
           @sys.exit(128)
         }
       }
@@ -898,13 +1275,87 @@ fn parse_config_key(key : String) -> (String, String?, String)? {
 }
 
 ///|
+fn find_config_key_line_from_content(content : String, key : String) -> Int? {
+  let target = parse_config_key(key)
+  guard target is Some((sec, sub, name)) else { return None }
+  let sec_l = sec.to_lower()
+  let name_l = name.to_lower()
+  let lines = split_config_lines_preserve_cr(content)
+  let mut current_section = ""
+  let mut current_subsection : String? = None
+  for i, line in lines {
+    let trimmed = trim_string(line)
+    if trimmed.length() == 0 || trimmed[0] == '#' || trimmed[0] == ';' {
+      continue
+    }
+    match parse_section_header_line(trimmed) {
+      Some((hs, hsub, rest, _)) => {
+        current_section = hs.to_lower()
+        current_subsection = hsub
+        if section_header_matches(
+            current_section, current_subsection, sec_l, sub,
+          ) &&
+          rest.length() > 0 {
+          let eq = rest.find("=")
+          let key_part = match eq {
+            Some(ei) =>
+              trim_chars(String::unsafe_substring(rest, start=0, end=ei), " \t")
+            None => trim_chars(rest, " \t")
+          }
+          if key_part.to_lower() == name_l {
+            return Some(i + 1)
+          }
+        }
+      }
+      None => {
+        if not(
+            section_header_matches(
+              current_section, current_subsection, sec_l, sub,
+            ),
+          ) {
+          continue
+        }
+        let eq = trimmed.find("=")
+        let key_part = match eq {
+          Some(ei) =>
+            trim_chars(
+              String::unsafe_substring(trimmed, start=0, end=ei),
+              " \t",
+            )
+          None => trim_chars(trimmed, " \t")
+        }
+        if key_part.to_lower() == name_l {
+          return Some(i + 1)
+        }
+      }
+    }
+  }
+  None
+}
+
+///|
 /// Join continuation lines (lines ending with unescaped backslash).
 /// Only join if the backslash is in a value context (not in a comment).
 fn preprocess_config_lines(raw_lines : Array[String]) -> Array[String] {
+  let line_info = preprocess_config_lines_with_line_numbers(raw_lines)
   let result : Array[String] = []
+  for info in line_info {
+    let (line, _line_num) = info
+    result.push(line)
+  }
+  result
+}
+
+///|
+/// Join continuation lines while keeping their original starting line number.
+fn preprocess_config_lines_with_line_numbers(
+  raw_lines : Array[String],
+) -> Array[(String, Int)] {
+  let result : Array[(String, Int)] = []
   let mut i = 0
   while i < raw_lines.length() {
     let mut line = raw_lines[i]
+    let start_line = i + 1
     while ends_with_unescaped_backslash(line) &&
           is_continuation_context(line) &&
           i + 1 < raw_lines.length() {
@@ -912,7 +1363,7 @@ fn preprocess_config_lines(raw_lines : Array[String]) -> Array[String] {
       i += 1
       line = line + raw_lines[i]
     }
-    result.push(line)
+    result.push((line, start_line))
     i += 1
   }
   result
@@ -987,6 +1438,11 @@ fn ends_with_unescaped_backslash(s : String) -> Bool {
 }
 
 ///|
+fn config_lines_from_content(content : String) -> Array[String] {
+  preprocess_config_lines(split_config_lines_preserve_cr(content))
+}
+
+///|
 async fn list_config(
   fs : &@bitcore.RepoFileSystem,
   config_path : String,
@@ -997,11 +1453,16 @@ async fn list_config(
     return
   }
   let content = decode_bytes(fs.read_file(config_path))
-  let raw_lines : Array[String] = []
-  for line_view in content.split("\n") {
-    raw_lines.push(line_view.to_string())
-  }
-  let lines = preprocess_config_lines(raw_lines)
+  list_config_from_content(content, name_only, null_terminator)
+}
+
+///|
+async fn list_config_from_content(
+  content : String,
+  name_only : Bool,
+  null_terminator : Bool,
+) -> Unit raise Error {
+  let lines = config_lines_from_content(content)
   let mut current_section = ""
   let mut current_subsection : String? = None
   for line in lines {
@@ -1139,11 +1600,17 @@ fn get_config_value(
     return None
   }
   let content = decode_bytes(fs.read_file(config_path))
-  let raw_lines : Array[String] = []
-  for line_view in content.split("\n") {
-    raw_lines.push(line_view.to_string())
-  }
-  let lines = preprocess_config_lines(raw_lines)
+  get_config_value_from_content(content, key, value_pattern, fixed_value)
+}
+
+///|
+fn get_config_value_from_content(
+  content : String,
+  key : String,
+  value_pattern : String?,
+  fixed_value : Bool,
+) -> String? {
+  let lines = config_lines_from_content(content)
   guard parse_config_key(key) is Some((section, subsection, name)) else {
     return None
   }
@@ -1203,13 +1670,21 @@ fn get_config_value(
                 " \t",
               )
               if key_part.to_lower() == name_l {
-                let val = parse_config_value(
-                  String::unsafe_substring(
-                    trimmed,
-                    start=i + 1,
-                    end=trimmed.length(),
-                  ),
-                )
+                let raw_val = match line.find("=") {
+                  Some(raw_i) =>
+                    String::unsafe_substring(
+                      line,
+                      start=raw_i + 1,
+                      end=line.length(),
+                    )
+                  None =>
+                    String::unsafe_substring(
+                      trimmed,
+                      start=i + 1,
+                      end=trimmed.length(),
+                    )
+                }
+                let val = parse_config_value(raw_val)
                 if matches_value_filter(val, value_pattern, fixed_value) {
                   found = Some(val)
                 }
@@ -1244,11 +1719,17 @@ fn get_all_config_values(
     return []
   }
   let content = decode_bytes(fs.read_file(config_path))
-  let raw_lines : Array[String] = []
-  for line_view in content.split("\n") {
-    raw_lines.push(line_view.to_string())
-  }
-  let lines = preprocess_config_lines(raw_lines)
+  get_all_config_values_from_content(content, key, value_pattern, fixed_value)
+}
+
+///|
+fn get_all_config_values_from_content(
+  content : String,
+  key : String,
+  value_pattern : String?,
+  fixed_value : Bool,
+) -> Array[String] {
+  let lines = config_lines_from_content(content)
   guard parse_config_key(key) is Some((section, subsection, name)) else {
     return []
   }
@@ -1305,13 +1786,21 @@ fn get_all_config_values(
                 " \t",
               )
               if key_part.to_lower() == name_l {
-                let val = parse_config_value(
-                  String::unsafe_substring(
-                    trimmed,
-                    start=i + 1,
-                    end=trimmed.length(),
-                  ),
-                )
+                let raw_val = match line.find("=") {
+                  Some(raw_i) =>
+                    String::unsafe_substring(
+                      line,
+                      start=raw_i + 1,
+                      end=line.length(),
+                    )
+                  None =>
+                    String::unsafe_substring(
+                      trimmed,
+                      start=i + 1,
+                      end=trimmed.length(),
+                    )
+                }
+                let val = parse_config_value(raw_val)
                 if matches_value_filter(val, value_pattern, fixed_value) {
                   result.push(val)
                 }
@@ -1503,6 +1992,7 @@ fn encode_config_value(value : String) -> String {
     match c {
       '\n' => sb.write_string("\\n")
       '\t' => sb.write_string("\\t")
+      '\r' => sb.write_string("\\r")
       '"' => sb.write_string("\\\"")
       '\\' => sb.write_string("\\\\")
       _ => sb.write_char(c)
@@ -1519,33 +2009,237 @@ fn format_config_output_value(
   val : String,
   get_bool : Bool,
   get_int : Bool,
+  get_bool_or_int : Bool,
+  get_path : Bool,
+  get_expiry_date : Bool,
+  get_color : Bool,
+  key : String?,
+  source_name : String?,
+  line_hint : Int?,
 ) -> String raise Error {
-  // Value-less keys: --bool returns "true", otherwise empty string
+  // Value-less keys: --bool and --bool-or-int return "true"
   if is_config_novalue(val) {
-    if get_bool {
+    if get_bool || get_bool_or_int {
       return "true"
+    }
+    if get_path {
+      let mut msg = "bad pathname config value ''"
+      match key {
+        Some(k) => msg = msg + " for '\{k}'"
+        None => ()
+      }
+      match source_name {
+        Some(src) => {
+          msg = msg + " in file \{format_config_source_name(src)}"
+          match line_hint {
+            Some(line) => msg = msg + " line \{line}"
+            None => ()
+          }
+        }
+        None => ()
+      }
+      raise @bitcore.GitError::InvalidObject(msg)
     }
     return ""
   }
   if get_bool {
     match parse_bool_value(val) {
       Some(b) => if b { "true" } else { "false" }
+      None => {
+        let mut msg = "bad boolean config value '\{val}'"
+        match key {
+          Some(k) => msg = msg + " for '\{k}'"
+          None => ()
+        }
+        raise @bitcore.GitError::InvalidObject(msg)
+      }
+    }
+  } else if get_bool_or_int {
+    match parse_bool_keyword_value(val) {
+      Some(b) => if b { "true" } else { "false" }
       None =>
-        raise @bitcore.GitError::InvalidObject(
-          "bad boolean config value '\{val}'",
-        )
+        match parse_size_value(val) {
+          Some(n) => n.to_string()
+          None =>
+            raise @bitcore.GitError::InvalidObject(
+              "bad numeric or boolean config value '\{val}'",
+            )
+        }
+    }
+  } else if get_path {
+    if val.has_prefix("~/") {
+      match @sys.get_env_var("HOME") {
+        Some(home) =>
+          if home.length() == 0 {
+            raise @bitcore.GitError::InvalidObject(
+              "failed to expand user dir in: '\{val}'",
+            )
+          } else {
+            let rest = String::unsafe_substring(val, start=2, end=val.length())
+            if home.has_suffix("/") {
+              home + rest
+            } else {
+              home + "/" + rest
+            }
+          }
+        None =>
+          raise @bitcore.GitError::InvalidObject(
+            "failed to expand user dir in: '\{val}'",
+          )
+      }
+    } else {
+      val
+    }
+  } else if get_expiry_date {
+    let trimmed = val.trim().to_string().to_lower()
+    if trimmed == "never" || trimmed == "false" {
+      "0"
+    } else {
+      let key_for_error = match key {
+        Some(k) => k
+        None => ""
+      }
+      raise @bitcore.GitError::InvalidObject(
+        "'\{val}' for '\{key_for_error}' is not a valid timestamp",
+      )
+    }
+  } else if get_color {
+    match parse_config_color(val) {
+      Some(ansi) => ansi
+      None =>
+        raise @bitcore.GitError::InvalidObject("cannot parse color '\{val}'")
     }
   } else if get_int {
-    match parse_size_value(val) {
+    let (parsed, reason) = parse_config_int_value(val)
+    match parsed {
       Some(n) => n.to_string()
-      None =>
-        raise @bitcore.GitError::InvalidObject(
-          "bad numeric config value '\{val}'",
-        )
+      None => {
+        let mut msg = "bad numeric config value '\{val}'"
+        match key {
+          Some(k) => msg = msg + " for '\{k}'"
+          None => ()
+        }
+        match source_name {
+          Some(src) => msg = msg + " in file \{format_config_source_name(src)}"
+          None => ()
+        }
+        match reason {
+          Some(r) => msg = msg + ": \{r}"
+          None => ()
+        }
+        raise @bitcore.GitError::InvalidObject(msg)
+      }
     }
   } else {
     val
   }
+}
+
+///|
+fn parse_bool_keyword_value(value : String) -> Bool? {
+  let trimmed = value.trim().to_string().to_lower()
+  match trimmed {
+    "true" | "yes" | "on" => Some(true)
+    "false" | "no" | "off" | "" => Some(false)
+    _ => None
+  }
+}
+
+///|
+fn parse_config_int_value(val : String) -> (Int64?, String?) {
+  match parse_size_value(val) {
+    Some(n) => (Some(n), (None : String?))
+    None => {
+      let trimmed = val.trim().to_string().to_lower()
+      if trimmed.length() == 0 {
+        return ((None : Int64?), (None : String?))
+      }
+      let last = trimmed[trimmed.length() - 1]
+      let invalid_unit = not(last >= '0' && last <= '9') &&
+        last != 'k' &&
+        last != 'm' &&
+        last != 'g'
+      if invalid_unit {
+        ((None : Int64?), Some("invalid unit"))
+      } else {
+        ((None : Int64?), (None : String?))
+      }
+    }
+  }
+}
+
+///|
+fn format_config_source_name(source_name : String) -> String {
+  if source_name == "standard input" {
+    return source_name
+  }
+  if source_name.has_suffix("/.git/config") {
+    return ".git/config"
+  }
+  let mut slash_idx = -1
+  for i, c in source_name {
+    if c == '/' {
+      slash_idx = i
+    }
+  }
+  if slash_idx >= 0 {
+    String::unsafe_substring(
+      source_name,
+      start=slash_idx + 1,
+      end=source_name.length(),
+    )
+  } else {
+    source_name
+  }
+}
+
+///|
+fn parse_config_color(value : String) -> String? {
+  let trimmed = value.trim().to_string().to_lower()
+  let code = match trimmed {
+    "black" => "30"
+    "red" => "31"
+    "green" => "32"
+    "yellow" => "33"
+    "blue" => "34"
+    "magenta" => "35"
+    "cyan" => "36"
+    "white" => "37"
+    "normal" | "reset" => "0"
+    _ => return None
+  }
+  Some("\u001b[\{code}m")
+}
+
+///|
+fn resolve_real_git_for_config() -> String {
+  match @sys.get_env_var("SHIM_REAL_GIT") {
+    Some(path) =>
+      if path.length() > 0 {
+        path
+      } else {
+        @sys.get_env_var("GIT_SHIM_REAL_GIT").unwrap_or("/usr/bin/git")
+      }
+    None => @sys.get_env_var("GIT_SHIM_REAL_GIT").unwrap_or("/usr/bin/git")
+  }
+}
+
+///|
+async fn delegate_config_to_real_git(args : Array[String]) -> Unit {
+  let real_git = resolve_real_git_for_config()
+  let argv : Array[String] = ["config"]
+  for arg in args {
+    argv.push(arg)
+  }
+  let code = @process.run(
+    real_git,
+    argv,
+    inherit_env=true,
+    stdin=@stdio.stdin,
+    stdout=@stdio.stdout,
+    stderr=@stdio.stderr,
+  )
+  @sys.exit(code)
 }
 
 ///|
@@ -1563,6 +2257,29 @@ fn format_int_for_write(v : String) -> String raise Error {
     Some(n) => n.to_string()
     None =>
       raise @bitcore.GitError::InvalidObject("bad numeric config value '\{v}'")
+  }
+}
+
+///|
+fn format_bool_or_int_for_write(v : String) -> String raise Error {
+  match parse_bool_keyword_value(v) {
+    Some(b) => if b { "true" } else { "false" }
+    None =>
+      match parse_size_value(v) {
+        Some(n) => n.to_string()
+        None =>
+          raise @bitcore.GitError::InvalidObject(
+            "bad numeric or boolean config value '\{v}'",
+          )
+      }
+  }
+}
+
+///|
+fn format_color_for_write(v : String) -> String raise Error {
+  match parse_config_color(v) {
+    Some(_) => v
+    None => raise @bitcore.GitError::InvalidObject("cannot parse color '\{v}'")
   }
 }
 
@@ -1761,6 +2478,22 @@ fn set_config(
   comment : String?,
   value_pattern : String?,
 ) -> Unit raise Error {
+  set_config_with_fixed_value(
+    fs, config_path, key, value, add_mode, comment, value_pattern, false,
+  )
+}
+
+///|
+fn set_config_with_fixed_value(
+  fs : OsFs,
+  config_path : String,
+  key : String,
+  value : String,
+  add_mode : Bool,
+  comment : String?,
+  value_pattern : String?,
+  fixed_value : Bool,
+) -> Unit raise Error {
   let rfs : &@bitcore.RepoFileSystem = fs
   let wfs : &@bitcore.FileSystem = fs
   guard parse_config_key(key) is Some((section, subsection, name)) else {
@@ -1791,10 +2524,7 @@ fn set_config(
     return
   }
   let content = decode_bytes(rfs.read_file(config_path))
-  let lines : Array[String] = []
-  for line_view in content.split("\n") {
-    lines.push(line_view.to_string())
-  }
+  let lines = split_config_lines_preserve_cr(content)
   if lines.length() > 0 && lines[lines.length() - 1] == "" {
     ignore(lines.pop())
   }
@@ -1806,8 +2536,40 @@ fn set_config(
     for line in lines {
       let trimmed = trim_string(line)
       match parse_section_header_line(trimmed) {
-        Some((hs, hsub, _, _)) =>
+        Some((hs, hsub, rest, _)) => {
           in_sec = section_header_matches(hs, hsub, section, subsection)
+          if in_sec && rest.length() > 0 {
+            let inline_eq_idx = rest.find("=")
+            match inline_eq_idx {
+              Some(idx) => {
+                let inline_key = trim_chars(
+                  String::unsafe_substring(rest, start=0, end=idx),
+                  " \t",
+                )
+                if inline_key.to_lower() == name_l {
+                  let inline_val = parse_config_value(
+                    String::unsafe_substring(
+                      rest,
+                      start=idx + 1,
+                      end=rest.length(),
+                    ),
+                  )
+                  if matches_value_filter(inline_val, Some(vp), fixed_value) {
+                    match_count += 1
+                  }
+                }
+              }
+              None => {
+                let inline_key = trim_chars(rest, " \t")
+                if inline_key.to_lower() == name_l {
+                  if matches_value_filter("", Some(vp), fixed_value) {
+                    match_count += 1
+                  }
+                }
+              }
+            }
+          }
+        }
         None =>
           if in_sec {
             let eq_idx = trimmed.find("=")
@@ -1825,12 +2587,19 @@ fn set_config(
                       end=trimmed.length(),
                     ),
                   )
-                  if config_value_pattern_matches(val, vp) {
+                  if matches_value_filter(val, Some(vp), fixed_value) {
                     match_count += 1
                   }
                 }
               }
-              None => ()
+              None => {
+                let key_part = trim_chars(trimmed, " \t")
+                if key_part.to_lower() == name_l {
+                  if matches_value_filter("", Some(vp), fixed_value) {
+                    match_count += 1
+                  }
+                }
+              }
             }
           }
       }
@@ -1842,7 +2611,16 @@ fn set_config(
     }
     if match_count == 0 {
       // No match: add as new entry (like --add)
-      set_config(fs, config_path, key, value, true, comment, None)
+      set_config_with_fixed_value(
+        fs,
+        config_path,
+        key,
+        value,
+        true,
+        comment,
+        None,
+        false,
+      )
       return
     }
     // Exactly 1 match: replace it
@@ -1852,8 +2630,46 @@ fn set_config(
     for line in lines {
       let trimmed = trim_string(line)
       match parse_section_header_line(trimmed) {
-        Some((hs, hsub, _, _)) => {
+        Some((hs, hsub, rest, _)) => {
           in_sec2 = section_header_matches(hs, hsub, section, subsection)
+          if in_sec2 && not(replaced) && rest.length() > 0 {
+            let inline_eq_idx = rest.find("=")
+            let mut inline_match = false
+            match inline_eq_idx {
+              Some(idx) => {
+                let inline_key = trim_chars(
+                  String::unsafe_substring(rest, start=0, end=idx),
+                  " \t",
+                )
+                if inline_key.to_lower() == name_l {
+                  let inline_val = parse_config_value(
+                    String::unsafe_substring(
+                      rest,
+                      start=idx + 1,
+                      end=rest.length(),
+                    ),
+                  )
+                  inline_match = matches_value_filter(
+                    inline_val,
+                    Some(vp),
+                    fixed_value,
+                  )
+                }
+              }
+              None => {
+                let inline_key = trim_chars(rest, " \t")
+                if inline_key.to_lower() == name_l {
+                  inline_match = matches_value_filter("", Some(vp), fixed_value)
+                }
+              }
+            }
+            if inline_match {
+              result.push(reconstruct_section_header(hs, hsub))
+              result.push("\t" + name + " = " + encoded_value + comment_suffix)
+              replaced = true
+              continue
+            }
+          }
           result.push(line)
         }
         None => {
@@ -1873,7 +2689,7 @@ fn set_config(
                       end=trimmed.length(),
                     ),
                   )
-                  if config_value_pattern_matches(val, vp) {
+                  if matches_value_filter(val, Some(vp), fixed_value) {
                     result.push(
                       "\t" + name + " = " + encoded_value + comment_suffix,
                     )
@@ -1882,7 +2698,18 @@ fn set_config(
                   }
                 }
               }
-              None => ()
+              None => {
+                let key_part = trim_chars(trimmed, " \t")
+                if key_part.to_lower() == name_l {
+                  if matches_value_filter("", Some(vp), fixed_value) {
+                    result.push(
+                      "\t" + name + " = " + encoded_value + comment_suffix,
+                    )
+                    replaced = true
+                    continue
+                  }
+                }
+              }
             }
           }
           result.push(line)
@@ -2014,10 +2841,7 @@ fn unset_config(
   }
   let name_l = name.to_lower()
   let content = decode_bytes(rfs.read_file(config_path))
-  let lines : Array[String] = []
-  for line_view in content.split("\n") {
-    lines.push(line_view.to_string())
-  }
+  let lines = split_config_lines_preserve_cr(content)
   if lines.length() > 0 && lines[lines.length() - 1] == "" {
     ignore(lines.pop())
   }
@@ -2242,6 +3066,7 @@ fn replace_all_config(
   key : String,
   value : String,
   value_pattern : String?,
+  fixed_value : Bool,
   comment : String?,
 ) -> Unit raise Error {
   let rfs : &@bitcore.RepoFileSystem = fs
@@ -2265,10 +3090,7 @@ fn replace_all_config(
     return
   }
   let content = decode_bytes(rfs.read_file(config_path))
-  let lines : Array[String] = []
-  for line_view in content.split("\n") {
-    lines.push(line_view.to_string())
-  }
+  let lines = split_config_lines_preserve_cr(content)
   if lines.length() > 0 && lines[lines.length() - 1] == "" {
     ignore(lines.pop())
   }
@@ -2299,10 +3121,7 @@ fn replace_all_config(
                     end=rest.length(),
                   ),
                 )
-                let pm = match value_pattern {
-                  Some(vp) => config_value_pattern_matches(val, vp)
-                  None => true
-                }
+                let pm = matches_value_filter(val, value_pattern, fixed_value)
                 if pm {
                   last_match_idx = i
                   last_match_is_inline = true
@@ -2312,7 +3131,8 @@ fn replace_all_config(
             None => {
               // Value-less inline key
               let inline_key = trim_chars(rest, " \t")
-              if inline_key.to_lower() == name_l && value_pattern is None {
+              if inline_key.to_lower() == name_l &&
+                matches_value_filter("", value_pattern, fixed_value) {
                 last_match_idx = i
                 last_match_is_inline = true
               }
@@ -2338,17 +3158,23 @@ fn replace_all_config(
                 end=trimmed.length(),
               ),
             )
-            let pattern_matches = match value_pattern {
-              Some(vp) => config_value_pattern_matches(val, vp)
-              None => true
-            }
+            let pattern_matches = matches_value_filter(
+              val, value_pattern, fixed_value,
+            )
             if pattern_matches {
               last_match_idx = i
               last_match_is_inline = false
             }
           }
         }
-        None => ()
+        None => {
+          let key_part = trim_chars(trimmed, " \t")
+          if key_part.to_lower() == name_l &&
+            matches_value_filter("", value_pattern, fixed_value) {
+            last_match_idx = i
+            last_match_is_inline = false
+          }
+        }
       }
     }
   }
@@ -2423,16 +3249,21 @@ fn replace_all_config(
                   end=trimmed.length(),
                 ),
               )
-              let pattern_matches = match value_pattern {
-                Some(vp) => config_value_pattern_matches(val, vp)
-                None => true
-              }
+              let pattern_matches = matches_value_filter(
+                val, value_pattern, fixed_value,
+              )
               if pattern_matches {
                 continue // skip earlier matches
               }
             }
           }
-          None => ()
+          None => {
+            let key_part = trim_chars(trimmed, " \t")
+            if key_part.to_lower() == name_l &&
+              matches_value_filter("", value_pattern, fixed_value) {
+              continue
+            }
+          }
         }
       }
       result.push(line)
@@ -2457,6 +3288,8 @@ async fn get_regexp_config(
   fs : &@bitcore.RepoFileSystem,
   config_path : String,
   pattern : String,
+  value_pattern : String?,
+  fixed_value : Bool,
   get_bool : Bool,
   get_int : Bool,
   name_only : Bool,
@@ -2466,11 +3299,25 @@ async fn get_regexp_config(
     return false
   }
   let content = decode_bytes(fs.read_file(config_path))
-  let raw_lines : Array[String] = []
-  for line_view in content.split("\n") {
-    raw_lines.push(line_view.to_string())
-  }
-  let lines = preprocess_config_lines(raw_lines)
+  get_regexp_config_from_content(
+    content, pattern, value_pattern, fixed_value, get_bool, get_int, name_only, null_terminator,
+    config_path,
+  )
+}
+
+///|
+async fn get_regexp_config_from_content(
+  content : String,
+  pattern : String,
+  value_pattern : String?,
+  fixed_value : Bool,
+  get_bool : Bool,
+  get_int : Bool,
+  name_only : Bool,
+  null_terminator : Bool,
+  source_name : String,
+) -> Bool raise Error {
+  let lines = config_lines_from_content(content)
   let mut current_section = ""
   let mut current_subsection : String? = None
   let mut found = false
@@ -2517,7 +3364,9 @@ async fn get_regexp_config(
               Some(sub) => current_section + "." + sub + "." + key_part
               None => current_section + "." + key_part
             }
-            if config_regex_matches(full_key, pattern) {
+            let match_val = if is_config_novalue(val) { "" } else { val }
+            if config_regex_matches(full_key, pattern) &&
+              matches_value_filter(match_val, value_pattern, fixed_value) {
               found = true
               if name_only {
                 if null_terminator {
@@ -2540,7 +3389,16 @@ async fn get_regexp_config(
                 }
               } else {
                 let formatted = format_config_output_value(
-                  val, get_bool, get_int,
+                  val,
+                  get_bool,
+                  get_int,
+                  false,
+                  false,
+                  false,
+                  false,
+                  Some(full_key),
+                  Some(source_name),
+                  (None : Int?),
                 )
                 if null_terminator {
                   print_nul_terminated(full_key + "\n" + formatted)
@@ -2587,10 +3445,7 @@ fn remove_config_section_file(
     (parts[0], Some(sub.join(".")))
   }
   let content = decode_bytes(rfs.read_file(config_path))
-  let lines : Array[String] = []
-  for line_view in content.split("\n") {
-    lines.push(line_view.to_string())
-  }
+  let lines = split_config_lines_preserve_cr(content)
   if lines.length() > 0 && lines[lines.length() - 1] == "" {
     ignore(lines.pop())
   }
@@ -2688,12 +3543,32 @@ fn rename_config_section(
     "[\{new_parts[0]} \"\{sub_joined}\"]"
   }
   let content = decode_bytes(rfs.read_file(config_path))
-  let lines : Array[String] = []
-  for line_view in content.split("\n") {
-    lines.push(line_view.to_string())
-  }
+  let lines = split_config_lines_preserve_cr(content)
   if lines.length() > 0 && lines[lines.length() - 1] == "" {
     ignore(lines.pop())
+  }
+  let mut slash_idx = -1
+  for i, c in config_path {
+    if c == '/' {
+      slash_idx = i
+    }
+  }
+  let path_for_error = if slash_idx >= 0 {
+    String::unsafe_substring(
+      config_path,
+      start=slash_idx + 1,
+      end=config_path.length(),
+    )
+  } else {
+    config_path
+  }
+  let max_config_line_len = 512 * 1024
+  for i, line in lines {
+    if line.length() >= max_config_line_len {
+      raise @bitcore.GitError::InvalidObject(
+        "refusing to work with overly long line in '\{path_for_error}' on line \{i + 1}",
+      )
+    }
   }
   let mut found = false
   let result : Array[String] = []

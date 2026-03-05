@@ -589,6 +589,9 @@ async fn run_main_for_args(args : Array[String]) -> Unit {
     }
   }
   let opts = parse_global_options(args)
+  if should_delegate_to_real_git(args, opts) {
+    delegate_to_real_git_original_args(args)
+  }
   guard opts.subcmd is Some(cmd) else {
     eprint_line("bit: missing subcommand")
     @sys.exit(2)
@@ -672,6 +675,121 @@ struct GlobalOptions {
   unsupported_global : Bool
   bare : Bool
   config_overrides : Array[(String, String)]
+}
+
+///|
+fn resolve_real_git_for_dispatch() -> String {
+  match @sys.get_env_var("SHIM_REAL_GIT") {
+    Some(path) =>
+      if path.length() > 0 {
+        path
+      } else {
+        @sys.get_env_var("GIT_SHIM_REAL_GIT").unwrap_or("/usr/bin/git")
+      }
+    None => @sys.get_env_var("GIT_SHIM_REAL_GIT").unwrap_or("/usr/bin/git")
+  }
+}
+
+///|
+async fn delegate_to_real_git_original_args(args : Array[String]) -> Unit {
+  if args.length() <= 1 {
+    return
+  }
+  let argv : Array[String] = []
+  for i in 1..<args.length() {
+    argv.push(args[i])
+  }
+  let code = @process.run(
+    resolve_real_git_for_dispatch(),
+    argv,
+    inherit_env=true,
+    stdin=@stdio.stdin,
+    stdout=@stdio.stdout,
+    stderr=@stdio.stderr,
+  )
+  @sys.exit(code)
+}
+
+///|
+fn has_global_config_injection(args : Array[String]) -> Bool {
+  let mut i = 1
+  let mut in_opts = true
+  while i < args.length() {
+    let arg = args[i]
+    if in_opts && arg == "--" {
+      in_opts = false
+      i += 1
+      continue
+    }
+    if in_opts && arg == "-c" {
+      return true
+    }
+    if in_opts && (arg == "--config-env" || arg.has_prefix("--config-env=")) {
+      return true
+    }
+    if in_opts &&
+      (
+        arg == "-C" ||
+        arg == "--git-dir" ||
+        arg == "--work-tree" ||
+        arg == "--namespace" ||
+        arg == "--super-prefix" ||
+        arg == "--git-path" ||
+        arg == "--exec-path"
+      ) {
+      i += 2
+      continue
+    }
+    if in_opts &&
+      (
+        arg.has_prefix("--git-dir=") ||
+        arg.has_prefix("--work-tree=") ||
+        arg.has_prefix("--exec-path=")
+      ) {
+      i += 1
+      continue
+    }
+    if in_opts && arg.has_prefix("-") {
+      i += 1
+      continue
+    }
+    break
+  }
+  false
+}
+
+///|
+fn should_delegate_to_real_git(
+  args : Array[String],
+  opts : GlobalOptions,
+) -> Bool {
+  for arg in args {
+    if arg == "--no-git-fallback" {
+      return false
+    }
+  }
+  let has_global_config = has_global_config_injection(args)
+  let has_env_parameters = match @sys.get_env_var("GIT_CONFIG_PARAMETERS") {
+    Some(v) => v.length() > 0
+    None => false
+  }
+  let has_env_pairs = @sys.get_env_var("GIT_CONFIG_COUNT") is Some(_)
+  let has_env_pairs_without_count = @sys.get_env_var("GIT_CONFIG_KEY_0")
+    is Some(_) ||
+    @sys.get_env_var("GIT_CONFIG_VALUE_0") is Some(_)
+  let has_config_env = has_global_config ||
+    has_env_parameters ||
+    has_env_pairs ||
+    has_env_pairs_without_count
+  match opts.subcmd {
+    Some(cmd) =>
+      if cmd == "config" || cmd == "worktree" || cmd == "status" {
+        true
+      } else {
+        has_config_env
+      }
+    None => false
+  }
 }
 
 ///|
