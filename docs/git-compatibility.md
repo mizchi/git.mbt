@@ -102,6 +102,12 @@ The following are intentionally rejected with explicit standalone-mode errors (c
 - `cat-file --batch-all-objects` with `%(objectsize:disk)`
 - unsupported option sets for `index-pack` and `pack-objects`
 
+## Target-Specific Limitations
+
+- JS target does not provide SSH process transport for `clone` / `fetch` / `pull` / `push`.
+  - Affected URL forms: `ssh://...`, `git@host:path`
+  - Use HTTP(S) remotes or relay URLs (`relay+https://...`) instead.
+
 ## Where Git Fallback Exists
 
 - Main `bit` command dispatch in `src/cmd/bit/main.mbt` does not auto-delegate unknown commands to system git.

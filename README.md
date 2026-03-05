@@ -220,6 +220,7 @@ The following features are **not supported** and will produce a fatal error:
 
 **Network**
 - SSH URLs (`git@...`) in `bit cat` / `bit tree` commands
+- JS target: SSH transport (`ssh://`, `git@...`) in `clone` / `fetch` / `pull` / `push` (use HTTP(S) or relay URLs)
 
 **Shell**
 - Shell aliases (prefixed with `!`)

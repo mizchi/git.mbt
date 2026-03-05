@@ -40,7 +40,8 @@ allowlist: 990 テスト
 - [x] proxied relay URL 検出修正（2026-02-24, PR #16）
 - [x] `bit relay serve` を JS target で有効化（2026-02-23）
 - [ ] SSH clone の JS target 対応（Issue #18）
-  - native-only の制約を文書化 or HTTP smart protocol で JS 対応
+  - [x] native-only の制約を文書化（2026-03-05）
+  - [ ] HTTP smart protocol で JS 対応
   - relay 経由 clone は両 target で動作済み
 
 ## P2: パフォーマンス
