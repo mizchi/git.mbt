@@ -210,6 +210,7 @@ pub async fn add_paths_async(
   root : String,
   paths : Array[String],
   run_filter_cmd? : FilterCmd,
+  warnings? : Array[String],
 ) -> Unit raise @bit.GitError {
   let git_dir = join_path(root, ".git")
   let actual_git_dir = if rfs.is_file(git_dir) {
@@ -267,6 +268,16 @@ pub async fn add_paths_async(
               _ => content
             }
             let normalized = clean_for_storage(content, attrs, autocrlf)
+            // Collect CRLF conversion warnings
+            match warnings {
+              Some(warns) =>
+                if not(is_binary_bytes(content)) {
+                  collect_crlf_warnings(
+                    warns, path, content, normalized, attrs, autocrlf,
+                  )
+                }
+              None => ()
+            }
             let id = write_loose_object(
               fs,
               actual_git_dir,
@@ -514,6 +525,21 @@ pub fn read_autocrlf_setting(
       None => ()
     }
   }
+  // GIT_CONFIG_OVERRIDES has highest priority (set by `git -c key=value`)
+  match @bitio.env_get("GIT_CONFIG_OVERRIDES") {
+    Some(env_value) =>
+      for line_view in env_value.split("\n") {
+        let line = line_view.to_string().trim().to_string()
+        if line.to_lower().has_prefix("core.autocrlf=") {
+          let v = String::unsafe_substring(line, start=14, end=line.length())
+            .trim()
+            .to_string()
+            .to_lower()
+          value = Some(parse_autocrlf_value(v))
+        }
+      }
+    None => ()
+  }
   match value {
     Some(v) => v
     None => AutoCrlf::Off
@@ -578,6 +604,121 @@ fn parse_autocrlf_from_content(content : String) -> AutoCrlf? {
     }
   }
   value
+}
+
+///|
+pub fn read_core_eol_setting(
+  fs : &@bit.RepoFileSystem,
+  git_dir : String,
+) -> EolAttr {
+  let mut value : EolAttr = EolAttr::Unspecified
+  match @bitio.env_get("HOME") {
+    None => ()
+    Some(home) => {
+      let candidates : Array[String] = []
+      if @bitio.env_get("XDG_CONFIG_HOME") is Some(base) {
+        candidates.push(base + "/git/config")
+      }
+      candidates.push(home + "/.gitconfig")
+      for path in candidates {
+        if fs.is_file(path) {
+          match read_core_eol_from_config(fs, path) {
+            Some(v) => value = v
+            None => ()
+          }
+          break
+        }
+      }
+    }
+  }
+  let local_path = join_path(git_dir, "config")
+  if fs.is_file(local_path) {
+    match read_core_eol_from_config(fs, local_path) {
+      Some(v) => value = v
+      None => ()
+    }
+  }
+  // GIT_CONFIG_OVERRIDES has highest priority
+  match @bitio.env_get("GIT_CONFIG_OVERRIDES") {
+    Some(env_value) =>
+      for line_view in env_value.split("\n") {
+        let line = line_view.to_string().trim().to_string()
+        if line.to_lower().has_prefix("core.eol=") {
+          let v = String::unsafe_substring(line, start=9, end=line.length())
+            .trim()
+            .to_string()
+            .to_lower()
+          value = parse_eol_value(v)
+        }
+      }
+    None => ()
+  }
+  value
+}
+
+///|
+fn read_core_eol_from_config(
+  fs : &@bit.RepoFileSystem,
+  path : String,
+) -> EolAttr? {
+  let bytes = fs.read_file(path) catch { _ => return None }
+  let content = @utf8.decode_lossy(bytes[:])
+  let mut section = ""
+  let mut value : EolAttr? = None
+  for line_view in content.split("\n") {
+    let line = line_view.trim().to_string()
+    if line.length() == 0 {
+      continue
+    }
+    if line.has_prefix("#") || line.has_prefix(";") {
+      continue
+    }
+    if line.has_prefix("[") && line.has_suffix("]") {
+      let inner = String::unsafe_substring(line, start=1, end=line.length() - 1)
+      let inner_trim = inner.trim().to_string()
+      let section_name = match inner_trim.find(" ") {
+        Some(i) => String::unsafe_substring(inner_trim, start=0, end=i)
+        None => inner_trim
+      }
+      section = section_name.to_lower()
+      continue
+    }
+    if section != "core" {
+      continue
+    }
+    match line.find("=") {
+      None => ()
+      Some(idx) => {
+        let key = String::unsafe_substring(line, start=0, end=idx)
+          .trim()
+          .to_string()
+          .to_lower()
+        if key != "eol" {
+          continue
+        }
+        let raw_value = String::unsafe_substring(
+            line,
+            start=idx + 1,
+            end=line.length(),
+          )
+          .trim()
+          .to_string()
+          .to_lower()
+        value = Some(parse_eol_value(raw_value))
+      }
+    }
+  }
+  value
+}
+
+///|
+fn parse_eol_value(value : String) -> EolAttr {
+  match value {
+    "lf" => EolAttr::Lf
+    "crlf" => EolAttr::Crlf
+    "native" => EolAttr::Lf // On Linux/macOS, native = LF
+    _ => EolAttr::Unspecified
+  }
 }
 
 ///|
@@ -698,6 +839,79 @@ pub fn is_binary_bytes(content : Bytes) -> Bool {
   let limit = if content.length() > 8000 { 8000 } else { content.length() }
   for i in 0..<limit {
     if content[i] == b'\x00' {
+      return true
+    }
+  }
+  false
+}
+
+///|
+fn collect_crlf_warnings(
+  warns : Array[String],
+  path : String,
+  original : Bytes,
+  normalized : Bytes,
+  attrs : FileEolAttrs,
+  autocrlf : AutoCrlf,
+) -> Unit {
+  // Check if content was actually changed (CRLF→LF normalization happened)
+  let has_crlf_in_original = bytes_contains_crlf(original)
+  if has_crlf_in_original && original.length() != normalized.length() {
+    // CRLF was replaced by LF in the repository
+    // Now check if smudge would convert back to CRLF
+    let would_crlf = match attrs.text {
+      Unset => false
+      Set | Auto =>
+        match attrs.eol {
+          Crlf => true
+          Lf | Unspecified => autocrlf is On
+        }
+      Unspecified => autocrlf is On
+    }
+    if would_crlf {
+      warns.push(
+        "warning: in the working copy of '\{path}', CRLF will be replaced by LF the next time Git touches it",
+      )
+    } else {
+      warns.push(
+        "warning: in the working copy of '\{path}', CRLF will be replaced by LF",
+      )
+    }
+  } else if not(has_crlf_in_original) && bytes_contains_lf(original) {
+    // File has LF only. Check if smudge would add CRLF
+    let would_crlf = match attrs.text {
+      Unset => false
+      Set | Auto =>
+        match attrs.eol {
+          Crlf => true
+          Lf | Unspecified => autocrlf is On
+        }
+      Unspecified => autocrlf is On
+    }
+    if would_crlf {
+      warns.push(
+        "warning: in the working copy of '\{path}', LF will be replaced by CRLF",
+      )
+    }
+  }
+}
+
+///|
+fn bytes_contains_crlf(content : Bytes) -> Bool {
+  let mut i = 0
+  while i + 1 < content.length() {
+    if content[i] == b'\r' && content[i + 1] == b'\n' {
+      return true
+    }
+    i += 1
+  }
+  false
+}
+
+///|
+fn bytes_contains_lf(content : Bytes) -> Bool {
+  for i in 0..<content.length() {
+    if content[i] == b'\n' {
       return true
     }
   }

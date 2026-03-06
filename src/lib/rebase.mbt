@@ -489,6 +489,7 @@ fn rebase_write_worktree_except(
   except : Array[String],
 ) -> Unit raise @bit.GitError {
   let autocrlf = read_autocrlf_setting(rfs, git_dir)
+  let core_eol = read_core_eol_setting(rfs, git_dir)
   let except_set : Map[String, Bool] = {}
   for path in except {
     except_set[path] = true
@@ -520,7 +521,7 @@ fn rebase_write_worktree_except(
         let dir = rebase_parent_dir(full)
         fs.mkdir_p(dir)
         let attrs = resolve_eol_attrs(rfs, root, path)
-        let output = smudge_for_checkout(o.data, attrs, autocrlf)
+        let output = smudge_for_checkout(o.data, attrs, autocrlf, core_eol~)
         fs.write_file(full, output)
       }
       None => raise @bit.GitError::InvalidObject("Missing blob object")

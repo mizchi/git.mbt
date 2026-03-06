@@ -53,9 +53,20 @@ async fn handle_ls_files(args : Array[String]) -> Unit raise Error {
   }
   if show_eol {
     let db = @bitlib.ObjectDb::load_lazy(fs, git_dir)
+    // Tracked entries (cached or deleted)
     for e in entries {
       if not(ls_files_matches_filters(e.path, filters)) {
         continue
+      }
+      let abs = root + "/" + e.path
+      let file_exists = fs.is_file(abs)
+      // If show_deleted, only show entries where file is missing
+      if show_deleted && file_exists {
+        continue
+      }
+      // Default (cached): skip deleted unless show_deleted
+      if not(show_deleted) && not(file_exists) && not(show_others) {
+        // still show in default cached mode
       }
       // Detect index EOL from blob content
       let i_eol = match db.get(fs, e.id) {
@@ -64,8 +75,7 @@ async fn handle_ls_files(args : Array[String]) -> Unit raise Error {
         _ => ""
       }
       // Detect worktree EOL from file on disk
-      let abs = root + "/" + e.path
-      let w_eol = if fs.is_file(abs) {
+      let w_eol = if file_exists {
         let content = fs.read_file(abs) catch { _ => Bytes::default() }
         detect_eol_type(content)
       } else {
@@ -77,6 +87,32 @@ async fn handle_ls_files(args : Array[String]) -> Unit raise Error {
       print_str(
         "i/\{i_eol}\tw/\{w_eol}\tattr/\{attr_str}\t\{e.path}" + terminator,
       )
+    }
+    // Untracked files (show_others)
+    if show_others {
+      let tracked : Map[String, Bool] = {}
+      for e in entries {
+        tracked[e.path] = true
+      }
+      let all_files = @ignore.list_working_files_async(fs, root)
+      for path in all_files {
+        if tracked.contains(path) {
+          continue
+        }
+        if not(ls_files_matches_filters(path, filters)) {
+          continue
+        }
+        let abs = root + "/" + path
+        let w_eol = if fs.is_file(abs) {
+          let content = fs.read_file(abs) catch { _ => Bytes::default() }
+          detect_eol_type(content)
+        } else {
+          ""
+        }
+        let attrs = @bitlib.resolve_eol_attrs(fs, root, path)
+        let attr_str = format_eol_attr(attrs)
+        print_str("i/\tw/\{w_eol}\tattr/\{attr_str}\t\{path}" + terminator)
+      }
     }
     return ()
   }
@@ -705,27 +741,39 @@ fn detect_eol_type(content : Bytes) -> String {
   if content.length() == 0 {
     return ""
   }
+  // Binary detection (git gather_stats compatible)
   let limit = if content.length() > 8000 { 8000 } else { content.length() }
-  for i in 0..<limit {
-    if content[i] == b'\x00' {
-      return ""
-    }
-  }
+  let mut i = 0
   let mut has_lf = false
   let mut has_crlf = false
-  let mut i = 0
-  while i < content.length() {
-    if content[i] == b'\r' &&
-      i + 1 < content.length() &&
-      content[i + 1] == b'\n' {
-      has_crlf = true
-      i += 2
-    } else if content[i] == b'\n' {
-      has_lf = true
-      i += 1
-    } else {
-      i += 1
+  while i < limit {
+    let b = content[i]
+    // NUL byte → binary
+    if b == b'\x00' {
+      return "-text"
     }
+    // lone CR (CR not followed by LF) → binary
+    if b == b'\r' {
+      if i + 1 < limit && content[i + 1] == b'\n' {
+        has_crlf = true
+        i += 2
+        continue
+      } else {
+        return "-text"
+      }
+    }
+    // SOH (\x01) at position < 128 → binary
+    if b == 0x01 && i < 128 {
+      return "-text"
+    }
+    // EOF/^Z (\x1a) at position < 128 → binary
+    if b == 0x1a && i < 128 {
+      return "-text"
+    }
+    if b == b'\n' {
+      has_lf = true
+    }
+    i += 1
   }
   if has_crlf && has_lf {
     "mixed"
@@ -734,7 +782,7 @@ fn detect_eol_type(content : Bytes) -> String {
   } else if has_lf {
     "lf"
   } else {
-    ""
+    "none"
   }
 }
 

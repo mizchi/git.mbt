@@ -736,6 +736,7 @@ fn checkout_to_worktree(
   commit_id : @bit.ObjectId,
 ) -> Unit raise @bit.GitError {
   let autocrlf = read_autocrlf_setting(rfs, git_dir)
+  let core_eol = read_core_eol_setting(rfs, git_dir)
   let db = ObjectDb::load(rfs, git_dir)
   let files = collect_tree_files_from_commit(db, rfs, commit_id)
   // Write files to worktree
@@ -754,7 +755,7 @@ fn checkout_to_worktree(
     match obj {
       Some(o) => {
         let attrs = resolve_eol_attrs(rfs, worktree_path, path)
-        let output = smudge_for_checkout(o.data, attrs, autocrlf)
+        let output = smudge_for_checkout(o.data, attrs, autocrlf, core_eol~)
         fs.write_file(abs_path, output)
       }
       None => ()

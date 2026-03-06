@@ -10,7 +10,7 @@ import {
 // Values
 pub fn add_paths(&@types.FileSystem, &@types.RepoFileSystem, String, Array[String]) -> Unit raise @object.GitError
 
-pub async fn add_paths_async(&@types.FileSystem, &@types.RepoFileSystem, String, Array[String], run_filter_cmd? : FilterCmd) -> Unit raise @object.GitError
+pub async fn add_paths_async(&@types.FileSystem, &@types.RepoFileSystem, String, Array[String], run_filter_cmd? : FilterCmd, warnings? : Array[String]) -> Unit raise @object.GitError
 
 pub fn append_reflog(&@types.FileSystem, &@types.RepoFileSystem, String, String, @object.ObjectId, @object.ObjectId, String, String, Int64, String, String) -> Unit raise @object.GitError
 
@@ -260,6 +260,8 @@ pub fn read_config_value(&@types.RepoFileSystem, String, String, String) -> Stri
 
 pub fn read_config_values(&@types.RepoFileSystem, String, String, String) -> Array[String]
 
+pub fn read_core_eol_setting(&@types.RepoFileSystem, String) -> EolAttr
+
 pub fn read_filter_commands(&@types.RepoFileSystem, String, String) -> (String?, String?)
 
 pub fn read_head_ref(&@types.RepoFileSystem, String) -> HeadRef raise @object.GitError
@@ -364,7 +366,7 @@ pub fn show_ref(&@types.RepoFileSystem, String) -> Array[(String, @object.Object
 
 pub fn show_ref_text(&@types.RepoFileSystem, String) -> Array[String] raise @object.GitError
 
-pub fn smudge_for_checkout(Bytes, FileEolAttrs, AutoCrlf) -> Bytes
+pub fn smudge_for_checkout(Bytes, FileEolAttrs, AutoCrlf, core_eol? : EolAttr) -> Bytes
 
 pub fn smudge_worktree_content(Bytes, AutoCrlf) -> Bytes
 

@@ -156,13 +156,18 @@ async fn handle_add(args : Array[String]) -> Unit raise Error {
       let filter_cmd = @bitlib.FilterCmd::{
         run: @bitlibnative.run_filter_command,
       }
+      let crlf_warnings : Array[String] = []
       @bitlib.add_paths_async(
         fs,
         fs,
         root,
         all_paths,
         run_filter_cmd=filter_cmd,
+        warnings=crlf_warnings,
       )
+      for msg in crlf_warnings {
+        eprint_line(msg)
+      }
       stage_submodule_gitlinks(fs, root, all_paths)
 
       let post_code = run_add_hook(fs, root, git_dir, "post-add")
@@ -191,13 +196,18 @@ async fn handle_add(args : Array[String]) -> Unit raise Error {
     let filter_cmd = @bitlib.FilterCmd::{
       run: @bitlibnative.run_filter_command,
     }
+    let crlf_warnings : Array[String] = []
     @bitlib.add_paths_async(
       fs,
       fs,
       root,
       stage_paths,
       run_filter_cmd=filter_cmd,
+      warnings=crlf_warnings,
     )
+    for msg in crlf_warnings {
+      eprint_line(msg)
+    }
     stage_submodule_gitlinks(fs, root, stage_paths)
   }
   if not(force) && add_has_explicit_ignored_path(fs, root, paths) {

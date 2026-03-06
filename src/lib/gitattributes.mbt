@@ -115,6 +115,10 @@ pub fn resolve_eol_attrs(
       j += 1
     }
   }
+  // git: eol=lf/crlf implicitly sets text (like "text eol=lf")
+  if text is Unspecified && not(eol is Unspecified) {
+    text = Set
+  }
   { text, eol, filter }
 }
 
@@ -180,6 +184,7 @@ pub fn smudge_for_checkout(
   content : Bytes,
   attrs : FileEolAttrs,
   autocrlf : AutoCrlf,
+  core_eol? : EolAttr = Unspecified,
 ) -> Bytes {
   match attrs.text {
     Unset => content // -text: no conversion
@@ -195,9 +200,15 @@ pub fn smudge_for_checkout(
         Lf => content // eol=lf: keep LF
         Crlf => convert_lf_to_crlf(content) // eol=crlf: expand
         Unspecified =>
-          // No eol attribute: use native line ending (on Windows CRLF, else LF)
-          // For now, follow autocrlf setting as a proxy for platform
-          smudge_worktree_content(content, autocrlf)
+          // No eol attribute: check autocrlf, then core.eol
+          if autocrlf is On {
+            convert_lf_to_crlf(content)
+          } else {
+            match core_eol {
+              Crlf => convert_lf_to_crlf(content)
+              _ => content // Lf or Unspecified: keep LF (native on Linux/macOS)
+            }
+          }
       }
     }
     Unspecified =>
