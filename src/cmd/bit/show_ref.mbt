@@ -9,19 +9,50 @@ async fn handle_show_ref(args : Array[String]) -> Unit raise Error {
   let mut verify = false
   let mut exists = false
   let mut quiet = false
+  let mut dereference = false
+  let mut show_head = false
+  let mut exclude_existing = false
+  let mut _exclude_existing_prefix = ""
   let patterns : Array[String] = []
   for arg in args {
     match arg {
-      "--heads" => heads_only = true
+      "--heads" | "--branches" => heads_only = true
       "--tags" => tags_only = true
       "-s" | "--hash" => hash_only = true
       "--verify" => verify = true
       "--exists" => exists = true
       "-q" | "--quiet" => quiet = true
+      "-d" | "--dereference" => dereference = true
+      "--head" => show_head = true
+      "--exclude-existing" => exclude_existing = true
+      _ if arg.has_prefix("--exclude-existing=") => {
+        exclude_existing = true
+        _exclude_existing_prefix = arg[19:].to_string()
+      }
       "--" => ()
       _ if arg.has_prefix("-") => warn_unimplemented_arg("show-ref", arg)
       _ => patterns.push(arg)
     }
+  }
+  // Sub-modes are mutually exclusive: --verify, --exists, --exclude-existing
+  let mode_count = (if verify { 1 } else { 0 }) +
+    (if exists { 1 } else { 0 }) +
+    (if exclude_existing { 1 } else { 0 })
+  if mode_count > 1 {
+    let modes : Array[String] = []
+    if verify {
+      modes.push("--verify")
+    }
+    if exclude_existing {
+      modes.push("--exclude-existing")
+    }
+    if exists {
+      modes.push("--exists")
+    }
+    eprint_line(
+      "error: options '\{modes[0]}' and '\{modes[1]}' cannot be used together",
+    )
+    @sys.exit(129)
   }
   if exists {
     if patterns.length() != 1 {
@@ -38,6 +69,11 @@ async fn handle_show_ref(args : Array[String]) -> Unit raise Error {
     if patterns.length() == 0 {
       @sys.exit(1)
     }
+    let db = if dereference {
+      Some(@bitlib.ObjectDb::load(fs, git_dir))
+    } else {
+      None
+    }
     let mut has_missing = false
     for refname in patterns {
       match @bitlib.resolve_ref(fs, git_dir, refname) {
@@ -47,6 +83,9 @@ async fn handle_show_ref(args : Array[String]) -> Unit raise Error {
               print_line(id.to_hex())
             } else {
               print_line("\{id.to_hex()} \{refname}")
+            }
+            if dereference {
+              show_ref_deref(db.unwrap(), fs, id, refname, hash_only)
             }
           }
         None => has_missing = true
@@ -58,19 +97,45 @@ async fn handle_show_ref(args : Array[String]) -> Unit raise Error {
     return
   }
   let refs = @bitrepo.show_ref(fs, git_dir)
+  let db = if dereference {
+    Some(@bitlib.ObjectDb::load(fs, git_dir))
+  } else {
+    None
+  }
   let mut matched_count = 0
+  // --head: show HEAD first
+  if show_head {
+    match @bitlib.resolve_ref(fs, git_dir, "HEAD") {
+      Some(head_id) => {
+        // --head always shows HEAD regardless of patterns
+        matched_count += 1
+        if not(quiet) {
+          if hash_only {
+            print_line(head_id.to_hex())
+          } else {
+            print_line("\{head_id.to_hex()} HEAD")
+          }
+        }
+      }
+      None => ()
+    }
+  }
   for item in refs {
     let (refname, id) = item
-    if heads_only && not(refname.has_prefix("refs/heads/")) {
-      continue
-    }
-    if tags_only && not(refname.has_prefix("refs/tags/")) {
-      continue
+    if heads_only || tags_only {
+      let is_head = refname.has_prefix("refs/heads/")
+      let is_tag = refname.has_prefix("refs/tags/")
+      let type_match = (heads_only && is_head) || (tags_only && is_tag)
+      if not(type_match) {
+        continue
+      }
     }
     if patterns.length() > 0 {
       let mut matched = false
       for pattern in patterns {
-        if refname == pattern || refname.has_suffix("/" + pattern) {
+        if refname == pattern ||
+          refname.has_suffix("/" + pattern) ||
+          refname.has_prefix(pattern) {
           matched = true
           break
         }
@@ -86,10 +151,51 @@ async fn handle_show_ref(args : Array[String]) -> Unit raise Error {
       } else {
         print_line("\{id.to_hex()} \{refname}")
       }
+      if dereference {
+        show_ref_deref(db.unwrap(), fs, id, refname, hash_only)
+      }
     }
   }
   if matched_count == 0 {
     @sys.exit(1)
+  }
+}
+
+///|
+async fn show_ref_deref(
+  db : @bitlib.ObjectDb,
+  fs : &@bitcore.RepoFileSystem,
+  id : @bitcore.ObjectId,
+  refname : String,
+  hash_only : Bool,
+) -> Unit raise Error {
+  // Dereference: if the object is a tag, show the dereferenced object
+  let obj = db.get(fs, id) catch { _ => return }
+  guard obj is Some(o) else { return }
+  if o.obj_type == @bitcore.ObjectType::Tag {
+    // Parse tag to get target object ID
+    let text = decode_bytes(o.data)
+    let mut target_hex = ""
+    for line_view in text.split("\n") {
+      let line = line_view.to_string()
+      if line.length() == 0 {
+        break
+      }
+      if line.has_prefix("object ") {
+        target_hex = line[7:].to_string()
+        break
+      }
+    }
+    if target_hex.length() > 0 {
+      let target_id = @bitcore.ObjectId::from_hex(target_hex) catch {
+        _ => return
+      }
+      if hash_only {
+        print_line(target_id.to_hex())
+      } else {
+        print_line("\{target_id.to_hex()} \{refname}^{}")
+      }
+    }
   }
 }
 

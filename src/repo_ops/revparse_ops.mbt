@@ -359,8 +359,9 @@ fn apply_rev_suffix(
         i += 1
       }
       if has_digits {
-        // `^0` peels to the commit itself.
+        // `^0` peels to the commit (dereference tags).
         if parent_index == 0 {
+          current = peel_to_commit_id(db, fs, current)
           continue
         }
       } else {
@@ -396,6 +397,30 @@ fn apply_rev_suffix(
 }
 
 ///|
+/// Peel tags to reach the underlying commit ID.
+fn peel_to_commit_id(
+  db : @bitlib.ObjectDb,
+  fs : &@types.RepoFileSystem,
+  id : @object.ObjectId,
+) -> @object.ObjectId raise @object.GitError {
+  let mut current = id
+  for _ in 0..<8 {
+    let obj = db.get(fs, current)
+    guard obj is Some(o) else { break }
+    match o.obj_type {
+      @object.ObjectType::Commit => return current
+      @object.ObjectType::Tag =>
+        match parse_tag_object_target(o.data) {
+          Some(next) => current = next
+          None => break
+        }
+      _ => break
+    }
+  }
+  current
+}
+
+///|
 fn commit_nth_parent(
   db : @bitlib.ObjectDb,
   fs : &@types.RepoFileSystem,
@@ -405,7 +430,9 @@ fn commit_nth_parent(
   if nth_parent <= 0 {
     return Some(commit_id)
   }
-  let obj = db.get(fs, commit_id)
+  // Peel tags to reach commit
+  let peeled = peel_to_commit_id(db, fs, commit_id)
+  let obj = db.get(fs, peeled)
   guard obj is Some(o) else { return None }
   if o.obj_type != @object.ObjectType::Commit {
     return None
@@ -574,7 +601,23 @@ pub fn show_ref(
     let (name, id) = item
     result.push((name, id))
   }
-  result.sort_by((a, b) => String::compare(a.0, b.0))
+  result.sort_by(fn(a, b) {
+    let la = a.0.to_array()
+    let lb = b.0.to_array()
+    let min_len = if la.length() < lb.length() {
+      la.length()
+    } else {
+      lb.length()
+    }
+    for i in 0..<min_len {
+      let ca = la[i].to_int()
+      let cb = lb[i].to_int()
+      if ca != cb {
+        return ca - cb
+      }
+    }
+    la.length() - lb.length()
+  })
   result
 }
 
