@@ -281,10 +281,10 @@ async fn diff_tree_output(
     // Raw format
     for item in results {
       let (path, old_mode, new_mode, old_id, new_id, status) = item
-      let old_hex = (try! old_id.to_hex()[:7]).to_string()
-      let new_hex = (try! new_id.to_hex()[:7]).to_string()
+      let old_hex = old_id.to_hex()
+      let new_hex = new_id.to_hex()
       print_line(
-        ":\{old_mode} \{new_mode} \{old_hex}... \{new_hex}... \{status}\t\{path}",
+        ":\{old_mode} \{new_mode} \{old_hex} \{new_hex} \{status}\t\{path}",
       )
     }
   }

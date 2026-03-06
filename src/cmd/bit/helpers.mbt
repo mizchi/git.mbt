@@ -628,11 +628,102 @@ fn parse_git_env_timestamp(raw : String) -> Int64? {
         let parsed = @strconv.parse_int64(numeric) catch { _ => return None }
         Some(parsed)
       } else {
-        let parsed = @strconv.parse_int64(part) catch { _ => return None }
-        Some(parsed)
+        // Try plain integer first
+        let parsed = @strconv.parse_int64(part) catch { _ => -1L }
+        if parsed >= 0L {
+          return Some(parsed)
+        }
+        // Try ISO date format: YYYY-MM-DD[T ]HH:MM[:SS]
+        parse_iso_date_timestamp(raw)
       }
     None => None
   }
+}
+
+///|
+fn parse_iso_date_timestamp(raw : String) -> Int64? {
+  // Extract date and time parts from ISO format
+  // Formats: "2005-05-26 23:00", "2005-05-26T23:00", "2005-05-26 23:00:30"
+  let s = raw.trim().to_string()
+  // Need at least "YYYY-MM-DD HH:MM" = 16 chars
+  if s.length() < 16 {
+    return None
+  }
+  // Validate date separators
+  if s[4] != '-' || s[7] != '-' {
+    return None
+  }
+  let sep = s[10]
+  if sep != ' ' && sep != 'T' {
+    return None
+  }
+  let year = @strconv.parse_int64(String::unsafe_substring(s, start=0, end=4)) catch {
+    _ => return None
+  }
+  let month = @strconv.parse_int64(String::unsafe_substring(s, start=5, end=7)) catch {
+    _ => return None
+  }
+  let day = @strconv.parse_int64(String::unsafe_substring(s, start=8, end=10)) catch {
+    _ => return None
+  }
+  // Parse time - find the time portion after the separator
+  let time_str = String::unsafe_substring(s, start=11, end=s.length())
+  // Extract HH:MM[:SS] - stop at space or +/- (timezone)
+  let mut time_end = time_str.length()
+  for i = 0; i < time_str.length(); i = i + 1 {
+    let c = time_str[i]
+    if c == ' ' || c == '+' || c == '-' {
+      time_end = i
+      break
+    }
+  }
+  let time_part = String::unsafe_substring(time_str, start=0, end=time_end)
+  if time_part.length() < 5 || time_part[2] != ':' {
+    return None
+  }
+  let hour = @strconv.parse_int64(
+    String::unsafe_substring(time_part, start=0, end=2),
+  ) catch {
+    _ => return None
+  }
+  let minute = @strconv.parse_int64(
+    String::unsafe_substring(time_part, start=3, end=5),
+  ) catch {
+    _ => return None
+  }
+  let second = if time_part.length() >= 8 && time_part[5] == ':' {
+    @strconv.parse_int64(String::unsafe_substring(time_part, start=6, end=8)) catch {
+      _ => 0L
+    }
+  } else {
+    0L
+  }
+  // Convert to Unix timestamp (UTC)
+  // Days from epoch (1970-01-01) to the given date
+  let days = days_from_epoch(year, month, day)
+  Some(days * 86400L + hour * 3600L + minute * 60L + second)
+}
+
+///|
+fn days_from_epoch(year : Int64, month : Int64, day : Int64) -> Int64 {
+  // Adjust for months before March (treat Jan/Feb as months 13/14 of previous year)
+  let mut y = year
+  let mut m = month
+  if m <= 2L {
+    y = y - 1L
+    m = m + 12L
+  }
+  // Days in years since epoch
+  let era_days = 365L * (y - 1970L) +
+    (y - 1969L) / 4L -
+    (y - 1901L) / 100L +
+    (y - 1601L) / 400L
+  // Days in months (using March-based month counting)
+  let month_days = (153L * (m - 3L) + 2L) / 5L + day - 1L
+  // Adjust: days from Jan 1 to Mar 1 in the adjusted year
+  // Jan has 31, Feb has 28 (non-leap adjustment handled by era_days)
+  let jan_feb_days = 31L + 28L
+  era_days + month_days - jan_feb_days
 }
 
 ///|
