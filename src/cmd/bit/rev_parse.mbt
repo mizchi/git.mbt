@@ -128,6 +128,36 @@ async fn handle_rev_parse(args : Array[String]) -> Unit raise Error {
       process_index += 1
       continue
     }
+    if arg == "--resolve-git-dir" {
+      if process_index + 1 >= args.length() {
+        eprint_line("fatal: option '--resolve-git-dir' requires a value")
+        @sys.exit(128)
+      }
+      let path = args[process_index + 1]
+      let resolved = rev_parse_resolve_git_dir_arg(fs, cwd_abs, path)
+      match resolved {
+        Some(dir) => print_line(dir)
+        None => {
+          eprint_line("fatal: not a gitdir '\{path}'")
+          @sys.exit(128)
+        }
+      }
+      process_index += 2
+      continue
+    }
+    if arg.has_prefix("--resolve-git-dir=") {
+      let path = String::unsafe_substring(arg, start=18, end=arg.length())
+      let resolved = rev_parse_resolve_git_dir_arg(fs, cwd_abs, path)
+      match resolved {
+        Some(dir) => print_line(dir)
+        None => {
+          eprint_line("fatal: not a gitdir '\{path}'")
+          @sys.exit(128)
+        }
+      }
+      process_index += 1
+      continue
+    }
     match arg {
       "--git-dir" =>
         print_line(rev_parse_display_git_dir(cwd_abs, root, git_dir))
@@ -173,6 +203,18 @@ async fn handle_rev_parse(args : Array[String]) -> Unit raise Error {
           root
         }
         print_line(abs)
+      }
+      "--local-env-vars" => {
+        // Output the list of GIT_* env vars that affect the local repository
+        let env_vars = [
+          "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CONFIG", "GIT_CONFIG_GLOBAL",
+          "GIT_CONFIG_SYSTEM", "GIT_DIR", "GIT_COMMON_DIR", "GIT_GRAFT_FILE", "GIT_INDEX_FILE",
+          "GIT_NO_REPLACE_OBJECTS", "GIT_OBJECT_DIRECTORY", "GIT_PREFIX", "GIT_REPLACE_REF_BASE",
+          "GIT_SHALLOW_FILE", "GIT_WORK_TREE",
+        ]
+        for v in env_vars {
+          print_line(v)
+        }
       }
       "--show-ref-format" =>
         print_line(
@@ -866,4 +908,56 @@ fn rev_parse_show_cdup(root : String, cwd_abs : String) -> String {
   } else {
     ""
   }
+}
+
+///|
+/// Check if a path is a valid git directory (for --resolve-git-dir)
+fn rev_parse_resolve_git_dir_arg(
+  fs : &@bitcore.RepoFileSystem,
+  cwd_abs : String,
+  path : String,
+) -> String? {
+  let abs_path = if path.has_prefix("/") { path } else { cwd_abs + "/" + path }
+  // Check if the path is a directory containing HEAD (bare or .git dir)
+  if fs.is_file(abs_path + "/HEAD") {
+    return Some(abs_path)
+  }
+  // Check if the path is a gitfile (text file pointing to actual git dir)
+  if fs.is_file(abs_path) {
+    let content = decode_bytes(
+      fs.read_file(abs_path) catch {
+        _ => return None
+      },
+    )
+    let trimmed = trim_string(content)
+    if trimmed.has_prefix("gitdir: ") {
+      let target = String::unsafe_substring(
+        trimmed,
+        start=8,
+        end=trimmed.length(),
+      )
+      let target_abs = if target.has_prefix("/") {
+        target
+      } else {
+        // Resolve relative to the directory containing the gitfile
+        let chars = abs_path.to_array()
+        let mut last_slash = -1
+        for i in 0..<chars.length() {
+          if chars[i] == '/' {
+            last_slash = i
+          }
+        }
+        let parent = if last_slash >= 0 {
+          String::unsafe_substring(abs_path, start=0, end=last_slash)
+        } else {
+          cwd_abs
+        }
+        parent + "/" + target
+      }
+      if fs.is_file(target_abs + "/HEAD") {
+        return Some(target_abs)
+      }
+    }
+  }
+  None
 }

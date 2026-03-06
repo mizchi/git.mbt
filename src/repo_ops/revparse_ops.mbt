@@ -84,6 +84,17 @@ fn resolve_commit_message_search(
   }
   let base = rev_parse(fs, git_dir, base_spec)
   guard base is Some(base_id) else { return None }
+  // !-prefix means negation: find commit whose message does NOT contain the pattern
+  if needle.has_prefix("!-") {
+    let actual_needle = substring_revparse(needle, 2, needle.length())
+    return find_reachable_commit_by_message_from_many(
+      fs,
+      git_dir,
+      [base_id],
+      actual_needle,
+      negate=true,
+    )
+  }
   find_reachable_commit_by_message_from_many(fs, git_dir, [base_id], needle)
 }
 
@@ -120,6 +131,17 @@ fn resolve_commit_message_search_all_refs(
   if starts.length() == 0 {
     return None
   }
+  // !-prefix means negation: find commit whose message does NOT contain the pattern
+  if needle.has_prefix("!-") {
+    let actual_needle = substring_revparse(needle, 2, needle.length())
+    return find_reachable_commit_by_message_from_many(
+      fs,
+      git_dir,
+      starts,
+      actual_needle,
+      negate=true,
+    )
+  }
   find_reachable_commit_by_message_from_many(fs, git_dir, starts, needle)
 }
 
@@ -129,6 +151,7 @@ fn find_reachable_commit_by_message_from_many(
   git_dir : String,
   starts : Array[@object.ObjectId],
   needle : String,
+  negate? : Bool = false,
 ) -> @object.ObjectId? raise @object.GitError {
   let db = @bitlib.ObjectDb::load(fs, git_dir)
   let queue : Array[@object.ObjectId] = []
@@ -148,7 +171,9 @@ fn find_reachable_commit_by_message_from_many(
     match db.get(fs, current) {
       Some(obj) =>
         if obj.obj_type == @object.ObjectType::Commit {
-          if commit_message_contains(obj.data, needle) {
+          let contains = commit_message_contains(obj.data, needle)
+          let matches = if negate { not(contains) } else { contains }
+          if matches {
             let ts = parse_commit_committer_timestamp(obj.data)
             if best_id is None || ts > best_time {
               best_id = Some(current)
