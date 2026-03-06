@@ -7,19 +7,100 @@ async fn handle_ls_tree(args : Array[String]) -> Unit raise Error {
   let mut show_trees = false // -t option
   let mut only_trees = false // -d option: only show trees
   let mut name_only = false
+  let mut name_status = false
+  let mut object_only = false
+  let mut long_mode = false
+  let mut format_str : String? = None
+  let mut _full_name = false
+  let mut _full_tree = false
+  let mut _abbrev : Int? = None
   let mut recurse_submodules = false
   let positional : Array[String] = []
   for arg in args {
     match arg {
       "-r" | "--recursive" => recursive = true
-      "-t" => show_trees = true // Show tree entries when recursing
-      "-d" => only_trees = true // Only show tree entries
-      "--name-only" | "--name-status" => name_only = true
+      "-t" => show_trees = true
+      "-d" => only_trees = true
+      "--name-only" => name_only = true
+      "--name-status" => name_status = true
+      "--object-only" => object_only = true
+      "-l" | "--long" => long_mode = true
+      "--full-name" => _full_name = true
+      "--full-tree" => _full_tree = true
       "--recurse-submodules" => recurse_submodules = true
+      _ if arg.has_prefix("--format=") => format_str = Some(arg[9:].to_string())
+      _ if arg.has_prefix("--abbrev=") => {
+        let v = arg[9:].to_string()
+        _abbrev = Some(@strconv.parse_int(v)) catch { _ => Some(7) }
+      }
+      "--abbrev" => _abbrev = Some(7)
       _ if not(arg.has_prefix("-")) => positional.push(arg)
       _ if arg.has_prefix("-") => warn_unimplemented_arg("ls-tree", arg)
       _ => ()
     }
+  }
+  // Validate incompatible options
+  // git uses a cmdmode enum; we check pairs explicitly.
+  // Each format-altering option conflicts with the others and with --format.
+  let has_format = format_str is Some(_)
+  if long_mode && name_only {
+    eprint_line(
+      "error: options '--name-only' and '--long' cannot be used together",
+    )
+    @sys.exit(129)
+  }
+  if long_mode && name_status {
+    eprint_line(
+      "error: options '--name-status' and '--long' cannot be used together",
+    )
+    @sys.exit(129)
+  }
+  if name_only && name_status {
+    eprint_line(
+      "error: options '--name-status' and '--name-only' cannot be used together",
+    )
+    @sys.exit(129)
+  }
+  if name_status && object_only {
+    eprint_line(
+      "error: options '--object-only' and '--name-status' cannot be used together",
+    )
+    @sys.exit(129)
+  }
+  if name_only && object_only {
+    eprint_line(
+      "error: options '--object-only' and '--name-only' cannot be used together",
+    )
+    @sys.exit(129)
+  }
+  if object_only && long_mode {
+    eprint_line(
+      "error: options '--long' and '--object-only' cannot be used together",
+    )
+    @sys.exit(129)
+  }
+  if has_format {
+    let other = if long_mode {
+      "--long"
+    } else if name_only {
+      "--name-only"
+    } else if name_status {
+      "--name-status"
+    } else if object_only {
+      "--object-only"
+    } else {
+      ""
+    }
+    if other.length() > 0 {
+      eprint_line(
+        "error: options '\{other}' and '--format' cannot be used together",
+      )
+      @sys.exit(129)
+    }
+  }
+  // Merge name_status into name_only for output logic
+  if name_status {
+    name_only = true
   }
   guard positional.length() > 0 else {
     raise @bitcore.GitError::InvalidObject("tree-ish required")
