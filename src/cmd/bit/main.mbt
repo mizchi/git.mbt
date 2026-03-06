@@ -625,12 +625,7 @@ async fn run_main_for_args(args : Array[String]) -> Unit {
   match opts.cwd {
     Some(dir) => {
       @sys.set_env_var("GIT_SHIM_CWD", dir)
-      if @sys.get_env_var("GIT_DIR") is None {
-        @sys.set_env_var("GIT_DIR", default_repo_marker_path(fs, dir))
-      }
-      if @sys.get_env_var("GIT_WORK_TREE") is None {
-        @sys.set_env_var("GIT_WORK_TREE", dir)
-      }
+      @sys.set_env_var("GIT_SHIM_PWD", dir)
     }
     None => ()
   }

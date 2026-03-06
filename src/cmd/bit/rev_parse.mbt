@@ -32,7 +32,10 @@ async fn handle_rev_parse(args : Array[String]) -> Unit raise Error {
     }
     None => ()
   }
-  let cwd_abs = @sys.get_env_var("PWD").unwrap_or(root)
+  let cwd_abs = match @sys.get_env_var("GIT_SHIM_PWD") {
+    Some(v) => v
+    None => @sys.get_env_var("PWD").unwrap_or(root)
+  }
   let abs_git_dir = if git_dir.has_prefix("/") {
     git_dir
   } else if git_dir == "." {
@@ -129,6 +132,40 @@ async fn handle_rev_parse(args : Array[String]) -> Unit raise Error {
       "--git-dir" =>
         print_line(rev_parse_display_git_dir(cwd_abs, root, git_dir))
       "--absolute-git-dir" => print_line(abs_git_dir)
+      "--is-bare-repository" =>
+        print_line(
+          if rev_parse_is_bare_repository(fs, git_dir, root) {
+            "true"
+          } else {
+            "false"
+          },
+        )
+      "--is-inside-git-dir" =>
+        print_line(
+          if rev_parse_is_inside_git_dir(cwd_abs, abs_git_dir) {
+            "true"
+          } else {
+            "false"
+          },
+        )
+      "--is-inside-work-tree" =>
+        print_line(
+          if rev_parse_is_inside_work_tree(
+              fs, git_dir, root, cwd_abs, abs_git_dir,
+            ) {
+            "true"
+          } else {
+            "false"
+          },
+        )
+      "--show-prefix" => {
+        let prefix = rev_parse_show_prefix(root, cwd_abs)
+        print_line(prefix)
+      }
+      "--show-cdup" => {
+        let cdup = rev_parse_show_cdup(root, cwd_abs)
+        print_line(cdup)
+      }
       "--show-toplevel" => {
         let abs = if root == "." {
           @sys.get_env_var("PWD").unwrap_or(root)
@@ -710,3 +747,123 @@ fn rev_parse_lookup_loose_object_idx(
 }
 
 ///|
+fn rev_parse_is_bare_repository(
+  fs : &@bitcore.RepoFileSystem,
+  git_dir : String,
+  root : String,
+) -> Bool {
+  // Check core.bare config first
+  let config_path = git_dir + "/config"
+  match @bitlib.read_config_value(fs, config_path, "core", "bare") {
+    Some(value) => {
+      let v = @bitlib.config_strip_quotes(value).to_lower()
+      return v == "true" || v == "yes" || v == "1"
+    }
+    None => ()
+  }
+  // If git_dir == root (no separate work tree), it's bare
+  let abs_root = if root == "." {
+    @sys.get_env_var("PWD").unwrap_or(root)
+  } else {
+    root
+  }
+  let abs_git_dir = if git_dir.has_prefix("/") {
+    git_dir
+  } else {
+    abs_root + "/" + git_dir
+  }
+  abs_git_dir == abs_root
+}
+
+///|
+fn rev_parse_is_inside_git_dir(cwd_abs : String, abs_git_dir : String) -> Bool {
+  if cwd_abs == abs_git_dir {
+    return true
+  }
+  let prefix = if abs_git_dir.has_suffix("/") {
+    abs_git_dir
+  } else {
+    abs_git_dir + "/"
+  }
+  cwd_abs.has_prefix(prefix)
+}
+
+///|
+fn rev_parse_is_inside_work_tree(
+  fs : &@bitcore.RepoFileSystem,
+  git_dir : String,
+  root : String,
+  cwd_abs : String,
+  abs_git_dir : String,
+) -> Bool {
+  if rev_parse_is_bare_repository(fs, git_dir, root) {
+    return false
+  }
+  if rev_parse_is_inside_git_dir(cwd_abs, abs_git_dir) {
+    return false
+  }
+  true
+}
+
+///|
+fn rev_parse_show_prefix(root : String, cwd_abs : String) -> String {
+  let abs_root = if root == "." {
+    @sys.get_env_var("PWD").unwrap_or(root)
+  } else {
+    root
+  }
+  if cwd_abs == abs_root {
+    return ""
+  }
+  let root_prefix = if abs_root.has_suffix("/") {
+    abs_root
+  } else {
+    abs_root + "/"
+  }
+  if cwd_abs.has_prefix(root_prefix) {
+    let rel = String::unsafe_substring(
+      cwd_abs,
+      start=root_prefix.length(),
+      end=cwd_abs.length(),
+    )
+    if rel.has_suffix("/") {
+      rel
+    } else {
+      rel + "/"
+    }
+  } else {
+    ""
+  }
+}
+
+///|
+fn rev_parse_show_cdup(root : String, cwd_abs : String) -> String {
+  let abs_root = if root == "." {
+    @sys.get_env_var("PWD").unwrap_or(root)
+  } else {
+    root
+  }
+  if cwd_abs == abs_root {
+    return ""
+  }
+  let root_prefix = if abs_root.has_suffix("/") {
+    abs_root
+  } else {
+    abs_root + "/"
+  }
+  if cwd_abs.has_prefix(root_prefix) {
+    let rel = String::unsafe_substring(
+      cwd_abs,
+      start=root_prefix.length(),
+      end=cwd_abs.length(),
+    )
+    let depth = rel.iter().filter(fn(c) { c == '/' }).count() + 1
+    let parts : Array[String] = []
+    for _ in 0..<depth {
+      parts.push("..")
+    }
+    parts.join("/") + "/"
+  } else {
+    ""
+  }
+}

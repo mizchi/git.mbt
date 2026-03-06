@@ -1,8 +1,19 @@
 ///|
 test "hash-object: storage runtime routing follows parser support" {
-  assert_false(hash_object_should_use_storage_runtime(["--stdin"]))
-  assert_true(hash_object_should_use_storage_runtime(["-t", "blob", "a.txt"]))
-  assert_false(hash_object_should_use_storage_runtime(["-t", "tree", "a.txt"]))
-
-  assert_false(hash_object_should_use_storage_runtime(["--stdin-paths"]))
+  assert_true(hash_object_storage_runtime_delegate_args(["--stdin"]) is Some(_))
+  assert_true(
+    hash_object_storage_runtime_delegate_args(["-t", "blob", "a.txt"])
+    is Some(_),
+  )
+  assert_true(
+    hash_object_storage_runtime_delegate_args(["-t", "tree", "a.txt"])
+    is Some(_),
+  )
+  assert_true(
+    hash_object_storage_runtime_delegate_args(["-t", "tag", "--stdin"])
+    is Some(_),
+  )
+  assert_true(
+    hash_object_storage_runtime_delegate_args(["--stdin-paths"]) is None,
+  )
 }

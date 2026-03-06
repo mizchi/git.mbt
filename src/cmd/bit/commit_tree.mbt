@@ -20,7 +20,9 @@ async fn handle_commit_tree(args : Array[String]) -> Unit raise Error {
       "-p" if i + 1 < args.length() => {
         let parent_hex = args[i + 1]
         let parent_id = commit_tree_resolve_hex(rfs, git_dir, parent_hex)
-        parents.push(parent_id)
+        if not(parents.contains(parent_id)) {
+          parents.push(parent_id)
+        }
         i += 2
         continue
       }
