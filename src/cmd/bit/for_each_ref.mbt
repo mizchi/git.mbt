@@ -20,6 +20,7 @@ async fn handle_for_each_ref(args : Array[String]) -> Unit raise Error {
   let mut ignore_case = false
   let mut color_mode = "" // "", "always", "never"
   let mut start_after : String? = None
+  let mut include_root_refs = false
   let mut i = 0
   while i < args.length() {
     let arg = args[i]
@@ -122,6 +123,7 @@ async fn handle_for_each_ref(args : Array[String]) -> Unit raise Error {
         start_after = Some(
           String::unsafe_substring(arg, start=14, end=arg.length()),
         )
+      "--include-root-refs" => include_root_refs = true
       "--color" | "--color=always" => color_mode = "always"
       "--color=auto" => color_mode = "auto"
       "--no-color" | "--color=never" => color_mode = "never"
@@ -169,6 +171,10 @@ async fn handle_for_each_ref(args : Array[String]) -> Unit raise Error {
   }
   // Collect all refs (with broken ref handling)
   let all_refs = for_each_ref_collect_refs(fs, git_dir)
+  // If --include-root-refs, add root refs (HEAD, *_HEAD, etc.) excluding pseudo refs
+  if include_root_refs {
+    for_each_ref_collect_root_refs(fs, git_dir, all_refs)
+  }
   // Load ObjectDb once for all filtering (points-at, merged, etc.)
   let filter_db : @bitlib.ObjectDb? = Some(@bitlib.ObjectDb::load(fs, git_dir)) catch {
     _ => None
@@ -467,6 +473,97 @@ async fn for_each_ref_collect_refs(
     result.push((refname, id))
   }
   result
+}
+
+///|
+/// Collect root refs (HEAD, *_HEAD, etc.) from .git/ directory.
+/// Excludes pseudo refs (FETCH_HEAD, MERGE_HEAD) and dangling symrefs.
+async fn for_each_ref_collect_root_refs(
+  fs : OsFs,
+  git_dir : String,
+  out : Array[(String, @bitcore.ObjectId)],
+) -> Unit {
+  let pseudo_refs : Array[String] = ["FETCH_HEAD", "MERGE_HEAD"]
+  let entries = fs.readdir(git_dir) catch { _ => return }
+  for entry in entries {
+    let name = entry
+    // Root ref syntax: all uppercase, hyphens, underscores
+    if not(for_each_ref_is_root_ref_syntax(name)) {
+      continue
+    }
+    // Skip pseudo refs (FETCH_HEAD, MERGE_HEAD)
+    let mut is_pseudo = false
+    for pr in pseudo_refs {
+      if name == pr {
+        is_pseudo = true
+        break
+      }
+    }
+    if is_pseudo {
+      continue
+    }
+    // Check if it's a root ref (HEAD, *_HEAD, or known irregular root refs)
+    if not(for_each_ref_is_root_ref(name)) {
+      continue
+    }
+    // Read the ref file
+    let path = git_dir + "/" + name
+    let content = fs.read_file(path) catch { _ => continue }
+    let text = decode_bytes(content).trim(chars=" \t\n\r").to_string()
+    if text.has_prefix("ref: ") {
+      // Symbolic ref — resolve the target
+      let target = String::unsafe_substring(text, start=5, end=text.length())
+      // Check if target exists (dangling symref → skip)
+      let resolved = @bitlib.resolve_ref(fs, git_dir, target) catch {
+        _ => continue
+      }
+      match resolved {
+        Some(id) => out.push((name, id))
+        None => continue // dangling
+      }
+    } else {
+      // Direct ref
+      let id = @bitcore.ObjectId::from_hex(text) catch { _ => continue }
+      out.push((name, id))
+    }
+  }
+}
+
+///|
+fn for_each_ref_is_root_ref_syntax(name : String) -> Bool {
+  if name.length() == 0 {
+    return false
+  }
+  for i = 0; i < name.length(); i = i + 1 {
+    let c = name[i]
+    if not((c >= 'A' && c <= 'Z') || c == '-' || c == '_') {
+      return false
+    }
+  }
+  true
+}
+
+///|
+fn for_each_ref_is_root_ref(name : String) -> Bool {
+  // HEAD is a root ref
+  if name == "HEAD" {
+    return true
+  }
+  // *_HEAD is a root ref (ORIG_HEAD, CHERRY_PICK_HEAD, etc.)
+  if name.has_suffix("_HEAD") {
+    return true
+  }
+  // Known irregular root refs
+  let irregular : Array[String] = [
+    "AUTO_MERGE", "BISECT_EXPECTED_REV", "NOTES_MERGE_PARTIAL", "NOTES_MERGE_REF",
+    "MERGE_AUTOSTASH",
+  ]
+  for ir in irregular {
+    if name == ir {
+      return true
+    }
+  }
+  false
 }
 
 ///|
