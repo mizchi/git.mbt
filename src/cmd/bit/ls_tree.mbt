@@ -220,7 +220,23 @@ async fn print_tree_entries(
           }
         } else {
           if path == filter || path.has_prefix(filter + "/") {
-            match_found = true
+            // Check if a more specific filter exists under this one
+            // e.g., filter="path0/a" and another filter="path0/a/b/c"
+            // In that case, don't match the broad filter; only recurse
+            let mut has_more_specific = false
+            if is_tree {
+              for other in path_filters {
+                if other != filter && other.has_prefix(path + "/") {
+                  has_more_specific = true
+                  break
+                }
+              }
+            }
+            if has_more_specific {
+              recurse_needed = true
+            } else {
+              match_found = true
+            }
           }
           // Filter is under the entry path (need to recurse into this tree to find it)
           if filter.has_prefix(path + "/") {

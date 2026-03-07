@@ -72,25 +72,31 @@ async fn handle_show_ref(args : Array[String]) -> Unit raise Error {
     if patterns.length() == 0 {
       @sys.exit(1)
     }
-    let db = if dereference {
-      Some(@bitlib.ObjectDb::load(fs, git_dir))
-    } else {
-      None
-    }
+    let db = @bitlib.ObjectDb::load(fs, git_dir)
     let mut has_missing = false
     for refname in patterns {
       match @bitlib.resolve_ref(fs, git_dir, refname) {
-        Some(id) =>
-          if not(quiet) {
+        Some(id) => {
+          // Verify object exists (git checks this for dangling refs)
+          let obj_exists = db.get(fs, id) catch { _ => None }
+          if obj_exists is None {
+            if not(quiet) {
+              eprint_line(
+                "fatal: git show-ref: bad ref \{refname} (\{id.to_hex()})",
+              )
+            }
+            has_missing = true
+          } else if not(quiet) {
             if hash_only {
               print_line(id.to_hex())
             } else {
               print_line("\{id.to_hex()} \{refname}")
             }
             if dereference {
-              show_ref_deref(db.unwrap(), fs, id, refname, hash_only)
+              show_ref_deref(db, fs, id, refname, hash_only)
             }
           }
+        }
         None => has_missing = true
       }
     }
