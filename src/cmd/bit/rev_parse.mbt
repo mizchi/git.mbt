@@ -242,6 +242,65 @@ async fn handle_rev_parse(args : Array[String]) -> Unit raise Error {
       "--abbrev-ref" => ()
       _ if arg.has_prefix("--abbrev-ref=") => ()
       "--symbolic-full-name" => ()
+      "--end-of-options" => {
+        // Output --end-of-options itself in non-verify mode
+        if not(verify) && not(revs_only) {
+          print_line("--end-of-options")
+        }
+        // All remaining args are revisions/paths, not options
+        process_index += 1
+        while process_index < args.length() {
+          let rev_arg = args[process_index]
+          // "--" still acts as separator in this mode
+          if rev_arg == "--" {
+            if not(revs_only) {
+              print_line("--")
+            }
+            process_index += 1
+            // Everything after "--" is a path
+            while process_index < args.length() {
+              if not(revs_only) {
+                print_line(args[process_index])
+              }
+              process_index += 1
+            }
+            break
+          }
+          let effective_arg = match parse_at_minus_prefix(rev_arg) {
+            Some((n, rest)) =>
+              match resolve_at_minus(fs, git_dir, n) {
+                Some(branch) => branch + rest
+                None => rev_arg
+              }
+            None => rev_arg
+          }
+          let id = if effective_arg.find("@{") is Some(_) {
+            resolve_reflog_selector(fs, git_dir, effective_arg)
+          } else {
+            @bitrepo.rev_parse(fs, git_dir, effective_arg)
+          }
+          match id {
+            Some(oid) => {
+              let output_oid_hex = rev_parse_resolve_output_oid_hex(
+                fs, git_dir, oid, output_object_format,
+              )
+              match short_length {
+                Some(length) =>
+                  print_line(shorten_oid_hex(output_oid_hex, length))
+                None => print_line(output_oid_hex)
+              }
+            }
+            None =>
+              if not(revs_only) {
+                raise @bitcore.GitError::InvalidObject(
+                  "unknown revision: " + rev_arg,
+                )
+              }
+          }
+          process_index += 1
+        }
+        break
+      }
       "--output-object-format" => ()
       _ if arg.has_prefix("--output-object-format=") => ()
       _ if arg.has_prefix("-") => warn_unimplemented_arg("rev-parse", arg)

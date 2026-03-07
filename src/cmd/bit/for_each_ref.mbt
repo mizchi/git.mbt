@@ -859,6 +859,15 @@ fn for_each_ref_commit_atom(
       }
       full.to_array().length().to_string()
     }
+    // Signature atoms — bit does not verify GPG signatures,
+    // so return "N" (no signature) for grade and empty for others
+    "signature" => ""
+    "signature:grade" => "N"
+    "signature:key" => ""
+    "signature:signer" => ""
+    "signature:fingerprint" => ""
+    "signature:primarykeyfingerprint" => ""
+    "signature:trustlevel" => ""
     _ => ""
   }
 }
