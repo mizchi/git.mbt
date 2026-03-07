@@ -8,6 +8,7 @@ async fn handle_for_each_ref(args : Array[String]) -> Unit raise Error {
   let mut count : Int? = None
   let sort_keys : Array[String] = []
   let patterns : Array[String] = []
+  let excludes : Array[String] = []
   let points_at : Array[String] = []
   let mut merged : String? = None
   let mut no_merged : String? = None
@@ -86,6 +87,8 @@ async fn handle_for_each_ref(args : Array[String]) -> Unit raise Error {
         }
         quote_style = "tcl"
       }
+      _ if arg.has_prefix("--exclude=") =>
+        excludes.push(String::unsafe_substring(arg, start=10, end=arg.length()))
       "--contains" | "--no-contains" | "--omit-empty" | "--stdin" => ()
       _ if arg.has_prefix("-") => warn_unimplemented_arg("for-each-ref", arg)
       _ => patterns.push(arg)
@@ -109,6 +112,19 @@ async fn handle_for_each_ref(args : Array[String]) -> Unit raise Error {
         }
       }
       if not(matched) {
+        continue
+      }
+    }
+    // Filter by --exclude
+    if excludes.length() > 0 {
+      let mut excluded = false
+      for excl in excludes {
+        if refname.has_prefix(excl) {
+          excluded = true
+          break
+        }
+      }
+      if excluded {
         continue
       }
     }
@@ -369,16 +385,32 @@ fn for_each_ref_quote(value : String, style : String) -> String {
       buf.write_char('\'')
       buf.to_string()
     }
-    "perl" | "python" => {
+    "perl" => {
       let buf = StringBuilder::new()
-      buf.write_char('"')
+      buf.write_char('\'')
       for c in value {
-        if c == '"' || c == '\\' || c == '$' || c == '@' {
+        if c == '\'' || c == '\\' {
           buf.write_char('\\')
         }
         buf.write_char(c)
       }
-      buf.write_char('"')
+      buf.write_char('\'')
+      buf.to_string()
+    }
+    "python" => {
+      let buf = StringBuilder::new()
+      buf.write_char('\'')
+      for c in value {
+        if c == '\n' {
+          buf.write_string("\\n")
+        } else {
+          if c == '\'' || c == '\\' {
+            buf.write_char('\\')
+          }
+          buf.write_char(c)
+        }
+      }
+      buf.write_char('\'')
       buf.to_string()
     }
     "tcl" => {
