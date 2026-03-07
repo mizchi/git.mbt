@@ -90,6 +90,19 @@ fn join_repo_marker(root : String, marker : String) -> String {
 }
 
 ///|
+fn is_path_prefix(path : String, prefix : String) -> Bool {
+  if prefix.length() > path.length() {
+    return false
+  }
+  if prefix == path {
+    return true
+  }
+  path.has_prefix(prefix) &&
+  path.length() > prefix.length() &&
+  path[prefix.length()] == '/'
+}
+
+///|
 fn is_bare_repo_dir(path : String) -> Bool {
   let head_ok = @fs.is_file(path + "/HEAD") catch { _ => false }
   let objs_ok = @fs.is_dir(path + "/objects") catch { _ => false }
@@ -114,15 +127,19 @@ fn find_repo_root(start : String) -> String? {
       }
     None => ()
   }
+  // Compute min_offset: longest ceiling that is a strict component-aligned
+  // prefix of start (ceiling == start is skipped per git behavior).
+  let mut min_ceil_len = 0
+  for ceiling in ceiling_dirs {
+    if ceiling == current {
+      continue // start dir is always searchable
+    }
+    if is_path_prefix(current, ceiling) && ceiling.length() > min_ceil_len {
+      min_ceil_len = ceiling.length()
+    }
+  }
   let mut last = ""
   while true {
-    if ceiling_dirs.length() > 0 {
-      for ceiling in ceiling_dirs {
-        if current == ceiling {
-          return None
-        }
-      }
-    }
     let bit_path = join_repo_marker(current, ".git")
     let is_git_dir = @fs.is_dir(bit_path) catch { _ => false }
     let is_git_file = if is_git_dir {
@@ -151,6 +168,10 @@ fn find_repo_root(start : String) -> String? {
     let next = if parent.length() == 0 { "." } else { parent }
     if next == current || next == last {
       break
+    }
+    // Block ascending if we would reach at or above a ceiling directory
+    if min_ceil_len > 0 && next.length() <= min_ceil_len {
+      return None
     }
     last = current
     current = next

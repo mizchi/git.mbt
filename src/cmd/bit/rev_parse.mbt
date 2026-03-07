@@ -25,12 +25,16 @@ async fn handle_rev_parse(args : Array[String]) -> Unit raise Error {
   let fs = OsFs::new()
   let rfs : &@bitcore.RepoFileSystem = fs
   let git_dir = resolve_git_dir(rfs, root)
-  match repository_format_error(rfs, git_dir) {
-    Some(err_msg) => {
-      eprint_line(err_msg)
-      @sys.exit(128)
+  // Check if we're actually in a git repository
+  let in_repo = rfs.is_file(git_dir + "/HEAD") || is_bare_repo_dir(git_dir)
+  if in_repo {
+    match repository_format_error(rfs, git_dir) {
+      Some(err_msg) => {
+        eprint_line(err_msg)
+        @sys.exit(128)
+      }
+      None => ()
     }
-    None => ()
   }
   let cwd_abs = match @sys.get_env_var("GIT_SHIM_CWD") {
     Some(v) => v
@@ -342,7 +346,8 @@ async fn handle_rev_parse(args : Array[String]) -> Unit raise Error {
             "false"
           },
         )
-      "--show-prefix" =>
+      "--show-prefix" => {
+        rev_parse_require_repo(in_repo)
         // Inside .git dir, prefix is empty
         if rev_parse_is_inside_git_dir(cwd_abs, abs_git_dir) {
           print_line("")
@@ -350,11 +355,14 @@ async fn handle_rev_parse(args : Array[String]) -> Unit raise Error {
           let prefix = rev_parse_show_prefix(root, cwd_abs)
           print_line(prefix)
         }
+      }
       "--show-cdup" => {
+        rev_parse_require_repo(in_repo)
         let cdup = rev_parse_show_cdup(root, cwd_abs)
         print_line(cdup)
       }
       "--show-toplevel" => {
+        rev_parse_require_repo(in_repo)
         // Inside .git dir, --show-toplevel should fail
         if rev_parse_is_inside_git_dir(cwd_abs, abs_git_dir) {
           eprint_line("fatal: this operation must be run in a work tree")
@@ -1300,6 +1308,16 @@ fn rev_parse_resolve_git_dir_arg(
     }
   }
   None
+}
+
+///|
+async fn rev_parse_require_repo(in_repo : Bool) -> Unit {
+  if not(in_repo) {
+    eprint_line(
+      "fatal: not a git repository (or any of the parent directories): .git",
+    )
+    @sys.exit(128)
+  }
 }
 
 ///|
