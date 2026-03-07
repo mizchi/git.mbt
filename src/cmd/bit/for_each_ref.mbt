@@ -147,8 +147,8 @@ async fn handle_for_each_ref(args : Array[String]) -> Unit raise Error {
       })
     }
   } else {
-    // Default sort by refname
-    filtered.sort_by(fn(a, b) { a.0.compare(b.0) })
+    // Default sort by refname (lexicographic, not shortlex)
+    filtered.sort_by(fn(a, b) { lexicographic_compare(a.0, b.0) })
   }
   // Load object db for object lookups
   let db = @bitlib.ObjectDb::load(fs, git_dir)
@@ -177,8 +177,8 @@ fn for_each_ref_compare(
   field : String,
 ) -> Int {
   match field {
-    "refname" | "refname:short" => a.0.compare(b.0)
-    "objectname" => a.1.to_hex().compare(b.1.to_hex())
+    "refname" | "refname:short" => lexicographic_compare(a.0, b.0)
+    "objectname" => lexicographic_compare(a.1.to_hex(), b.1.to_hex())
     _ if field.has_prefix("version:refname") || field == "v:refname" =>
       for_each_ref_version_compare(a.0, b.0)
     _ if field.has_prefix("creatordate") ||
@@ -189,7 +189,26 @@ fn for_each_ref_compare(
       let ts_b = for_each_ref_get_timestamp(fs, git_dir, b.1, field)
       ts_a.compare(ts_b)
     }
-    _ => a.0.compare(b.0)
+    _ => lexicographic_compare(a.0, b.0)
+  }
+}
+
+///|
+fn lexicographic_compare(a : String, b : String) -> Int {
+  let len = if a.length() < b.length() { a.length() } else { b.length() }
+  for i in 0..<len {
+    let ca = a[i].to_int()
+    let cb = b[i].to_int()
+    if ca != cb {
+      return if ca < cb { -1 } else { 1 }
+    }
+  }
+  if a.length() < b.length() {
+    -1
+  } else if a.length() > b.length() {
+    1
+  } else {
+    0
   }
 }
 
