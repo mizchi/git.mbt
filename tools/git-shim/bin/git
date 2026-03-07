@@ -168,9 +168,16 @@ fi
 subcmd=""
 take_next=0
 skip_next=0
+capture_C=""
+capture_C_next=0
 for arg in "$@"; do
   if [ "$skip_next" -eq 1 ]; then
     skip_next=0
+    continue
+  fi
+  if [ "$capture_C_next" -eq 1 ]; then
+    capture_C_next=0
+    capture_C="$arg"
     continue
   fi
   if [ "$take_next" -eq 1 ]; then
@@ -181,7 +188,10 @@ for arg in "$@"; do
     --)
       take_next=1
       ;;
-    -c|-C|--git-dir|--work-tree|--namespace|--super-prefix|--git-path)
+    -C)
+      capture_C_next=1
+      ;;
+    -c|--git-dir|--work-tree|--namespace|--super-prefix|--git-path)
       skip_next=1
       ;;
     --exec-path)
@@ -202,6 +212,10 @@ done
 prev_is_c=0
 skip_next_c=0
 for arg in "$@"; do
+  if [ "$skip_next_c" -eq 1 ]; then
+    skip_next_c=0
+    continue
+  fi
   # Handle -c value argument (don't treat as subcommand)
   if [ "$prev_is_c" -eq 1 ]; then
     prev_is_c=0
@@ -224,7 +238,10 @@ for arg in "$@"; do
     -c)
       prev_is_c=1
       ;;
-    -C|--git-dir|--work-tree|--namespace|--super-prefix|--git-path|--exec-path|--)
+    -C|--git-dir|--work-tree|--namespace|--super-prefix|--git-path|--exec-path)
+      skip_next_c=1
+      ;;
+    --)
       ;;
     --exec-path=*|--git-dir=*|--work-tree=*)
       ;;
@@ -421,6 +438,13 @@ if [ "$intercept" -eq 1 ]; then
       export SHIM_EXEC_PATH="${GIT_SHIM_EXEC_PATH:-${SHIM_EXEC_PATH:-}}"
     fi
     export GIT_SHIM_PWD="${GIT_SHIM_PWD:-$(pwd)}"
+    # Pass -C directory to moon binary via GIT_SHIM_CWD
+    if [ -n "$capture_C" ]; then
+      case "$capture_C" in
+        /*) export GIT_SHIM_CWD="$capture_C" ;;
+        *)  export GIT_SHIM_CWD="${GIT_SHIM_PWD}/$capture_C" ;;
+      esac
+    fi
     exec "$moon" "$@"
   fi
   if [ "$strict_mode" = "1" ]; then

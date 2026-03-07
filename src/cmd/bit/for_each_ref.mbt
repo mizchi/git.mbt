@@ -703,13 +703,30 @@ fn for_each_ref_push_atom(
   guard refname.has_prefix("refs/heads/") else { return "" }
   let branch = String::unsafe_substring(refname, start=11, end=refname.length())
   let (remotes, branches) = @bitlib.read_repo_config(fs, git_dir)
-  let remote = match branches.get(branch) {
-    Some(cfg) =>
-      match cfg.remote {
+  // git push remote priority:
+  // 1. branch.<name>.pushRemote
+  // 2. remote.pushdefault
+  // 3. branch.<name>.remote
+  let branch_push_remote = for_each_ref_read_branch_pushremote(
+    fs, git_dir, branch,
+  )
+  let remote = match branch_push_remote {
+    Some(r) => r
+    None => {
+      let pushdefault = for_each_ref_read_pushdefault(fs, git_dir)
+      match pushdefault {
         Some(r) => r
-        None => "origin"
+        None =>
+          match branches.get(branch) {
+            Some(cfg) =>
+              match cfg.remote {
+                Some(r) => r
+                None => "origin"
+              }
+            None => "origin"
+          }
       }
-    None => "origin"
+    }
   }
   // Check if remote exists
   guard remotes.get(remote) is Some(_) else { return "" }
@@ -741,6 +758,47 @@ fn for_each_ref_push_atom(
     }
     _ => push_ref
   }
+}
+
+///|
+fn for_each_ref_read_pushdefault(fs : OsFs, git_dir : String) -> String? {
+  let content = @bitlib.read_config_content(fs, git_dir)
+  let blocks = @bitlib.parse_config_blocks(content)
+  for block in blocks {
+    // Look for [remote] section (no subsection name)
+    if block.section != Some("remote") || block.name is Some(_) {
+      continue
+    }
+    for line in block.lines {
+      match @bitlib.parse_config_kv(line) {
+        Some((key, value)) if key == "pushdefault" => return Some(value)
+        _ => ()
+      }
+    }
+  }
+  None
+}
+
+///|
+fn for_each_ref_read_branch_pushremote(
+  fs : OsFs,
+  git_dir : String,
+  branch_name : String,
+) -> String? {
+  let content = @bitlib.read_config_content(fs, git_dir)
+  let blocks = @bitlib.parse_config_blocks(content)
+  for block in blocks {
+    if block.section != Some("branch") || block.name != Some(branch_name) {
+      continue
+    }
+    for line in block.lines {
+      match @bitlib.parse_config_kv(line) {
+        Some((key, value)) if key == "pushremote" => return Some(value)
+        _ => ()
+      }
+    }
+  }
+  None
 }
 
 ///|
