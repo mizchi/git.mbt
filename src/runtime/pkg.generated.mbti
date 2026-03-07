@@ -38,6 +38,7 @@ pub(all) struct StorageCommitArgs {
 pub(all) struct StorageHashObjectArgs {
   write_object : Bool
   stdin_mode : Bool
+  literally : Bool
   obj_type : @object.ObjectType
   paths : Array[String]
 }

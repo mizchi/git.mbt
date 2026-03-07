@@ -103,7 +103,91 @@ async fn handle_rev_parse(args : Array[String]) -> Unit raise Error {
       @sys.exit(128)
     }
   }
-  ignore(verify)
+  // --verify mode: exactly one revision argument required
+  if verify {
+    let rev_args : Array[String] = []
+    let mut vi = 0
+    let mut end_of_opts = false
+    while vi < args.length() {
+      if output_object_format_arg_indices.contains(vi) {
+        vi += 1
+        continue
+      }
+      let a = args[vi]
+      if not(end_of_opts) {
+        match a {
+          "--verify"
+          | "--quiet"
+          | "-q"
+          | "--short"
+          | "--symbolic-full-name"
+          | "--abbrev-ref"
+          | "--revs-only" => {
+            vi += 1
+            continue
+          }
+          "--output-object-format" => {
+            vi += 2
+            continue
+          }
+          "--end-of-options" => {
+            end_of_opts = true
+            vi += 1
+            continue
+          }
+          _ if a.has_prefix("--short=") ||
+            a.has_prefix("--abbrev-ref=") ||
+            a.has_prefix("--output-object-format=") => {
+            vi += 1
+            continue
+          }
+          _ => ()
+        }
+      }
+      if not(a.has_prefix("-")) || end_of_opts {
+        rev_args.push(a)
+      }
+      vi += 1
+    }
+    if rev_args.length() != 1 {
+      if not(quiet) {
+        eprint_line("fatal: Needed a single revision")
+      }
+      @sys.exit(128)
+    }
+    let spec = rev_args[0]
+    let effective_spec = match parse_at_minus_prefix(spec) {
+      Some((n, rest)) =>
+        match resolve_at_minus(fs, git_dir, n) {
+          Some(branch) => branch + rest
+          None => spec
+        }
+      None => spec
+    }
+    let id = if effective_spec.find("@{") is Some(_) {
+      resolve_reflog_selector(fs, git_dir, effective_spec)
+    } else {
+      @bitrepo.rev_parse(fs, git_dir, effective_spec)
+    }
+    match id {
+      Some(oid) => {
+        let output_oid_hex = rev_parse_resolve_output_oid_hex(
+          fs, git_dir, oid, output_object_format,
+        )
+        match short_length {
+          Some(length) => print_line(shorten_oid_hex(output_oid_hex, length))
+          None => print_line(output_oid_hex)
+        }
+      }
+      None => {
+        if not(quiet) {
+          eprint_line("fatal: Needed a single revision")
+        }
+        @sys.exit(128)
+      }
+    }
+    return
+  }
   ignore(quiet)
   let mut process_index = 0
   while process_index < args.length() {
