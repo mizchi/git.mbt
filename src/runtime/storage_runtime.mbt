@@ -37,6 +37,7 @@ pub(all) struct StorageLogArgs {
 pub(all) struct StorageHashObjectArgs {
   write_object : Bool
   stdin_mode : Bool
+  literally : Bool
   obj_type : @bit.ObjectType
   paths : Array[String]
 }
@@ -321,6 +322,28 @@ fn storage_hash_object_requires_standalone_error(
   match compat_object_format {
     Some(format) => @bitlib.config_strip_quotes(format).to_lower() == "sha256"
     None => false
+  }
+}
+
+///|
+fn storage_hash_object_validate_content(
+  obj_type : @bit.ObjectType,
+  content : Bytes,
+) -> Unit raise @bit.GitError {
+  match obj_type {
+    @bit.ObjectType::Commit => {
+      let text = @utf8.decode_lossy(content[:])
+      if not(text.has_prefix("tree ")) {
+        raise @bit.GitError::InvalidObject("corrupt commit")
+      }
+    }
+    @bit.ObjectType::Tag => {
+      let text = @utf8.decode_lossy(content[:])
+      if not(text.has_prefix("object ")) {
+        raise @bit.GitError::InvalidObject("corrupt tag")
+      }
+    }
+    _ => ()
   }
 }
 
@@ -1004,6 +1027,10 @@ fn storage_handle_hash_object(
   }
   if args.stdin_mode {
     let content = storage_read_all_stdin()
+    // Validate commit/tag content unless --literally
+    if not(args.literally) {
+      storage_hash_object_validate_content(args.obj_type, content)
+    }
     let id = @bit.hash_object_content(args.obj_type, content)
     if args.write_object {
       ignore(@bitlib.write_loose_object(fs, git_dir, args.obj_type, content))
@@ -1027,6 +1054,9 @@ fn storage_handle_hash_object(
     }
     let attrs = @bitlib.resolve_eol_attrs(rfs, root, rel_path)
     let normalized = @bitlib.clean_for_storage(content, attrs, autocrlf)
+    if not(args.literally) {
+      storage_hash_object_validate_content(args.obj_type, normalized)
+    }
     let id = @bit.hash_object_content(args.obj_type, normalized)
     if args.write_object {
       ignore(@bitlib.write_loose_object(fs, git_dir, args.obj_type, normalized))

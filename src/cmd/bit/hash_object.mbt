@@ -28,6 +28,10 @@ async fn handle_hash_object(args : Array[String]) -> Unit raise Error {
       if hash_args.stdin_mode {
         let content = read_all_stdin()
         let git_dir = resolve_git_dir(fs, root)
+        // Validate commit/tag content unless --literally
+        if not(hash_args.literally) {
+          hash_object_validate_content(hash_args.obj_type, content)
+        }
         let id = @bitcore.hash_object_content(hash_args.obj_type, content)
         if hash_args.write_object {
           ignore(
@@ -51,4 +55,28 @@ async fn handle_hash_object(args : Array[String]) -> Unit raise Error {
     "fatal: hash-object with unsupported arguments is not available in standalone mode",
   )
   @sys.exit(128)
+}
+
+///|
+async fn hash_object_validate_content(
+  obj_type : @bitcore.ObjectType,
+  content : Bytes,
+) -> Unit raise Error {
+  match obj_type {
+    @bitcore.ObjectType::Commit => {
+      let text = @utf8.decode_lossy(content[:])
+      if not(text.has_prefix("tree ")) {
+        eprint_line("fatal: corrupt commit")
+        @sys.exit(128)
+      }
+    }
+    @bitcore.ObjectType::Tag => {
+      let text = @utf8.decode_lossy(content[:])
+      if not(text.has_prefix("object ")) {
+        eprint_line("fatal: corrupt tag")
+        @sys.exit(128)
+      }
+    }
+    _ => ()
+  }
 }

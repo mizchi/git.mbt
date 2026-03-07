@@ -154,7 +154,13 @@ fn storage_runtime_wbtest_hash_object_command(
   stdin_mode? : Bool = false,
   obj_type? : @bit.ObjectType = @bit.ObjectType::Blob,
 ) -> StorageCommand {
-  StorageCommand::HashObject({ write_object, stdin_mode, obj_type, paths })
+  StorageCommand::HashObject({
+    write_object,
+    stdin_mode,
+    literally: false,
+    obj_type,
+    paths,
+  })
 }
 
 ///|

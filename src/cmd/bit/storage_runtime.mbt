@@ -287,6 +287,7 @@ fn storage_runtime_parse_hash_object_args(
 ) -> @runtime.StorageHashObjectArgs raise Error {
   let mut write_object = false
   let mut stdin_mode = false
+  let mut literally = false
   let mut obj_type = "blob"
   let paths : Array[String] = []
   let mut i = 0
@@ -295,7 +296,7 @@ fn storage_runtime_parse_hash_object_args(
     match arg {
       "-w" => write_object = true
       "--stdin" => stdin_mode = true
-      "--literally" => ()
+      "--literally" => literally = true
       "-t" if i + 1 < args.length() => {
         obj_type = args[i + 1]
         i += 2
@@ -311,6 +312,7 @@ fn storage_runtime_parse_hash_object_args(
   {
     write_object,
     stdin_mode,
+    literally,
     obj_type: storage_runtime_parse_object_type(obj_type),
     paths,
   }

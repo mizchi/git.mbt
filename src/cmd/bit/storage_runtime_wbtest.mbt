@@ -325,6 +325,7 @@ test "storage runtime parser: hash-object normal and invalid type" {
       @runtime.StorageCommand::HashObject({
         write_object: false,
         stdin_mode: false,
+        literally: false,
         obj_type: @bitcore.ObjectType::Blob,
         paths: [],
       })
