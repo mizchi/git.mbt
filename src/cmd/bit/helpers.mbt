@@ -486,16 +486,20 @@ fn repository_format_error(
         if min_version >= 0 {
           if version < min_version {
             return Some(
-              "fatal: repository extension requires higher format version: " +
-              extension_name,
+              "error: repo version is \{version}, but v1-only extension found:\n\{extension_name}",
             )
+          }
+          // Validate known extension values
+          let ext_value = repository_extension_value(trimmed)
+          match repository_validate_extension(extension_name, ext_value) {
+            Some(err) => return Some(err)
+            None => ()
           }
         } else if version >= 1 {
           return Some("fatal: unknown repository extension: " + extension_name)
         } else if extension_name.has_suffix("-v1") {
           return Some(
-            "fatal: repository extension requires higher format version: " +
-            extension_name,
+            "error: repo version is \{version}, but v1-only extension found:\n\{extension_name}",
           )
         }
       }
@@ -551,6 +555,34 @@ fn repository_extension_min_version(extension_name : String) -> Int {
     "relativeworktrees" => 1
     "refstorage" => 1
     _ => -1
+  }
+}
+
+///|
+/// Extract the value part from a config line like "key = value"
+fn repository_extension_value(line : String) -> String {
+  match line.find("=") {
+    Some(idx) =>
+      String::unsafe_substring(line, start=idx + 1, end=line.length())
+      .trim()
+      .to_string()
+    None => ""
+  }
+}
+
+///|
+/// Validate a known extension's value. Returns Some(error) if invalid.
+fn repository_validate_extension(name : String, value : String) -> String? {
+  match name {
+    "refstorage" => {
+      let v = value.to_lower()
+      if v != "files" && v != "reftable" && v != "" {
+        Some("error: invalid value for 'extensions.refstorage': '\{v}'")
+      } else {
+        None
+      }
+    }
+    _ => None
   }
 }
 

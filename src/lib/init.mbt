@@ -85,8 +85,12 @@ pub fn init_repo_with_options(
   }
   if opts.separate_git_dir is Some(_) && not(bare) {
     let gitfile_path = join_path(root, ".git")
-    fs.remove_dir(gitfile_path) catch { _ => () }
-    fs.remove_file(gitfile_path) catch { _ => () }
+    fs.remove_dir(gitfile_path) catch {
+      _ => ()
+    }
+    fs.remove_file(gitfile_path) catch {
+      _ => ()
+    }
     fs.write_string(gitfile_path, "gitdir: " + git_dir + "\n")
   }
   if not(opts.is_reinit) {
