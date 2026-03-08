@@ -2052,6 +2052,9 @@ fn init_clone_destination(
       ref_format,
       object_format,
       is_reinit: false,
+      git_dir: None,
+      work_tree: None,
+      shared: None,
     })
     dest_path
   } else {
@@ -2066,6 +2069,9 @@ fn init_clone_destination(
           ref_format,
           object_format,
           is_reinit: false,
+          git_dir: None,
+          work_tree: None,
+          shared: None,
         })
         path
       }
@@ -2078,6 +2084,9 @@ fn init_clone_destination(
           ref_format,
           object_format,
           is_reinit: false,
+          git_dir: None,
+          work_tree: None,
+          shared: None,
         })
         dest_path + "/.git"
       }

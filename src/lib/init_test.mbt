@@ -21,6 +21,9 @@ test "init: reftable ref format writes extensions and metadata directory" {
     ref_format: "reftable",
     object_format: "sha1",
     is_reinit: false,
+    git_dir: None,
+    work_tree: None,
+    shared: None,
   })
   let config = fs.read_string("/repo/.git/config")
   assert_true(config.contains("repositoryformatversion = 1"))
@@ -40,6 +43,9 @@ test "init: sha256 object format writes objectFormat extension" {
     ref_format: "files",
     object_format: "sha256",
     is_reinit: false,
+    git_dir: None,
+    work_tree: None,
+    shared: None,
   })
   let config = fs.read_string("/repo/.git/config")
   assert_true(config.contains("repositoryformatversion = 1"))
@@ -57,6 +63,9 @@ test "init: reinit to move existing .git directory to separate gitdir" {
     ref_format: "files",
     object_format: "sha1",
     is_reinit: false,
+    git_dir: None,
+    work_tree: None,
+    shared: None,
   })
   init_repo_with_options_with_repo_fs(fs, fs, "/repo", {
     default_branch: "main",
@@ -66,6 +75,9 @@ test "init: reinit to move existing .git directory to separate gitdir" {
     ref_format: "files",
     object_format: "sha1",
     is_reinit: true,
+    git_dir: None,
+    work_tree: None,
+    shared: None,
   })
   assert_true(fs.is_file("/repo/.git"))
   assert_eq(fs.read_string("/repo/.git"), "gitdir: /separate\n")
@@ -85,6 +97,9 @@ test "init: reinit to move existing separate gitdir path from .git file" {
     ref_format: "files",
     object_format: "sha1",
     is_reinit: false,
+    git_dir: None,
+    work_tree: None,
+    shared: None,
   })
   init_repo_with_options_with_repo_fs(fs, fs, "/repo", {
     default_branch: "main",
@@ -94,6 +109,9 @@ test "init: reinit to move existing separate gitdir path from .git file" {
     ref_format: "files",
     object_format: "sha1",
     is_reinit: true,
+    git_dir: None,
+    work_tree: None,
+    shared: None,
   })
   assert_true(fs.is_file("/repo/.git"))
   assert_eq(fs.read_string("/repo/.git"), "gitdir: /surreal-git-dir\n")

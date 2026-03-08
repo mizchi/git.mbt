@@ -9,6 +9,9 @@ pub(all) struct InitOptions {
   ref_format : String
   object_format : String
   is_reinit : Bool
+  git_dir : String? // explicit GIT_DIR override (no .git file created)
+  work_tree : String? // explicit core.worktree to write to config
+  shared : String? // --shared value for directory permissions
 }
 
 ///|
@@ -21,6 +24,9 @@ pub fn InitOptions::new() -> InitOptions {
     ref_format: "files",
     object_format: "sha1",
     is_reinit: false,
+    git_dir: None,
+    work_tree: None,
+    shared: None,
   }
 }
 
@@ -42,6 +48,9 @@ pub fn init_repo(
     ref_format: "files",
     object_format: "sha1",
     is_reinit: false,
+    git_dir: None,
+    work_tree: None,
+    shared: None,
   })
 }
 
@@ -54,14 +63,16 @@ pub fn init_repo_with_options(
   opts : InitOptions,
 ) -> Unit raise @bit.GitError {
   let bare = opts.bare
-  // Determine git directory location
-  let git_dir = match opts.separate_git_dir {
-    Some(sep_dir) => sep_dir
-    None => if bare { root } else { join_path(root, ".git") }
+  let git_dir = match (opts.git_dir, opts.separate_git_dir) {
+    (Some(explicit_dir), _) => explicit_dir
+    (None, Some(sep_dir)) => sep_dir
+    (None, None) => if bare { root } else { join_path(root, ".git") }
   }
   let use_default_template_files = opts.template_dir is None
   let head_path = join_path(git_dir, "HEAD")
-  // Create git directory structure
+  if opts.separate_git_dir is Some(_) && not(bare) {
+    fs.mkdir_p(root)
+  }
   fs.mkdir_p(git_dir)
   fs.mkdir_p(join_path(git_dir, "objects"))
   fs.mkdir_p(join_path(git_dir, "objects/info"))
@@ -72,22 +83,15 @@ pub fn init_repo_with_options(
     fs.mkdir_p(join_path(git_dir, "hooks"))
     fs.mkdir_p(join_path(git_dir, "info"))
   }
-  // If separate-git-dir, create .git file pointing to actual git dir
   if opts.separate_git_dir is Some(_) && not(bare) {
     let gitfile_path = join_path(root, ".git")
-    fs.remove_dir(gitfile_path) catch {
-      _ => ()
-    }
-    fs.remove_file(gitfile_path) catch {
-      _ => ()
-    }
+    fs.remove_dir(gitfile_path) catch { _ => () }
+    fs.remove_file(gitfile_path) catch { _ => () }
     fs.write_string(gitfile_path, "gitdir: " + git_dir + "\n")
   }
-  // Write HEAD only on fresh init (not re-init)
   if not(opts.is_reinit) {
     fs.write_string(head_path, "ref: refs/heads/" + opts.default_branch + "\n")
   }
-  // Create/update config file with appropriate bare setting
   let bare_str = if bare { "true" } else { "false" }
   let mut repository_format_version = "0"
   if opts.ref_format == "reftable" || opts.object_format != "sha1" {
@@ -98,10 +102,16 @@ pub fn init_repo_with_options(
     "\n\tfilemode = true\n\tbare = " +
     bare_str +
     "\n"
+  match opts.work_tree {
+    Some(wt) => config = config + "\tworktree = " + wt + "\n"
+    None => ()
+  }
+  if not(bare) {
+    config = config + "\tlogallrefupdates = true\n"
+  }
   if opts.ref_format == "reftable" {
     fs.mkdir_p(join_path(git_dir, "reftable"))
-    let tables_list_path = join_path(git_dir, "reftable/tables.list")
-    fs.write_string(tables_list_path, "")
+    fs.write_string(join_path(git_dir, "reftable/tables.list"), "")
   }
   let extension_lines : Array[String] = []
   if opts.ref_format == "reftable" {
@@ -113,14 +123,17 @@ pub fn init_repo_with_options(
   if extension_lines.length() > 0 {
     config += "[extensions]\n" + extension_lines.join("\n") + "\n"
   }
+  match opts.shared {
+    Some(shared_val) =>
+      config = config + "\tsharedRepository = " + shared_val + "\n"
+    None => ()
+  }
   fs.write_string(join_path(git_dir, "config"), config)
   if use_default_template_files {
-    // Create description file
     fs.write_string(
       join_path(git_dir, "description"),
       "Unnamed repository; edit this file 'description' to name the repository.\n",
     )
-    // Create info/exclude
     fs.write_string(join_path(git_dir, "info/exclude"), "")
   }
 }
@@ -136,12 +149,17 @@ pub fn init_repo_with_options_with_repo_fs(
 ) -> Unit raise @bit.GitError {
   let bare = opts.bare
   // Determine git directory location
-  let git_dir = match opts.separate_git_dir {
-    Some(sep_dir) => sep_dir
-    None => if bare { root } else { join_path(root, ".git") }
+  let git_dir = match (opts.git_dir, opts.separate_git_dir) {
+    (Some(explicit_dir), _) => explicit_dir
+    (None, Some(sep_dir)) => sep_dir
+    (None, None) => if bare { root } else { join_path(root, ".git") }
   }
   let use_default_template_files = opts.template_dir is None
   let head_path = join_path(git_dir, "HEAD")
+  // Create work tree directory if needed (for --separate-git-dir)
+  if opts.separate_git_dir is Some(_) && not(bare) {
+    fs.mkdir_p(root)
+  }
   // Create git directory structure
   fs.mkdir_p(git_dir)
   fs.mkdir_p(join_path(git_dir, "objects"))
@@ -195,6 +213,15 @@ pub fn init_repo_with_options_with_repo_fs(
     "\n\tfilemode = true\n\tbare = " +
     bare_str +
     "\n"
+  // Write core.worktree if explicitly set
+  match opts.work_tree {
+    Some(wt) => config = config + "\tworktree = " + wt + "\n"
+    None => ()
+  }
+  // Write core.logallrefupdates for non-bare repos
+  if not(bare) {
+    config = config + "\tlogallrefupdates = true\n"
+  }
   if opts.ref_format == "reftable" {
     fs.mkdir_p(join_path(git_dir, "reftable"))
     let tables_list_path = join_path(git_dir, "reftable/tables.list")
@@ -209,6 +236,12 @@ pub fn init_repo_with_options_with_repo_fs(
   }
   if extension_lines.length() > 0 {
     config += "[extensions]\n" + extension_lines.join("\n") + "\n"
+  }
+  // Write --shared config
+  match opts.shared {
+    Some(shared_val) =>
+      config = config + "\tsharedRepository = " + shared_val + "\n"
+    None => ()
   }
   fs.write_string(join_path(git_dir, "config"), config)
   if use_default_template_files {

@@ -22,39 +22,10 @@ async fn handle_init(args : Array[String]) -> Unit raise Error {
   let mut target_dir : String? = None
   let mut separate_git_dir : String? = None
   let mut template_dir : String? = None
-  // GIT_DEFAULT_REF_FORMAT takes precedence over GIT_TEST_DEFAULT_REF_FORMAT
-  let default_ref_format = match @sys.get_env_var("GIT_DEFAULT_REF_FORMAT") {
-    Some(value) => {
-      let normalized = value.to_lower()
-      if normalized == "reftable" {
-        "reftable"
-      } else if normalized == "files" || normalized == "" {
-        "files"
-      } else {
-        eprint_line("fatal: unknown ref storage format '\{value}'")
-        @sys.exit(128)
-        "files"
-      }
-    }
-    None =>
-      match @sys.get_env_var("GIT_TEST_DEFAULT_REF_FORMAT") {
-        Some(value) => {
-          let normalized = value.to_lower()
-          if normalized == "reftable" {
-            "reftable"
-          } else if normalized == "files" || normalized == "" {
-            "files"
-          } else {
-            eprint_line("fatal: unknown ref storage format '\{value}'")
-            @sys.exit(128)
-            "files"
-          }
-        }
-        None => "files"
-      }
-  }
-  let mut ref_format = default_ref_format
+  // Ref format: resolved later after parsing args (--ref-format may override env)
+  let mut ref_format = "files"
   let mut ref_format_explicit = false
+  let ref_format_env_deferred = true
   let mut object_format : String? = None
   let mut object_format_explicit = false
   let mut shared_mode : String? = None
@@ -136,6 +107,30 @@ async fn handle_init(args : Array[String]) -> Unit raise Error {
       _ => ()
     }
     i += 1
+  }
+  // Resolve ref format from env if not explicitly set via --ref-format
+  let mut ref_format_from_env = false
+  if ref_format_env_deferred && not(ref_format_explicit) {
+    let env_ref_format = match @sys.get_env_var("GIT_DEFAULT_REF_FORMAT") {
+      Some(value) => Some(value)
+      None => @sys.get_env_var("GIT_TEST_DEFAULT_REF_FORMAT")
+    }
+    match env_ref_format {
+      Some(value) => {
+        let normalized = value.to_lower()
+        if normalized == "reftable" {
+          ref_format = "reftable"
+          ref_format_from_env = true
+        } else if normalized == "files" || normalized == "" {
+          ref_format = "files"
+          ref_format_from_env = true
+        } else {
+          eprint_line("fatal: unknown ref storage format '\{value}'")
+          @sys.exit(128)
+        }
+      }
+      None => ()
+    }
   }
   // Check --bare and --separate-git-dir incompatibility
   if bare && separate_git_dir is Some(_) {
@@ -220,8 +215,28 @@ async fn handle_init(args : Array[String]) -> Unit raise Error {
     (None, None) => (root, None)
   }
   // Determine if bare: only bare if explicitly requested or GIT_DIR without GIT_WORK_TREE
+  // GIT_DIR without GIT_WORK_TREE: bare unless GIT_DIR ends with /.git (inferred work tree)
   if bit_dir_env is Some(_) && work_tree_env is None && target_dir is None {
-    bare = true
+    match effective_git_dir {
+      Some(gd) => {
+        let basename = match gd.rev_find("/") {
+          Some(idx) => (try? gd[idx + 1:]).unwrap_or(gd).to_string()
+          None => gd
+        }
+        if basename != ".git" {
+          bare = true
+        }
+      }
+      _ => bare = true
+    }
+  }
+  // Check bare and --separate-git-dir incompatibility (after implicit bare detection)
+  if bare && separate_git_dir is Some(_) {
+    eprint_line(
+      "fatal: --separate-git-dir and --bare are incompatible",
+    )
+    @sys.exit(128)
+    return
   }
   // If GIT_WORK_TREE is set with --bare, that's an error
   if bare && work_tree_env is Some(_) {
@@ -232,7 +247,10 @@ async fn handle_init(args : Array[String]) -> Unit raise Error {
   }
   // Resolve separate_git_dir to absolute path
   let resolved_sep_git_dir : String? = match separate_git_dir {
-    Some(d) => Some(if d.has_prefix("/") { d } else { root + "/" + d })
+    Some(d) =>
+      Some(
+        init_normalize_path(if d.has_prefix("/") { d } else { root + "/" + d }),
+      )
     None =>
       if use_bit && not(bare) && effective_git_dir is None {
         Some(path + "/.bit")
@@ -275,9 +293,40 @@ async fn handle_init(args : Array[String]) -> Unit raise Error {
     (None, Some(gd)) => gd
     (None, None) => if bare { path } else { path + "/.git" }
   }
+  // Resolve .git file (gitdir: pointer) to actual git dir
+  let mut actual_git_dir = actual_git_dir
+  if not(fs.is_dir(actual_git_dir)) && fs.is_file(actual_git_dir) {
+    // .git is a file pointing to the real git dir
+    let content = decode_bytes(fs.read_file(actual_git_dir))
+    let trimmed = content.trim_end(chars="\r\n").to_string()
+    if trimmed.has_prefix("gitdir: ") {
+      let linked = (try? trimmed[8:]).unwrap_or(trimmed).to_string()
+      let resolved = if linked.has_prefix("/") {
+        linked
+      } else {
+        // Relative to the directory containing the .git file
+        match actual_git_dir.rev_find("/") {
+          Some(idx) =>
+            (try? actual_git_dir[:idx]).unwrap_or(actual_git_dir).to_string() +
+            "/" +
+            linked
+          None => linked
+        }
+      }
+      actual_git_dir = resolved
+    }
+  }
   // Check if this is a reinit (repository already exists)
-  let is_reinit = fs.is_dir(actual_git_dir) &&
-    fs.is_file(actual_git_dir + "/HEAD")
+  let is_reinit = if fs.is_dir(actual_git_dir) &&
+    fs.is_file(actual_git_dir + "/HEAD") {
+    true
+  } else if resolved_sep_git_dir is Some(_) {
+    // --separate-git-dir: check if work tree already has a repo (.git dir or file)
+    let dot_git = path + "/.git"
+    (fs.is_dir(dot_git) && fs.is_file(dot_git + "/HEAD")) || fs.is_file(dot_git)
+  } else {
+    false
+  }
   let mut reinit_tables_list_content : String? = None
   if object_format is None {
     // Check config init.defaultObjectFormat first
@@ -317,7 +366,8 @@ async fn handle_init(args : Array[String]) -> Unit raise Error {
       object_format = Some(normalized)
     }
   }
-  // Read init.defaultRefFormat from config (if not explicitly set)
+  // Read init.defaultRefFormat from config, and feature.experimental fallback
+  let mut ref_format_from_config = false
   if not(ref_format_explicit) && ref_format == "files" {
     let rfs3 : &@bitcore.RepoFileSystem = fs
     match find_global_gitconfig_path() {
@@ -336,11 +386,29 @@ async fn handle_init(args : Array[String]) -> Unit raise Error {
             let normalized = fmt.to_lower()
             if normalized == "files" || normalized == "reftable" {
               ref_format = normalized
+              ref_format_from_config = true
             } else {
               eprint_line("warning: unknown ref storage format '\{fmt}'")
             }
           }
           None => ()
+        }
+        // feature.experimental=true → default to reftable (only if no explicit env, flag, or config)
+        if not(ref_format_from_config) && not(ref_format_from_env) &&
+          ref_format == "files" {
+          let fe_val = get_config_value(
+            rfs3,
+            config_path,
+            "feature.experimental",
+            None,
+            false,
+          ) catch {
+            _ => None
+          }
+          match fe_val {
+            Some(v) if v.to_lower() == "true" => ref_format = "reftable"
+            _ => ()
+          }
         }
       }
       None => ()
@@ -377,6 +445,47 @@ async fn handle_init(args : Array[String]) -> Unit raise Error {
     }
     object_format = Some(existing_object_format)
   }
+  // Read core.sharedRepository from global config if --shared not specified
+  if shared_mode is None {
+    let rfs_shared : &@bitcore.RepoFileSystem = fs
+    match find_global_gitconfig_path() {
+      Some(config_path) => {
+        let shared_val = get_config_value(
+          rfs_shared,
+          config_path,
+          "core.sharedRepository",
+          None,
+          false,
+        ) catch {
+          _ => None
+        }
+        match shared_val {
+          Some(v) => shared_mode = Some(v)
+          None => ()
+        }
+      }
+      None => ()
+    }
+  }
+  // Determine work_tree for config
+  let config_work_tree : String? = match work_tree_env {
+    Some(wt) if bit_dir_env is Some(_) && not(bare) =>
+      Some(if wt.has_prefix("/") { wt } else { root + "/" + wt })
+    _ => None
+  }
+  // If reiniting and actual_git_dir differs from default (e.g., .git file redirect),
+  // pass it as git_dir so init_repo uses the correct directory
+  let resolved_git_dir = if is_reinit && effective_git_dir is None &&
+    resolved_sep_git_dir is None {
+    let default_git_dir = if bare { path } else { path + "/.git" }
+    if actual_git_dir != default_git_dir {
+      Some(actual_git_dir)
+    } else {
+      effective_git_dir
+    }
+  } else {
+    effective_git_dir
+  }
   // Build init options
   let opts : @bitlib.InitOptions = {
     default_branch: branch,
@@ -386,6 +495,9 @@ async fn handle_init(args : Array[String]) -> Unit raise Error {
     ref_format,
     object_format: object_format.unwrap_or("sha1"),
     is_reinit,
+    git_dir: resolved_git_dir,
+    work_tree: config_work_tree,
+    shared: shared_mode,
   }
   // Initialize repository
   @bitrepo.init_repo_with_options_with_repo_fs(fs, fs, path, opts)
@@ -510,5 +622,28 @@ fn init_read_default_branch(fs : OsFs) -> String? {
         _ => None
       }
     None => None
+  }
+}
+
+///|
+/// Normalize a path by resolving `.` and `..` components.
+fn init_normalize_path(p : String) -> String {
+  let parts = p.split("/")
+  let result : Array[String] = []
+  for part in parts {
+    match part {
+      "." => continue
+      ".." =>
+        if result.length() > 1 {
+          let _ = result.pop()
+        }
+      "" if result.length() > 0 => continue
+      _ => result.push(part.to_string())
+    }
+  }
+  if result.length() == 0 {
+    "/"
+  } else {
+    result.join("/")
   }
 }

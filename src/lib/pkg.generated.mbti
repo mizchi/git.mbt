@@ -586,6 +586,9 @@ pub(all) struct InitOptions {
   ref_format : String
   object_format : String
   is_reinit : Bool
+  git_dir : String?
+  work_tree : String?
+  shared : String?
 }
 pub fn InitOptions::new() -> Self
 

@@ -483,6 +483,9 @@ fn storage_handle_init(
     ref_format,
     object_format,
     is_reinit: false,
+    git_dir: None,
+    work_tree: None,
+    shared: None,
   }
   @bitrepo.init_repo_with_options_with_repo_fs(fs, rfs, root, opts)
   if not(args.quiet) {
