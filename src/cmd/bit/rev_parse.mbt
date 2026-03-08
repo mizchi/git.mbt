@@ -3610,15 +3610,23 @@ async fn rev_parse_handle_range_op(
   // Check for ... (symmetric difference) first, then .. (range)
   // Don't match :/ (commit message search) or : (tree path)
   match effective_arg.find("...") {
-    Some(idx) if idx > 0 && idx + 3 <= effective_arg.length() => {
-      let left_spec = String::unsafe_substring(effective_arg, start=0, end=idx)
-      let right_spec = String::unsafe_substring(
+    Some(idx) if idx + 3 <= effective_arg.length() => {
+      let left_spec0 = String::unsafe_substring(effective_arg, start=0, end=idx)
+      let right_spec0 = String::unsafe_substring(
         effective_arg,
         start=idx + 3,
         end=effective_arg.length(),
       )
-      if right_spec.length() == 0 {
+      // Both empty = "..." literal, not a range
+      if left_spec0.length() == 0 && right_spec0.length() == 0 {
         return false
+      }
+      // Default empty side to HEAD
+      let left_spec = if left_spec0.length() == 0 { "HEAD" } else { left_spec0 }
+      let right_spec = if right_spec0.length() == 0 {
+        "HEAD"
+      } else {
+        right_spec0
       }
       let left_id = @bitrepo.rev_parse(fs, git_dir, left_spec)
       let right_id = @bitrepo.rev_parse(fs, git_dir, right_spec)
@@ -3686,20 +3694,28 @@ async fn rev_parse_handle_range_op(
   }
   // Check for .. (range)
   match effective_arg.find("..") {
-    Some(idx) if idx > 0 && idx + 2 <= effective_arg.length() => {
+    Some(idx) if idx + 2 <= effective_arg.length() => {
       // Make sure it's not ... (already handled above)
       if idx + 2 < effective_arg.length() &&
         effective_arg.to_array()[idx + 2] == '.' {
         return false
       }
-      let left_spec = String::unsafe_substring(effective_arg, start=0, end=idx)
-      let right_spec = String::unsafe_substring(
+      let left_spec0 = String::unsafe_substring(effective_arg, start=0, end=idx)
+      let right_spec0 = String::unsafe_substring(
         effective_arg,
         start=idx + 2,
         end=effective_arg.length(),
       )
-      if right_spec.length() == 0 {
+      // Both empty = ".." literal, pass through as-is
+      if left_spec0.length() == 0 && right_spec0.length() == 0 {
         return false
+      }
+      // Default empty side to HEAD
+      let left_spec = if left_spec0.length() == 0 { "HEAD" } else { left_spec0 }
+      let right_spec = if right_spec0.length() == 0 {
+        "HEAD"
+      } else {
+        right_spec0
       }
       let left_id = @bitrepo.rev_parse(fs, git_dir, left_spec)
       let right_id = @bitrepo.rev_parse(fs, git_dir, right_spec)
