@@ -250,7 +250,7 @@ async fn handle_diff(args : Array[String]) -> Unit raise Error {
           let new_tree = resolve_diff_tree_id(db, rfs, new_id)
           match (old_tree, new_tree) {
             (Some(ot), Some(nt)) =>
-              @bitdiff.diff_trees(rfs, repo_git_dir, Some(ot), nt)
+              @bitdiff.diff_trees(rfs, repo_git_dir, Some(ot), nt, db~)
             _ =>
               raise @bitcore.GitError::InvalidObject(
                 "unsupported diff range: " + spec,
@@ -602,7 +602,7 @@ fn diff_cached_against_ref(
   let index_tree = @bitlib.write_tree_from_index(
     fs, rfs, git_dir, index_entries,
   )
-  @bitdiff.diff_trees(rfs, git_dir, Some(old_tree_id), index_tree)
+  @bitdiff.diff_trees(rfs, git_dir, Some(old_tree_id), index_tree, db~)
 }
 
 ///|

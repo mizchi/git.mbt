@@ -208,6 +208,7 @@ pub async fn diff_worktree(
 pub fn diff_index(
   fs : &@bit.RepoFileSystem,
   root : String,
+  db? : ObjectDb,
 ) -> Array[DiffFile] raise @bit.GitError {
   let git_dir = join_path(root, ".git")
   let index_entries = read_index_entries(fs, git_dir)
@@ -216,7 +217,10 @@ pub fn diff_index(
     index_map[e.path] = e
   }
   let head_entries = diff_read_head_entries(fs, git_dir)
-  let db = ObjectDb::load_lazy(fs, git_dir)
+  let db = match db {
+    Some(db) => db
+    None => ObjectDb::load_lazy(fs, git_dir)
+  }
   let out : Array[DiffFile] = []
   for item in index_map.to_array() {
     let (path, entry) = item
@@ -596,8 +600,12 @@ pub fn diff_trees(
   git_dir : String,
   old_tree : @bit.ObjectId?,
   new_tree : @bit.ObjectId,
+  db? : ObjectDb,
 ) -> Array[DiffFile] raise @bit.GitError {
-  let db = ObjectDb::load(fs, git_dir)
+  let db = match db {
+    Some(db) => db
+    None => ObjectDb::load(fs, git_dir)
+  }
   let out : Array[DiffFile] = []
   let old_entries : Map[String, DiffHeadEntry] = {}
   let new_entries : Map[String, DiffHeadEntry] = {}

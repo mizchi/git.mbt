@@ -416,7 +416,7 @@ test "serialization: stats" {
   assert_true(stats.tree_count >= 1)
   assert_eq(stats.blob_count, 2)
   assert_eq(stats.blob_bytes, 300)
-  println("Stats: \{stats.total_bytes} bytes, \{stats.object_count} objects")
+  assert_true(stats.total_bytes > 0)
 }
 
 ///|
@@ -449,12 +449,6 @@ test "demo: serialization overhead" {
   let snapshot = db.serialize_snapshot()
   let bytes = snapshot.to_bytes()
   let stats = snapshot.stats()
-  let raw_size = 50 * 2048
-  let overhead = (bytes.length() - raw_size) * 100 / raw_size
-  println("Raw data: \{raw_size} bytes")
-  println("Serialized: \{bytes.length()} bytes")
-  println("Overhead: \{overhead}%")
-  println(
-    "Objects: \{stats.object_count} (commits: \{stats.commit_count}, trees: \{stats.tree_count}, blobs: \{stats.blob_count})",
-  )
+  assert_true(bytes.length() > 0)
+  assert_true(stats.object_count > 0)
 }

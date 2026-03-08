@@ -1014,6 +1014,11 @@ async fn handle_log(args : Array[String]) -> Unit raise Error {
       }
     }
     // BFS walk
+    let walk_db = if show_stat || show_patch {
+      Some(@bitlib.ObjectDb::load(rfs, git_dir))
+    } else {
+      None
+    }
     let entries = log_walk_commits(
       rfs,
       git_dir,
@@ -1054,6 +1059,7 @@ async fn handle_log(args : Array[String]) -> Unit raise Error {
             git_dir,
             entry.parent_tree,
             entry.tree,
+            db=walk_db.unwrap(),
           )
           if show_stat {
             let stat_lines = @bitdiff.diff_stat(diff_files)
@@ -1100,6 +1106,11 @@ async fn handle_log(args : Array[String]) -> Unit raise Error {
     if reverse {
       entries.rev_in_place()
     }
+    let log_db = if show_stat || show_patch {
+      Some(@bitlib.ObjectDb::load(rfs, git_dir))
+    } else {
+      None
+    }
     for entry in entries {
       print_line("commit " + entry.id.to_hex())
       print_line("Author: " + entry.author)
@@ -1118,6 +1129,7 @@ async fn handle_log(args : Array[String]) -> Unit raise Error {
           git_dir,
           entry.parent_tree,
           entry.tree,
+          db=log_db.unwrap(),
         )
         if show_stat {
           let stat_lines = @bitdiff.diff_stat(diff_files)

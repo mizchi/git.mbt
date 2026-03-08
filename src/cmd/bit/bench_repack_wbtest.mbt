@@ -84,7 +84,9 @@ test "bench repack small (115 obj)" (b : @bench.T) {
   let repo = bench_repack_root + "/small"
   let args = ["bit", "-C", repo, "repack", "-a", "-d"]
   b.bench(fn() {
+    bench_stdout_suppress()
     @async.run_async_main(async fn() { run_main_for_args(args) })
+    bench_stdout_restore()
     b.keep(1)
   })
 }
@@ -96,7 +98,9 @@ test "bench repack large (560 obj)" (b : @bench.T) {
   let repo = bench_repack_root + "/large"
   let args = ["bit", "-C", repo, "repack", "-a", "-d"]
   b.bench(fn() {
+    bench_stdout_suppress()
     @async.run_async_main(async fn() { run_main_for_args(args) })
+    bench_stdout_restore()
     b.keep(1)
   })
 }

@@ -77,9 +77,11 @@ test "bench cat-file -t commit (×10)" (b : @bench.T) {
   @sys.unset_env_var("GIT_WORK_TREE")
   @sys.unset_env_var("GIT_SHIM_CWD")
   b.bench(fn() {
+    bench_stdout_suppress()
     for _ in 0..<bench_catfile_repeat {
       @async.run_async_main(async fn() { run_main_for_args(args) })
     }
+    bench_stdout_restore()
     b.keep(bench_catfile_repeat)
   })
 }
@@ -93,9 +95,11 @@ test "bench cat-file -p commit (×10)" (b : @bench.T) {
   @sys.unset_env_var("GIT_WORK_TREE")
   @sys.unset_env_var("GIT_SHIM_CWD")
   b.bench(fn() {
+    bench_stdout_suppress()
     for _ in 0..<bench_catfile_repeat {
       @async.run_async_main(async fn() { run_main_for_args(args) })
     }
+    bench_stdout_restore()
     b.keep(bench_catfile_repeat)
   })
 }
@@ -109,9 +113,11 @@ test "bench cat-file -s commit (×10)" (b : @bench.T) {
   @sys.unset_env_var("GIT_WORK_TREE")
   @sys.unset_env_var("GIT_SHIM_CWD")
   b.bench(fn() {
+    bench_stdout_suppress()
     for _ in 0..<bench_catfile_repeat {
       @async.run_async_main(async fn() { run_main_for_args(args) })
     }
+    bench_stdout_restore()
     b.keep(bench_catfile_repeat)
   })
 }
@@ -125,9 +131,11 @@ test "bench cat-file -e commit (×10)" (b : @bench.T) {
   @sys.unset_env_var("GIT_WORK_TREE")
   @sys.unset_env_var("GIT_SHIM_CWD")
   b.bench(fn() {
+    bench_stdout_suppress()
     for _ in 0..<bench_catfile_repeat {
       @async.run_async_main(async fn() { run_main_for_args(args) })
     }
+    bench_stdout_restore()
     b.keep(bench_catfile_repeat)
   })
 }

@@ -63,8 +63,9 @@ let bench_diff_10pct : (@bit.TestFs, @bit.ObjectId, @bit.ObjectId) = try! setup_
 test "bench diff_trees identical 100 files" (b : @bench.T) {
   let (fs, tree1, _) = bench_diff_identical
   let git_dir = bench_diff_root + "/.git"
+  let db = @bitlib.ObjectDb::load(fs, git_dir)
   b.bench(fn() {
-    let diffs = try! diff_trees(fs, git_dir, Some(tree1), tree1)
+    let diffs = try! diff_trees(fs, git_dir, Some(tree1), tree1, db~)
     b.keep(diffs.length())
   })
 }
@@ -73,8 +74,9 @@ test "bench diff_trees identical 100 files" (b : @bench.T) {
 test "bench diff_trees 10pct changed 100 files" (b : @bench.T) {
   let (fs, tree1, tree2) = bench_diff_10pct
   let git_dir = bench_diff_root + "/.git"
+  let db = @bitlib.ObjectDb::load(fs, git_dir)
   b.bench(fn() {
-    let diffs = try! diff_trees(fs, git_dir, Some(tree1), tree2)
+    let diffs = try! diff_trees(fs, git_dir, Some(tree1), tree2, db~)
     b.keep(diffs.length())
   })
 }

@@ -75,58 +75,34 @@ let bench_wt_missing : String = bench_wt_join_path(bench_wt_root, "missing.txt")
 test "bench worktree_entry regular" (b : @bench.T) {
   bench_wt_setup(bench_wt_root)
   let fs = @osfs.OsFs::new()
-  let iterations = 200
-  @async.run_async_main(async fn() {
-    let start = @bench.monotonic_clock_start()
-    for _ in 0..<iterations {
+  b.bench(fn() {
+    @async.run_async_main(async fn() {
       ignore(@bitio.worktree_entry(fs, bench_wt_regular))
-    }
-    let elapsed = @bench.monotonic_clock_end(start)
-    let total_ms = elapsed / 1000.0
-    let per_us = elapsed / iterations.to_double()
-    println(
-      "bench worktree_entry regular: total=\{total_ms}ms per=\{per_us}us n=\{iterations}",
-    )
+    })
+    b.keep(1)
   })
-  b.keep(iterations)
 }
 
 ///|
 test "bench worktree_entry symlink" (b : @bench.T) {
   bench_wt_setup(bench_wt_root)
   let fs = @osfs.OsFs::new()
-  let iterations = 200
-  @async.run_async_main(async fn() {
-    let start = @bench.monotonic_clock_start()
-    for _ in 0..<iterations {
+  b.bench(fn() {
+    @async.run_async_main(async fn() {
       ignore(@bitio.worktree_entry(fs, bench_wt_symlink))
-    }
-    let elapsed = @bench.monotonic_clock_end(start)
-    let total_ms = elapsed / 1000.0
-    let per_us = elapsed / iterations.to_double()
-    println(
-      "bench worktree_entry symlink: total=\{total_ms}ms per=\{per_us}us n=\{iterations}",
-    )
+    })
+    b.keep(1)
   })
-  b.keep(iterations)
 }
 
 ///|
 test "bench worktree_entry missing" (b : @bench.T) {
   bench_wt_setup(bench_wt_root)
   let fs = @osfs.OsFs::new()
-  let iterations = 200
-  @async.run_async_main(async fn() {
-    let start = @bench.monotonic_clock_start()
-    for _ in 0..<iterations {
+  b.bench(fn() {
+    @async.run_async_main(async fn() {
       ignore(@bitio.worktree_entry(fs, bench_wt_missing))
-    }
-    let elapsed = @bench.monotonic_clock_end(start)
-    let total_ms = elapsed / 1000.0
-    let per_us = elapsed / iterations.to_double()
-    println(
-      "bench worktree_entry missing: total=\{total_ms}ms per=\{per_us}us n=\{iterations}",
-    )
+    })
+    b.keep(1)
   })
-  b.keep(iterations)
 }

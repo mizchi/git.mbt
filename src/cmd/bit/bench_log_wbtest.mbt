@@ -130,7 +130,9 @@ fn bench_log_run(repo_root : String, args : Array[String]) -> Int {
   bench_log_init_probe()
   bench_log_reset_env()
   let full_args = ["bit", "-C", repo_root] + args
+  bench_stdout_suppress()
   @async.run_async_main(async fn() { run_main_for_args(full_args) })
+  bench_stdout_restore()
   1
 }
 

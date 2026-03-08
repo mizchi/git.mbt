@@ -172,11 +172,13 @@ test "bench e2e clone local medium repo" (b : @bench.T) {
   b.bench(fn() {
     e2e_reset_git_env()
     e2e_cleanup_tree(fs, bench_e2e_clone_target)
+    bench_stdout_suppress()
     @async.run_async_main(async fn() {
       run_main_for_args([
         "bit", "clone", bench_e2e_clone_source, bench_e2e_clone_target,
       ])
     })
+    bench_stdout_restore()
     b.keep(fs.is_dir(bench_e2e_clone_target + "/.git"))
   })
 }
@@ -188,11 +190,13 @@ test "bench e2e clone local bundle medium repo" (b : @bench.T) {
   b.bench(fn() {
     e2e_reset_git_env()
     e2e_cleanup_tree(fs, bench_e2e_bundle_clone_target)
+    bench_stdout_suppress()
     @async.run_async_main(async fn() {
       run_main_for_args([
         "bit", "clone", bench_e2e_bundle_path, bench_e2e_bundle_clone_target,
       ])
     })
+    bench_stdout_restore()
     b.keep(fs.is_dir(bench_e2e_bundle_clone_target + "/.git"))
   })
 }
@@ -205,9 +209,11 @@ test "bench e2e fetch after one new commit" (b : @bench.T) {
     step += 1
     append_fetch_update_commit_for_e2e_bench(step)
     e2e_reset_git_env()
+    bench_stdout_suppress()
     @async.run_async_main(async fn() {
       run_main_for_args(["bit", "-C", bench_e2e_fetch_target, "fetch", "origin"])
     })
+    bench_stdout_restore()
     b.keep(step)
   })
 }

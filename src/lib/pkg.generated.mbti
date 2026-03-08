@@ -94,13 +94,13 @@ pub fn detect_git_dir(&@types.RepoFileSystem, String) -> (String, Bool)?
 
 pub fn detect_protocol_version(Bytes) -> Int
 
-pub fn diff_index(&@types.RepoFileSystem, String) -> Array[DiffFile] raise @object.GitError
+pub fn diff_index(&@types.RepoFileSystem, String, db? : ObjectDb) -> Array[DiffFile] raise @object.GitError
 
 pub fn diff_stat(Array[DiffFile]) -> Array[String]
 
 pub fn diff_text(Array[DiffFile]) -> Array[String]
 
-pub fn diff_trees(&@types.RepoFileSystem, String, @object.ObjectId?, @object.ObjectId) -> Array[DiffFile] raise @object.GitError
+pub fn diff_trees(&@types.RepoFileSystem, String, @object.ObjectId?, @object.ObjectId, db? : ObjectDb) -> Array[DiffFile] raise @object.GitError
 
 pub async fn diff_worktree(&@types.RepoFileSystem, String, run_filter_cmd? : FilterCmd) -> Array[DiffFile] raise @object.GitError
 

@@ -142,9 +142,11 @@ test "bench init first status startup (-C)" (b : @bench.T) {
   @sys.unset_env_var("GIT_SHIM_CWD")
   @sys.unset_env_var("GIT_CONFIG_OVERRIDES")
   b.bench(fn() {
+    bench_stdout_suppress()
     for _ in 0..<bench_startup_repeat {
       @async.run_async_main(async fn() { run_main_for_args(args) })
     }
+    bench_stdout_restore()
     b.keep(bench_startup_repeat)
   })
 }

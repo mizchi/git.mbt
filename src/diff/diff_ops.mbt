@@ -835,8 +835,12 @@ pub fn diff_trees(
   git_dir : String,
   old_tree : @bit.ObjectId?,
   new_tree : @bit.ObjectId,
+  db? : @bitlib.ObjectDb,
 ) -> Array[DiffFile] raise @bit.GitError {
-  let db = @bitlib.ObjectDb::load(fs, git_dir)
+  let db = match db {
+    Some(db) => db
+    None => @bitlib.ObjectDb::load(fs, git_dir)
+  }
   let out : Array[DiffFile] = []
   let old_entries : Map[String, DiffHeadEntry] = {}
   let new_entries : Map[String, DiffHeadEntry] = {}

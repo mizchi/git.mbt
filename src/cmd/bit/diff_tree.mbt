@@ -264,7 +264,7 @@ async fn diff_tree_output(
   results.sort_by(fn(a, b) { String::compare(a.0, b.0) })
   if patch {
     // Unified diff output using diff_trees from lib
-    let diff_files = @bitlib.diff_trees(fs, git_dir, old_tree, new_tree)
+    let diff_files = @bitlib.diff_trees(fs, git_dir, old_tree, new_tree, db~)
     let lines = @bitlib.diff_text(diff_files)
     for line in lines {
       print_line(line)

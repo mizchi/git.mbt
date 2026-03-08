@@ -57,8 +57,8 @@ fn setup_checkout_repo(file_count : Int) -> @bit.TestFs raise @bit.GitError {
 
 ///|
 test "bench add_paths 100 files" (b : @bench.T) {
+  let fs = setup_add_repo(100)
   b.bench(fn() {
-    let fs = setup_add_repo(100)
     try! add_paths(fs, fs, bench_ops_root, ["."])
     b.keep(0)
   })
@@ -66,8 +66,8 @@ test "bench add_paths 100 files" (b : @bench.T) {
 
 ///|
 test "bench add_paths 500 files" (b : @bench.T) {
+  let fs = setup_add_repo(500)
   b.bench(fn() {
-    let fs = setup_add_repo(500)
     try! add_paths(fs, fs, bench_ops_root, ["."])
     b.keep(0)
   })
@@ -75,8 +75,8 @@ test "bench add_paths 500 files" (b : @bench.T) {
 
 ///|
 test "bench commit 100 files" (b : @bench.T) {
+  let fs = try! setup_commit_repo(100)
   b.bench(fn() {
-    let fs = try! setup_commit_repo(100)
     let id = try! commit(
       fs, fs, bench_ops_root, "bench commit\n", "Bench <bench@example.com>", 1700000000L,
     )
@@ -86,8 +86,8 @@ test "bench commit 100 files" (b : @bench.T) {
 
 ///|
 test "bench checkout" (b : @bench.T) {
+  let fs = try! setup_checkout_repo(100)
   b.bench(fn() {
-    let fs = try! setup_checkout_repo(100)
     let id = try! checkout(fs, fs, bench_ops_root, "other")
     b.keep(id.to_hex().length())
   })

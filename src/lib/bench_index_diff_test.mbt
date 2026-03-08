@@ -96,8 +96,10 @@ test "bench read_index_entries large" (b : @bench.T) {
 test "bench diff_index small" (b : @bench.T) {
   bench_index_ensure_repo(bench_index_small_root, 200)
   let fs = @osfs.OsFs::new()
+  let git_dir = bench_index_join_path(bench_index_small_root, ".git")
+  let db = ObjectDb::load_lazy(fs, git_dir)
   b.bench(fn() {
-    let diffs = try! diff_index(fs, bench_index_small_root)
+    let diffs = try! diff_index(fs, bench_index_small_root, db~)
     b.keep(diffs.length())
   })
 }
@@ -106,8 +108,10 @@ test "bench diff_index small" (b : @bench.T) {
 test "bench diff_index large" (b : @bench.T) {
   bench_index_ensure_repo(bench_index_large_root, 2000)
   let fs = @osfs.OsFs::new()
+  let git_dir = bench_index_join_path(bench_index_large_root, ".git")
+  let db = ObjectDb::load_lazy(fs, git_dir)
   b.bench(fn() {
-    let diffs = try! diff_index(fs, bench_index_large_root)
+    let diffs = try! diff_index(fs, bench_index_large_root, db~)
     b.keep(diffs.length())
   })
 }

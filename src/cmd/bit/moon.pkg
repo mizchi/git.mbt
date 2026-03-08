@@ -43,6 +43,7 @@ warnings = "-29-67"
 
 options(
   is_main: true,
+  "native-stub": [ "bench_suppress_stub.c" ],
   targets: {
     "add.mbt": [ "native" ],
     "add_wbtest.mbt": [ "native" ],
@@ -56,6 +57,7 @@ options(
     "bench_midx_clone_wbtest.mbt": [ "native" ],
     "bench_repack_wbtest.mbt": [ "native" ],
     "bench_status_wbtest.mbt": [ "native" ],
+    "bench_suppress_wbtest.mbt": [ "native" ],
     "bisect.mbt": [ "native" ],
     "blame.mbt": [ "native" ],
     "branch.mbt": [ "native" ],
