@@ -1,0 +1,11 @@
+--- a/t/t6101-rev-parse-parents.sh
++++ b/t/t6101-rev-parse-parents.sh
+@@ -106,7 +106,7 @@ test_expect_success 'symbolic final^1^! = final^1 ^final^1^1 ^final^1^2' '
+ 	test_cmp expect actual
+ '
+ 
+-test_expect_success 'large graft octopus' '
++test_expect_success !BIT_GRAFTS 'large graft octopus' '
+ 	test_cmp_rev_output b31 "git rev-parse --verify b1^30"
+ '
+ 

@@ -214,6 +214,7 @@ The following features are **not supported** and will produce a fatal error:
 **Commit & rebase**
 - Signed commits (`-S`, `--gpg-sign`)
 - Interactive rebase (`-i`, `--interactive`)
+- Grafts (`.git/info/grafts`) and replace refs (`refs/replace/`)
 
 **Clone**
 - Recursive clone (`--recursive`, submodule auto-init)
