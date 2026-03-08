@@ -517,6 +517,41 @@ async fn handle_rev_parse(args : Array[String]) -> Unit raise Error {
             process_index += 1
             continue
           }
+          if rev_parse_handle_range_op(
+              fs, git_dir, rev_arg, effective_arg, symbolic_full_name, short_length,
+              output_object_format, quiet, revs_only,
+            ) {
+            process_index += 1
+            continue
+          }
+          // Handle ^ negation prefix
+          if effective_arg.has_prefix("^") && effective_arg.length() > 1 {
+            let neg_spec = String::unsafe_substring(
+              effective_arg,
+              start=1,
+              end=effective_arg.length(),
+            )
+            let id = @bitrepo.rev_parse(fs, git_dir, neg_spec)
+            match id {
+              Some(oid) => {
+                let hex = rev_parse_resolve_output_oid_hex(
+                  fs, git_dir, oid, output_object_format,
+                )
+                match short_length {
+                  Some(length) => print_line("^" + shorten_oid_hex(hex, length))
+                  None => print_line("^" + hex)
+                }
+              }
+              None =>
+                if not(revs_only) {
+                  raise @bitcore.GitError::InvalidObject(
+                    "unknown revision: " + rev_arg,
+                  )
+                }
+            }
+            process_index += 1
+            continue
+          }
           let id = if effective_arg.find("@{") is Some(_) {
             match resolve_upstream_push_oid(fs, git_dir, effective_arg, quiet) {
               Some(oid) => Some(oid)
@@ -794,6 +829,55 @@ async fn handle_rev_parse(args : Array[String]) -> Unit raise Error {
             fs, git_dir, arg, effective_arg, symbolic_full_name, short_length, output_object_format,
             quiet, revs_only,
           ) {
+          process_index += 1
+          continue
+        }
+        // Handle .. and ... range operators
+        if rev_parse_handle_range_op(
+            fs, git_dir, arg, effective_arg, symbolic_full_name, short_length, output_object_format,
+            quiet, revs_only,
+          ) {
+          process_index += 1
+          continue
+        }
+        // Handle ^ negation prefix (e.g., ^HEAD, ^main~2)
+        if effective_arg.has_prefix("^") && effective_arg.length() > 1 {
+          let neg_spec = String::unsafe_substring(
+            effective_arg,
+            start=1,
+            end=effective_arg.length(),
+          )
+          if symbolic_full_name {
+            let name = resolve_symbolic_full_name(fs, git_dir, neg_spec)
+            match name {
+              Some(value) => print_line("^\{value}")
+              None =>
+                if not(revs_only) {
+                  raise @bitcore.GitError::InvalidObject(
+                    "unknown revision: " + arg,
+                  )
+                }
+            }
+          } else {
+            let id = @bitrepo.rev_parse(fs, git_dir, neg_spec)
+            match id {
+              Some(oid) => {
+                let hex = rev_parse_resolve_output_oid_hex(
+                  fs, git_dir, oid, output_object_format,
+                )
+                match short_length {
+                  Some(length) => print_line("^" + shorten_oid_hex(hex, length))
+                  None => print_line("^" + hex)
+                }
+              }
+              None =>
+                if not(revs_only) {
+                  raise @bitcore.GitError::InvalidObject(
+                    "unknown revision: " + arg,
+                  )
+                }
+            }
+          }
           process_index += 1
           continue
         }
@@ -3508,6 +3592,202 @@ fn rev_parse_list_matching_refs(
   // Sort by refname for deterministic output
   result.sort_by(fn(a, b) { lexicographic_compare(a.0, b.0) })
   result
+}
+
+///|
+/// Handle A..B and A...B range operators. Returns true if handled.
+async fn rev_parse_handle_range_op(
+  fs : &@bitcore.RepoFileSystem,
+  git_dir : String,
+  arg : String,
+  effective_arg : String,
+  symbolic_full_name : Bool,
+  short_length : Int?,
+  output_object_format : String?,
+  quiet : Bool,
+  revs_only : Bool,
+) -> Bool raise Error {
+  // Check for ... (symmetric difference) first, then .. (range)
+  // Don't match :/ (commit message search) or : (tree path)
+  match effective_arg.find("...") {
+    Some(idx) if idx > 0 && idx + 3 <= effective_arg.length() => {
+      let left_spec = String::unsafe_substring(effective_arg, start=0, end=idx)
+      let right_spec = String::unsafe_substring(
+        effective_arg,
+        start=idx + 3,
+        end=effective_arg.length(),
+      )
+      if right_spec.length() == 0 {
+        return false
+      }
+      let left_id = @bitrepo.rev_parse(fs, git_dir, left_spec)
+      let right_id = @bitrepo.rev_parse(fs, git_dir, right_spec)
+      guard left_id is Some(lid) && right_id is Some(rid) else {
+        if not(quiet) && not(revs_only) {
+          raise @bitcore.GitError::InvalidObject("unknown revision: " + arg)
+        }
+        return true
+      }
+      // A...B = A B ^merge-base(A,B)
+      if symbolic_full_name {
+        let left_name = resolve_symbolic_full_name(fs, git_dir, left_spec)
+        let right_name = resolve_symbolic_full_name(fs, git_dir, right_spec)
+        print_line(left_name.unwrap_or(left_spec))
+        print_line(right_name.unwrap_or(right_spec))
+        // merge-base output as ^OID (no symbolic form for merge-base)
+        let mb = rev_parse_find_merge_base(fs, git_dir, lid, rid)
+        match mb {
+          Some(mb_id) => print_line("^\{mb_id.to_hex()}")
+          None => ()
+        }
+      } else {
+        let lhex = rev_parse_resolve_output_oid_hex(
+          fs, git_dir, lid, output_object_format,
+        )
+        let rhex = rev_parse_resolve_output_oid_hex(
+          fs, git_dir, rid, output_object_format,
+        )
+        match short_length {
+          Some(length) => {
+            print_line(shorten_oid_hex(lhex, length))
+            print_line(shorten_oid_hex(rhex, length))
+          }
+          None => {
+            print_line(lhex)
+            print_line(rhex)
+          }
+        }
+        let mb = rev_parse_find_merge_base(fs, git_dir, lid, rid)
+        match mb {
+          Some(mb_id) => {
+            let mbhex = rev_parse_resolve_output_oid_hex(
+              fs, git_dir, mb_id, output_object_format,
+            )
+            match short_length {
+              Some(length) => print_line("^" + shorten_oid_hex(mbhex, length))
+              None => print_line("^" + mbhex)
+            }
+          }
+          None => ()
+        }
+      }
+      return true
+    }
+    _ => ()
+  }
+  // Check for .. (range)
+  match effective_arg.find("..") {
+    Some(idx) if idx > 0 && idx + 2 <= effective_arg.length() => {
+      // Make sure it's not ... (already handled above)
+      if idx + 2 < effective_arg.length() &&
+        effective_arg.to_array()[idx + 2] == '.' {
+        return false
+      }
+      let left_spec = String::unsafe_substring(effective_arg, start=0, end=idx)
+      let right_spec = String::unsafe_substring(
+        effective_arg,
+        start=idx + 2,
+        end=effective_arg.length(),
+      )
+      if right_spec.length() == 0 {
+        return false
+      }
+      let left_id = @bitrepo.rev_parse(fs, git_dir, left_spec)
+      let right_id = @bitrepo.rev_parse(fs, git_dir, right_spec)
+      guard left_id is Some(lid) && right_id is Some(rid) else {
+        if not(quiet) && not(revs_only) {
+          raise @bitcore.GitError::InvalidObject("unknown revision: " + arg)
+        }
+        return true
+      }
+      // A..B = ^A B
+      if symbolic_full_name {
+        let left_name = resolve_symbolic_full_name(fs, git_dir, left_spec)
+        let right_name = resolve_symbolic_full_name(fs, git_dir, right_spec)
+        print_line("^\{left_name.unwrap_or(left_spec)}")
+        print_line(right_name.unwrap_or(right_spec))
+      } else {
+        let lhex = rev_parse_resolve_output_oid_hex(
+          fs, git_dir, lid, output_object_format,
+        )
+        let rhex = rev_parse_resolve_output_oid_hex(
+          fs, git_dir, rid, output_object_format,
+        )
+        match short_length {
+          Some(length) => {
+            print_line("^" + shorten_oid_hex(lhex, length))
+            print_line(shorten_oid_hex(rhex, length))
+          }
+          None => {
+            print_line("^" + lhex)
+            print_line(rhex)
+          }
+        }
+      }
+      return true
+    }
+    _ => ()
+  }
+  false
+}
+
+///|
+/// Find merge-base of two commits (simple BFS approach).
+async fn rev_parse_find_merge_base(
+  fs : &@bitcore.RepoFileSystem,
+  git_dir : String,
+  a : @bitcore.ObjectId,
+  b : @bitcore.ObjectId,
+) -> @bitcore.ObjectId? raise Error {
+  let db = @bitlib.ObjectDb::load(fs, git_dir)
+  // Collect ancestors of A
+  let ancestors_a : Map[String, Bool] = {}
+  let queue : Array[@bitcore.ObjectId] = [a]
+  while queue.length() > 0 {
+    let current = queue.unsafe_pop()
+    let hex = current.to_hex()
+    if ancestors_a.contains(hex) {
+      continue
+    }
+    ancestors_a[hex] = true
+    let obj = db.get(fs, current)
+    match obj {
+      Some(o) =>
+        if o.obj_type == @bitcore.ObjectType::Commit {
+          let info = @bitcore.parse_commit(o.data)
+          for parent in info.parents {
+            queue.push(parent)
+          }
+        }
+      None => ()
+    }
+  }
+  // BFS from B, find first ancestor of A
+  let queue2 : Array[@bitcore.ObjectId] = [b]
+  let seen : Map[String, Bool] = {}
+  while queue2.length() > 0 {
+    let current = queue2.unsafe_pop()
+    let hex = current.to_hex()
+    if seen.contains(hex) {
+      continue
+    }
+    seen[hex] = true
+    if ancestors_a.contains(hex) {
+      return Some(current)
+    }
+    let obj = db.get(fs, current)
+    match obj {
+      Some(o) =>
+        if o.obj_type == @bitcore.ObjectType::Commit {
+          let info = @bitcore.parse_commit(o.data)
+          for parent in info.parents {
+            queue2.push(parent)
+          }
+        }
+      None => ()
+    }
+  }
+  None
 }
 
 ///|
