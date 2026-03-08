@@ -3450,8 +3450,10 @@ fn rev_parse_list_matching_refs(
       } else {
         refname
       }
+      // git matches exclude against short name only (after stripping refs/heads/ etc.)
+      // Also try full refname match only when exclude starts with "refs/"
       if rev_parse_glob_match(short_name, excl) ||
-        rev_parse_glob_match(refname, excl) {
+        (excl.has_prefix("refs/") && rev_parse_glob_match(refname, excl)) {
         excluded = true
         break
       }
