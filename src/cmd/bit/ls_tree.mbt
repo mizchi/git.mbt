@@ -1,8 +1,8 @@
 ///|
 async fn handle_ls_tree(args : Array[String]) -> Unit raise Error {
   let root = get_work_root()
-  let git_dir = root + "/.git"
   let fs = OsFs::new()
+  let git_dir = resolve_git_dir(fs, root)
   let mut recursive = false
   let mut show_trees = false // -t option
   let mut only_trees = false // -d option: only show trees

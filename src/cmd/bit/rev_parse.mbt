@@ -58,6 +58,7 @@ async fn handle_rev_parse(args : Array[String]) -> Unit raise Error {
   let mut show_object_format = false
   let mut short_length : Int? = None
   let mut abbrev_ref = false
+  let mut default_rev : String? = None
   let mut symbolic_full_name = false
   let mut path_format : String? = None // "absolute" or "relative"
   let mut output_object_format : String? = None
@@ -68,7 +69,13 @@ async fn handle_rev_parse(args : Array[String]) -> Unit raise Error {
     match arg {
       "--revs-only" => revs_only = true
       "--verify" => verify = true
-      "--quiet" => quiet = true
+      "--quiet" | "-q" => quiet = true
+      "--default" =>
+        if arg_index + 1 < args.length() {
+          default_rev = Some(args[arg_index + 1])
+          arg_index += 2
+          continue
+        }
       "--show-ref-format" => show_ref_format = true
       "--show-object-format" => show_object_format = true
       "--short" => short_length = Some(7)
@@ -150,7 +157,7 @@ async fn handle_rev_parse(args : Array[String]) -> Unit raise Error {
             vi += 1
             continue
           }
-          "--output-object-format" => {
+          "--output-object-format" | "--default" => {
             vi += 2
             continue
           }
@@ -172,6 +179,9 @@ async fn handle_rev_parse(args : Array[String]) -> Unit raise Error {
         rev_args.push(a)
       }
       vi += 1
+    }
+    if rev_args.length() == 0 && default_rev is Some(d) {
+      rev_args.push(d)
     }
     if rev_args.length() != 1 {
       if not(quiet) {
@@ -518,6 +528,11 @@ async fn handle_rev_parse(args : Array[String]) -> Unit raise Error {
         // Error already handled in pre-pass
       }
       "--path-format" => () // Already handled in pre-pass (exits with error)
+      "--default" => {
+        // Skip the next argument (the default rev value), already handled in pre-pass
+        process_index += 2
+        continue
+      }
       _ if arg.has_prefix("--since=") || arg.has_prefix("--after=") => {
         // Convert --since=DATE to --max-age=TIMESTAMP
         let date_str = if arg.has_prefix("--since=") {
@@ -551,7 +566,7 @@ async fn handle_rev_parse(args : Array[String]) -> Unit raise Error {
           Some((n, rest)) =>
             match resolve_at_minus(fs, git_dir, n) {
               Some(branch) => branch + rest
-              None => arg // leave as-is, will fail later
+              None => arg
             }
           None => arg
         }
@@ -862,7 +877,7 @@ fn resolve_at_minus(
       count += 1
       if count == n {
         // Extract the "from" branch name
-        let rest = String::unsafe_substring(msg, start=21, end=msg.length())
+        let rest = String::unsafe_substring(msg, start=22, end=msg.length())
         match rest.find(" to ") {
           Some(idx) => {
             let branch = String::unsafe_substring(rest, start=0, end=idx)

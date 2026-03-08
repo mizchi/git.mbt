@@ -49,6 +49,19 @@ pub fn rev_parse(
     }
     None => ()
   }
+  // ^{tag} — verify object is a tag
+  if spec.has_suffix("^{tag}") && spec.length() > 6 {
+    let base_spec = substring_revparse(spec, 0, spec.length() - 6)
+    let base = rev_parse(fs, git_dir, base_spec)
+    guard base is Some(base_id) else { return None }
+    let db = @bitlib.ObjectDb::load(fs, git_dir)
+    let obj = db.get(fs, base_id)
+    guard obj is Some(o) else { return None }
+    if o.obj_type == @object.ObjectType::Tag {
+      return Some(base_id)
+    }
+    return None
+  }
   // Parse suffix (^, ^^, ~n, ^n)
   let (base_spec, suffix) = parse_rev_suffix(spec)
   // Resolve base reference
@@ -68,7 +81,7 @@ fn parse_commit_message_search_spec(spec : String) -> (String, String)? {
   match spec.find(marker) {
     Some(idx) if idx > 0 &&
       spec.has_suffix("}") &&
-      idx + marker.length() < spec.length() - 1 =>
+      idx + marker.length() <= spec.length() - 1 =>
       Some(
         (
           substring_revparse(spec, 0, idx),
@@ -89,40 +102,45 @@ fn resolve_commit_message_search(
   if needle.length() == 0 {
     return None
   }
-  // Bare "!" is invalid
-  if needle == "!" {
+  // "!" prefix handling: "!!" = literal "!", "!-" = negation, bare "!" or "!X" = invalid
+  if needle.has_prefix("!") {
+    if needle.has_prefix("!!") {
+      // "!!" prefix means literal "!" search (strip one "!")
+      let base = rev_parse(fs, git_dir, base_spec)
+      guard base is Some(base_id) else { return None }
+      let actual_needle = substring_revparse(needle, 1, needle.length())
+      return find_reachable_commit_by_message_from_many(
+        fs,
+        git_dir,
+        [base_id],
+        actual_needle,
+      )
+    }
+    if needle.has_prefix("!-") {
+      // "!-" prefix means negation
+      let actual_needle = substring_revparse(needle, 2, needle.length())
+      if actual_needle.length() == 0 {
+        raise @object.GitError::InvalidObject(
+          "Invalid search pattern: \\{base_spec}^{{/!-}}",
+        )
+      }
+      let base = rev_parse(fs, git_dir, base_spec)
+      guard base is Some(base_id) else { return None }
+      return find_reachable_commit_by_message_from_many(
+        fs,
+        git_dir,
+        [base_id],
+        actual_needle,
+        negate=true,
+      )
+    }
+    // Bare "!" or "!X" (not "!!" or "!-") is invalid
     raise @object.GitError::InvalidObject(
-      "Invalid search pattern: \\{base_spec}^{{/!}}",
+      "Invalid search pattern: \\{base_spec}^{{/\\{needle}}}",
     )
   }
   let base = rev_parse(fs, git_dir, base_spec)
   guard base is Some(base_id) else { return None }
-  // "!!" prefix means literal "!" search (strip one "!")
-  if needle.has_prefix("!!") {
-    let actual_needle = substring_revparse(needle, 1, needle.length())
-    return find_reachable_commit_by_message_from_many(
-      fs,
-      git_dir,
-      [base_id],
-      actual_needle,
-    )
-  }
-  // "!-" prefix means negation: find commit whose message does NOT contain the pattern
-  if needle.has_prefix("!-") {
-    let actual_needle = substring_revparse(needle, 2, needle.length())
-    if actual_needle.length() == 0 {
-      raise @object.GitError::InvalidObject(
-        "Invalid search pattern: \\{base_spec}^{{/!-}}",
-      )
-    }
-    return find_reachable_commit_by_message_from_many(
-      fs,
-      git_dir,
-      [base_id],
-      actual_needle,
-      negate=true,
-    )
-  }
   find_reachable_commit_by_message_from_many(fs, git_dir, [base_id], needle)
 }
 

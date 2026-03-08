@@ -42,6 +42,14 @@ pub fn rev_parse(
     }
     None => ()
   }
+  match parse_peel_tag_spec(spec) {
+    Some(base_spec) => {
+      let base = rev_parse(fs, git_dir, base_spec)
+      guard base is Some(base_id) else { return None }
+      return peel_object_to_tag(fs, git_dir, base_id)
+    }
+    None => ()
+  }
   // Parse suffix (^, ^^, ~n, ^n)
   let (base_spec, suffix) = parse_rev_suffix(spec)
   // Resolve base reference
@@ -61,7 +69,7 @@ fn parse_commit_message_search_spec(spec : String) -> (String, String)? {
   match spec.find(marker) {
     Some(idx) if idx > 0 &&
       spec.has_suffix("}") &&
-      idx + marker.length() < spec.length() - 1 =>
+      idx + marker.length() <= spec.length() - 1 =>
       Some(
         (
           substring_revparse(spec, 0, idx),
@@ -281,6 +289,30 @@ fn peel_object_to_tree(
         }
       _ => return None
     }
+  }
+  None
+}
+
+///|
+fn parse_peel_tag_spec(spec : String) -> String? {
+  let suffix = "^{tag}"
+  if spec.has_suffix(suffix) && spec.length() > suffix.length() {
+    return Some(substring_revparse(spec, 0, spec.length() - suffix.length()))
+  }
+  None
+}
+
+///|
+fn peel_object_to_tag(
+  fs : &@bit.RepoFileSystem,
+  git_dir : String,
+  id : @bit.ObjectId,
+) -> @bit.ObjectId? raise @bit.GitError {
+  let db = ObjectDb::load(fs, git_dir)
+  let obj = db.get(fs, id)
+  guard obj is Some(o) else { return None }
+  if o.obj_type == @bit.ObjectType::Tag {
+    return Some(id)
   }
   None
 }
