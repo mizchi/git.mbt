@@ -103,16 +103,16 @@ fn storage_runtime_parse_init_args(
         continue
       }
       _ if arg.has_prefix("--initial-branch=") =>
-        default_branch = (try! arg[17:]).to_string()
+        default_branch = String::unsafe_substring(arg, start=17, end=arg.length())
       _ if arg.has_prefix("--ref-format=") => {
-        let value = (try! arg[13:]).to_string().to_lower()
+        let value = String::unsafe_substring(arg, start=13, end=arg.length()).to_lower()
         if value != "files" {
           storage_runtime_fail_unsupported_mode("init", "--ref-format=" + value)
         }
         ref_format = value
       }
       _ if arg.has_prefix("--object-format=") => {
-        let value = (try! arg[16:]).to_string().to_lower()
+        let value = String::unsafe_substring(arg, start=16, end=arg.length()).to_lower()
         if value != "sha1" {
           storage_runtime_fail_unsupported_mode(
             "init",
@@ -185,18 +185,18 @@ fn storage_runtime_parse_commit_args(
         continue
       }
       _ if arg.has_prefix("-m") && arg.length() > 2 => {
-        message = Some((try! arg[2:]).to_string())
+        message = Some(String::unsafe_substring(arg, start=2, end=arg.length()))
         i += 1
         continue
       }
       _ if arg.has_prefix("-am") || arg.has_prefix("-ma") => {
         all_modified = true
-        message = Some((try! arg[3:]).to_string())
+        message = Some(String::unsafe_substring(arg, start=3, end=arg.length()))
         i += 1
         continue
       }
       _ if arg.has_prefix("--message=") => {
-        message = Some((try! arg[10:]).to_string())
+        message = Some(String::unsafe_substring(arg, start=10, end=arg.length()))
         i += 1
         continue
       }
@@ -265,13 +265,17 @@ fn storage_runtime_parse_log_args(
         continue
       }
       _ if arg.has_prefix("-n") && arg.length() > 2 =>
-        max_count = @strconv.parse_int((try! arg[2:]).to_string())
+        max_count = @strconv.parse_int(
+          String::unsafe_substring(arg, start=2, end=arg.length()),
+        )
       _ if storage_runtime_is_short_count_flag(arg) => {
         let num_str = String::unsafe_substring(arg, start=1, end=arg.length())
         max_count = @strconv.parse_int(num_str)
       }
       _ if arg.has_prefix("--max-count=") =>
-        max_count = @strconv.parse_int((try! arg[12:]).to_string())
+        max_count = @strconv.parse_int(
+          String::unsafe_substring(arg, start=12, end=arg.length()),
+        )
       _ if arg.has_prefix("-") =>
         storage_runtime_fail_unsupported_option("log", arg)
       _ => storage_runtime_fail_unsupported_mode("log", "revision arguments")
@@ -326,7 +330,7 @@ fn storage_runtime_parse_write_tree_args(
   let mut missing_ok = false
   for arg in args {
     if arg.has_prefix("--prefix=") {
-      prefix = Some((try! arg[9:]).to_string())
+      prefix = Some(String::unsafe_substring(arg, start=9, end=arg.length()))
       continue
     }
     if arg == "--missing-ok" {
