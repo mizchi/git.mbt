@@ -22,7 +22,12 @@ fn parent_dir(path : String) -> String {
   let sep = @path.sep.to_string()
   match path.rev_find(sep) {
     None => ""
-    Some(idx) => if idx == 0 { sep } else { (try! path[:idx]).to_string() }
+    Some(idx) =>
+      if idx == 0 {
+        sep
+      } else {
+        String::unsafe_substring(path, start=0, end=idx)
+      }
   }
 }
 
@@ -237,10 +242,10 @@ fn normalize_repo_root(path : String) -> String {
     return "."
   }
   if path.has_suffix("/.git") && path.length() > 5 {
-    return (try! path[:path.length() - 5]).to_string()
+    return String::unsafe_substring(path, start=0, end=path.length() - 5)
   }
   if path.has_suffix("/.bit") && path.length() > 5 {
-    return (try! path[:path.length() - 5]).to_string()
+    return String::unsafe_substring(path, start=0, end=path.length() - 5)
   }
   path
 }
