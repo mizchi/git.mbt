@@ -64,7 +64,12 @@ fn parent_dir(path : String) -> String {
   let sep = @path.sep.to_string()
   match path.rev_find(sep) {
     None => ""
-    Some(idx) => if idx == 0 { sep } else { (try! path[:idx]).to_string() }
+    Some(idx) =>
+      if idx == 0 {
+        sep
+      } else {
+        String::unsafe_substring(path, start=0, end=idx)
+      }
   }
 }
 

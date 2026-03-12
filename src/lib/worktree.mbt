@@ -1215,9 +1215,11 @@ pub fn write_tree_from_index(
         }
         if e.path.has_prefix(prefix_with_slash) {
           // Strip the prefix from the path
-          let new_path = e.path[prefix_with_slash.length():].to_string() catch {
-            _ => continue
-          }
+          let new_path = String::unsafe_substring(
+            e.path,
+            start=prefix_with_slash.length(),
+            end=e.path.length(),
+          )
           result.push({
             path: new_path,
             id: e.id,

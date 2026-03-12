@@ -75,7 +75,7 @@ fn sparse_checkout_wbtest_strip_moon_warnings(text : String) -> String {
       continue
     }
     if skipping_warning {
-      if line.starts_with("────") {
+      if line.has_prefix("────") {
         skipping_warning = false
       }
       continue

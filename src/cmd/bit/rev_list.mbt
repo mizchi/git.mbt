@@ -33,7 +33,6 @@ fn rev_list_requires_real_git(args : Array[String]) -> Bool {
 
 ///|
 fn rev_list_config_get(
-  fs : &@bitcore.RepoFileSystem,
   git_dir : String,
   dotted_key : String,
   section : String,
@@ -53,18 +52,15 @@ fn rev_list_config_get(
 }
 
 ///|
-fn rev_list_resolve_output_encoding(
-  fs : &@bitcore.RepoFileSystem,
-  git_dir : String,
-) -> String {
+fn rev_list_resolve_output_encoding(git_dir : String) -> String {
   match
     rev_list_config_get(
-      fs, git_dir, "i18n.logOutputEncoding", "i18n", "logOutputEncoding",
+      git_dir, "i18n.logOutputEncoding", "i18n", "logOutputEncoding",
     ) {
     Some(value) => value
     None =>
       rev_list_config_get(
-        fs, git_dir, "i18n.commitEncoding", "i18n", "commitEncoding",
+        git_dir, "i18n.commitEncoding", "i18n", "commitEncoding",
       ).unwrap_or("UTF-8")
   }
 }
@@ -374,7 +370,7 @@ async fn handle_rev_list(args : Array[String]) -> Unit raise Error {
         false
       }
       let ref_names : Map[String, Array[String]] = {}
-      let output_encoding = rev_list_resolve_output_encoding(fs, git_dir)
+      let output_encoding = rev_list_resolve_output_encoding(git_dir)
       for idx, id in sliced_result {
         // Print commit header line
         rev_list_write_text("commit " + id.to_hex() + "\n", output_encoding)
@@ -755,15 +751,6 @@ fn rev_list_collect_matching_index_trees(
       true
     }
     _ => false
-  }
-}
-
-///|
-fn rev_list_path_in_prefix(path : String, prefix : String) -> Bool {
-  if prefix.length() == 0 {
-    true
-  } else {
-    path.has_prefix(prefix)
   }
 }
 

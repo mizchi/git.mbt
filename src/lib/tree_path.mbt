@@ -33,7 +33,7 @@ fn normalize_repo_path_internal(path : String) -> String {
 pub fn normalize_repo_path(path : String) -> String raise @bit.GitError {
   let normalized = normalize_repo_path_internal(path)
   let stripped = if normalized.has_prefix("/") && normalized.length() > 1 {
-    (try! normalized[1:]).to_string()
+    String::unsafe_substring(normalized, start=1, end=normalized.length())
   } else {
     normalized
   }

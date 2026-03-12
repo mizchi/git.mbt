@@ -53,7 +53,7 @@ fn inject_if_unset(env_key : String, value : String) -> Unit {
 /// ~ をホームディレクトリに展開
 fn expand_home(path : String, home : String) -> String {
   if path.has_prefix("~/") {
-    let rest = path[1:].to_string() catch { _ => path }
+    let rest = String::unsafe_substring(path, start=1, end=path.length())
     home + rest
   } else {
     path

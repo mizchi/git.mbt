@@ -1128,7 +1128,7 @@ async fn handle_update_index_refresh(
         selected_unmerged_paths[normalized_path] = true
       }
     }
-    if selected_unmerged_paths.size() > 0 {
+    if selected_unmerged_paths.length() > 0 {
       if not(quiet) {
         for item in selected_unmerged_paths.to_array() {
           let (path, _) = item

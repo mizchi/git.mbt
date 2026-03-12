@@ -13,7 +13,7 @@ fn docs_dir(root : String) -> String {
 ///|
 fn normalize_page_name(raw : String) -> String {
   if raw.has_suffix(".md") && raw.length() > 3 {
-    return (try! raw[:raw.length() - 3]).to_string()
+    return String::unsafe_substring(raw, start=0, end=raw.length() - 3)
   }
   raw
 }
@@ -194,7 +194,11 @@ fn collect_pages(
     if not(entry.has_suffix(".md")) {
       continue
     }
-    let page = (try! rel_path[:rel_path.length() - 3]).to_string()
+    let page = String::unsafe_substring(
+      rel_path,
+      start=0,
+      end=rel_path.length() - 3,
+    )
     match prefix {
       Some(p) if not(page.has_prefix(p)) => continue
       _ => ()
@@ -216,7 +220,12 @@ fn parent_dir(path : String) -> String {
   let sep = @path.sep.to_string()
   match path.rev_find(sep) {
     None => ""
-    Some(idx) => if idx == 0 { sep } else { (try! path[:idx]).to_string() }
+    Some(idx) =>
+      if idx == 0 {
+        sep
+      } else {
+        String::unsafe_substring(path, start=0, end=idx)
+      }
   }
 }
 

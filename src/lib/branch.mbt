@@ -136,7 +136,7 @@ pub fn list_branches_verbose(
       Branch(name) => if name == b.name { "* " } else { "  " }
       Detached(_) => "  "
     }
-    let short_hash = (try! b.id.to_hex()[:7]).to_string()
+    let short_hash = String::unsafe_substring(b.id.to_hex(), start=0, end=7)
     let subject = branch_get_commit_subject(db, fs, b.id)
     let padded_name = pad_right(b.name, max_len)
     lines.push("\{marker}\{padded_name} \{short_hash} \{subject}")
