@@ -200,6 +200,7 @@ async fn handle_merge(args : Array[String]) -> Unit raise Error {
         for path in result.conflicts {
           print_line("  \{path}")
         }
+        @sys.exit(1)
       }
     }
     return
@@ -302,6 +303,7 @@ async fn handle_merge(args : Array[String]) -> Unit raise Error {
         print_line("  \{path}")
       }
       print_line("Automatic merge failed; fix conflicts and then commit.")
+      @sys.exit(1)
     }
   }
 }
