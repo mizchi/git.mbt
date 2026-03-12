@@ -24,7 +24,6 @@ CI 失敗: **101/906** (2026-03-09, commit b3f62de)
 | t5318-commit-graph.sh | 1/109 | commit-graph |
 | t5404-tracking-branches.sh | 1/7 | tracking branches |
 | t5537-fetch-shallow.sh | 1/16 | fetch shallow |
-| t6006-rev-list-format.sh | 1/80 | `%-b` format modifier |
 | t6020-bundle-misc.sh | 1/37 | bundle |
 | t6060-merge-index.sh | 1/7 | merge-index |
 | t6120-describe.sh | 1/103 | describe |
