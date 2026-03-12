@@ -189,6 +189,8 @@ type ServePollRequest
 
 type ServeSession
 
+type SparseCheckoutListState
+
 type SubdirChangeInfo
 
 type SubdirDiffEntry

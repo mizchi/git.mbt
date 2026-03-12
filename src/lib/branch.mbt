@@ -743,6 +743,9 @@ pub fn switch_branch(
   }
   if checkout_files {
     ignore(checkout(fs, rfs, root, name))
+    if is_sparse_checkout_enabled(rfs, git_dir) {
+      sparse_checkout_reapply(fs, rfs, root)
+    }
   } else {
     let head_path = join_path(git_dir, "HEAD")
     fs.write_string(head_path, "ref: \{refname}\n")

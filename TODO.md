@@ -210,7 +210,12 @@ CI SHIM_CMDS: 54 コマンド (init add diff diff-files diff-index ls-files tag 
 - [x] `switch` (251)
 - [x] `remote` (298)
 - [x] `grep` (312)
-  - [ ] big grep ベンチマークを取る
+  - [x] big grep ベンチマークを取得
+    - worktree medium literal: `95.54 ms ± 13.86 ms`
+    - worktree large literal: `452.19 ms ± 66.31 ms`
+    - cached large literal: `1.28 s ± 202.85 ms`
+    - head large literal: `1.24 s ± 193.86 ms`
+  - [x] `t7817-grep-sparse-checkout.sh` (`8/8`)
 - [x] `format-patch` (300)
 - [x] `reflog` (296)
 - [x] `diff-index` (219), `diff-files` (170)

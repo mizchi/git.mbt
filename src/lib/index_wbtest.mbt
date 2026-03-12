@@ -255,6 +255,83 @@ test "index: write_index_entries_preserving_cache_tree builds fresh TREE extensi
 }
 
 ///|
+test "index: write_index_entries_preserving_cache_tree preserves skip and assume flags" {
+  let fs = @bit.TestFs::new()
+  init_repo(fs, "/repo")
+  fs.write_string("/repo/a.txt", "hello\n")
+  fs.write_string("/repo/b.txt", "world\n")
+  add_paths(fs, fs, "/repo", ["a.txt", "b.txt"])
+
+  let entries = read_index_entries(fs, "/repo/.git")
+  let skip_paths : Map[String, Bool] = { "a.txt": true }
+  let assume_paths : Map[String, Bool] = { "b.txt": true }
+  write_index_entries_with_flags(
+    fs, "/repo/.git", entries, skip_paths, assume_paths,
+  )
+
+  let rewritten = read_index_entries(fs, "/repo/.git")
+  write_index_entries_preserving_cache_tree(fs, fs, "/repo/.git", rewritten)
+
+  let actual_skip = read_skip_worktree_paths(fs, "/repo/.git")
+  let actual_assume = read_assume_unchanged_paths(fs, "/repo/.git")
+  assert_true(actual_skip.contains("a.txt"))
+  assert_true(actual_assume.contains("b.txt"))
+}
+
+///|
+test "index: sparse directory entries expand to file entries and skip paths" {
+  let fs = @bit.TestFs::new()
+  init_repo(fs, "/repo")
+  fs.write_string("/repo/root.txt", "root\n")
+  fs.mkdir_p("/repo/dir")
+  fs.write_string("/repo/dir/file.txt", "nested\n")
+  add_paths(fs, fs, "/repo", ["root.txt", "dir/file.txt"])
+
+  let full_entries = read_index_entries(fs, "/repo/.git")
+  let tree_id = write_tree_from_index(fs, fs, "/repo/.git", full_entries)
+  let db = ObjectDb::load(fs, "/repo/.git")
+  let tree_obj = db.get(fs, tree_id)
+  guard tree_obj is Some(root_obj) else { fail("expected root tree") }
+  let root_entries = @bit.parse_tree(root_obj.data)
+  let mut dir_tree_id : @bit.ObjectId? = None
+  let mut root_entry : IndexEntry? = None
+  for entry in full_entries {
+    if entry.path == "root.txt" {
+      root_entry = Some(entry)
+    }
+  }
+  guard root_entry is Some(existing_root_entry) else {
+    fail("expected root entry")
+  }
+  for entry in root_entries {
+    if entry.name == "dir" {
+      dir_tree_id = Some(entry.id)
+    }
+  }
+  guard dir_tree_id is Some(actual_dir_tree_id) else {
+    fail("expected dir tree id")
+  }
+
+  let sparse_entries = [
+    existing_root_entry,
+    IndexEntry::new("dir/", actual_dir_tree_id, 0o040000, 0),
+  ]
+  let expanded = expand_sparse_index_entries(fs, "/repo/.git", sparse_entries)
+  assert_true(expanded.any(fn(entry) { entry.path == "root.txt" }))
+  assert_true(expanded.any(fn(entry) { entry.path == "dir/file.txt" }))
+  assert_false(expanded.any(fn(entry) { entry.path == "dir/" }))
+
+  let expanded_skip = expand_sparse_skip_worktree_paths(
+    fs,
+    "/repo/.git",
+    sparse_entries,
+    { "dir/": true },
+  )
+  assert_true(expanded_skip.contains("dir/"))
+  assert_true(expanded_skip.contains("dir/file.txt"))
+}
+
+///|
 fn index_test_mark_single_entry_skip_worktree(
   fs : @bit.TestFs,
   index_path : String,

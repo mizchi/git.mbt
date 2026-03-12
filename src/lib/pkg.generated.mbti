@@ -398,7 +398,11 @@ pub fn sparse_checkout_disable(&@types.FileSystem, &@types.RepoFileSystem, Strin
 
 pub fn sparse_checkout_init(&@types.FileSystem, &@types.RepoFileSystem, String, cone? : Bool) -> Unit raise @object.GitError
 
+pub fn sparse_checkout_reapply(&@types.FileSystem, &@types.RepoFileSystem, String) -> Unit raise @object.GitError
+
 pub fn sparse_checkout_set(&@types.FileSystem, &@types.RepoFileSystem, String, Array[String]) -> Unit raise @object.GitError
+
+pub fn sparse_default_patterns() -> Array[String]
 
 pub fn split_config_key(String, String) -> (String, String)?
 

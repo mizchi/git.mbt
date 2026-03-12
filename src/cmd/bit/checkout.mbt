@@ -567,7 +567,12 @@ async fn checkout_with_promisor_retry(
       detach=checkout_detach,
     )
     match result {
-      Ok(id) => return id
+      Ok(id) => {
+        if @bitlib.is_sparse_checkout_enabled(fs, git_dir) {
+          @bitlib.sparse_checkout_reapply(fs, fs, root)
+        }
+        return id
+      }
       Err(err) =>
         match parse_checkout_missing_object_id(err) {
           Some(missing_id) => {

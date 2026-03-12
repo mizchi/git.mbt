@@ -121,6 +121,128 @@ pub fn read_index_entries(
 }
 
 ///|
+fn index_entry_is_sparse_dir(entry : IndexEntry) -> Bool {
+  entry.mode == 0o040000 && entry.path.has_suffix("/")
+}
+
+///|
+fn index_collect_tree_entries(
+  db : ObjectDb,
+  fs : &@bit.RepoFileSystem,
+  tree_id : @bit.ObjectId,
+  prefix : String,
+  out : Array[IndexEntry],
+) -> Unit raise @bit.GitError {
+  let tree_obj = db.get(fs, tree_id)
+  match tree_obj {
+    None =>
+      raise @bit.GitError::InvalidObject(
+        "Missing tree object: " + tree_id.to_hex(),
+      )
+    Some(obj) => {
+      if obj.obj_type != @bit.ObjectType::Tree {
+        raise @bit.GitError::InvalidObject("Object is not a tree")
+      }
+      let entries = @bit.parse_tree(obj.data)
+      for entry in entries {
+        let path = if prefix == "" {
+          entry.name
+        } else {
+          prefix + "/" + entry.name
+        }
+        if entry.mode == "40000" {
+          index_collect_tree_entries(db, fs, entry.id, path, out)
+          continue
+        }
+        if entry.mode == "160000" {
+          out.push(IndexEntry::new(path, entry.id, 0o160000, 0))
+          continue
+        }
+        let blob_obj = db.get(fs, entry.id)
+        match blob_obj {
+          None =>
+            raise @bit.GitError::InvalidObject(
+              "Missing blob object: " + entry.id.to_hex(),
+            )
+          Some(blob) => {
+            if blob.obj_type != @bit.ObjectType::Blob {
+              raise @bit.GitError::InvalidObject("Object is not a blob")
+            }
+            out.push(
+              IndexEntry::new(
+                path,
+                entry.id,
+                index_parse_octal_value(entry.mode),
+                blob.data.length(),
+              ),
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+///|
+pub fn expand_sparse_index_entries(
+  fs : &@bit.RepoFileSystem,
+  git_dir : String,
+  entries : Array[IndexEntry],
+) -> Array[IndexEntry] raise @bit.GitError {
+  let has_sparse_dir = entries.any(index_entry_is_sparse_dir)
+  if not(has_sparse_dir) {
+    return entries
+  }
+  let db = ObjectDb::load(fs, git_dir)
+  let expanded : Array[IndexEntry] = []
+  for entry in entries {
+    if index_entry_is_sparse_dir(entry) {
+      let prefix = entry.path[:entry.path.length() - 1].to_string()
+      index_collect_tree_entries(db, fs, entry.id, prefix, expanded)
+    } else {
+      expanded.push(entry)
+    }
+  }
+  expanded.sort_by((a, b) => index_path_compare_git_order(a.path, b.path))
+  expanded
+}
+
+///|
+pub fn expand_sparse_skip_worktree_paths(
+  fs : &@bit.RepoFileSystem,
+  git_dir : String,
+  entries : Array[IndexEntry],
+  skip_worktree_paths : Map[String, Bool],
+) -> Map[String, Bool] raise @bit.GitError {
+  let has_sparse_dir = entries.any(index_entry_is_sparse_dir)
+  if not(has_sparse_dir) {
+    return skip_worktree_paths
+  }
+  let db = ObjectDb::load(fs, git_dir)
+  let expanded : Map[String, Bool] = {}
+  for item in skip_worktree_paths.to_array() {
+    let (path, _) = item
+    expanded[path] = true
+  }
+  for entry in entries {
+    if not(skip_worktree_paths.contains(entry.path)) {
+      continue
+    }
+    if index_entry_is_sparse_dir(entry) {
+      let prefix = entry.path[:entry.path.length() - 1].to_string()
+      let children : Array[IndexEntry] = []
+      index_collect_tree_entries(db, fs, entry.id, prefix, children)
+      for child in children {
+        expanded[child.path] = true
+      }
+    } else {
+      expanded[entry.path] = true
+    }
+  }
+  expanded
+}
+
+///|
 pub fn read_index_stage_entries(
   fs : &@bit.RepoFileSystem,
   git_dir : String,
@@ -1058,6 +1180,27 @@ fn write_index_buf(
 }
 
 ///|
+fn index_preserved_flag_paths(
+  fs : &@bit.RepoFileSystem,
+  git_dir : String,
+  entries : Array[IndexEntry],
+) -> (Map[String, Bool], Map[String, Bool]) {
+  let existing_skip = read_skip_worktree_paths(fs, git_dir)
+  let existing_assume = read_assume_unchanged_paths(fs, git_dir)
+  let skip_worktree_paths : Map[String, Bool] = {}
+  let assume_unchanged_paths : Map[String, Bool] = {}
+  for entry in entries {
+    if existing_skip.contains(entry.path) {
+      skip_worktree_paths[entry.path] = true
+    }
+    if existing_assume.contains(entry.path) {
+      assume_unchanged_paths[entry.path] = true
+    }
+  }
+  (skip_worktree_paths, assume_unchanged_paths)
+}
+
+///|
 pub fn write_index_entries(
   fs : &@bit.FileSystem,
   git_dir : String,
@@ -1080,7 +1223,15 @@ pub fn write_index_entries_preserving_cache_tree(
   let sorted = entries.copy()
   sorted.sort_by((a, b) => index_path_compare_git_order(a.path, b.path))
   let cache_tree = index_prepare_cache_tree(rfs, git_dir, sorted)
-  let buf = write_index_buf(sorted, None, None, cache_tree=Some(cache_tree))
+  let (skip_worktree_paths, assume_unchanged_paths) = index_preserved_flag_paths(
+    rfs, git_dir, sorted,
+  )
+  let buf = write_index_buf(
+    sorted,
+    Some(skip_worktree_paths),
+    Some(assume_unchanged_paths),
+    cache_tree=Some(cache_tree),
+  )
   let index_path = join_path(git_dir, "index")
   fs.write_file(index_path, Bytes::from_array(buf[:]))
 }
@@ -1093,7 +1244,6 @@ pub fn write_index_entries_with_tree(
   entries : Array[IndexEntry],
   tree_id : @bit.ObjectId,
 ) -> Unit raise @bit.GitError {
-  ignore(rfs)
   let sorted = entries.copy()
   sorted.sort_by((a, b) => index_path_compare_git_order(a.path, b.path))
   let cache_tree = index_build_cache_tree_from_entries(sorted)
@@ -1101,7 +1251,15 @@ pub fn write_index_entries_with_tree(
     Some(id) if id == tree_id => ()
     _ => ()
   }
-  let buf = write_index_buf(sorted, None, None, cache_tree=Some(cache_tree))
+  let (skip_worktree_paths, assume_unchanged_paths) = index_preserved_flag_paths(
+    rfs, git_dir, sorted,
+  )
+  let buf = write_index_buf(
+    sorted,
+    Some(skip_worktree_paths),
+    Some(assume_unchanged_paths),
+    cache_tree=Some(cache_tree),
+  )
   let index_path = join_path(git_dir, "index")
   fs.write_file(index_path, Bytes::from_array(buf[:]))
 }

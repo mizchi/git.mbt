@@ -16,6 +16,7 @@ async fn handle_ls_files(args : Array[String]) -> Unit raise Error {
   let mut use_nul = false
   let mut error_unmatch = false
   let mut show_eol = false
+  let mut show_sparse = false
   let mut exclude_standard = false
   let exclude_patterns : Array[String] = []
   let exclude_from_files : Array[String] = []
@@ -56,6 +57,7 @@ async fn handle_ls_files(args : Array[String]) -> Unit raise Error {
         "--recurse-submodules" => recurse_submodules = true
         "--error-unmatch" => error_unmatch = true
         "--eol" => show_eol = true
+        "--sparse" => show_sparse = true
         "--exclude-standard" => exclude_standard = true
         "--exclude" => pending_value_flag = Some("exclude")
         "--exclude-from" => pending_value_flag = Some("exclude-from")
@@ -140,7 +142,12 @@ async fn handle_ls_files(args : Array[String]) -> Unit raise Error {
     }
     return ()
   }
-  let entries = @bitlib.read_index_entries(fs, git_dir)
+  let raw_entries = @bitlib.read_index_entries(fs, git_dir)
+  let entries = if show_sparse {
+    raw_entries
+  } else {
+    @bitlib.expand_sparse_index_entries(fs, git_dir, raw_entries)
+  }
   if show_eol {
     let db = @bitlib.ObjectDb::load_lazy(fs, git_dir)
     // Tracked entries (cached or deleted)
@@ -468,6 +475,7 @@ async fn handle_ls_files(args : Array[String]) -> Unit raise Error {
     git_dir,
     "",
     recurse_submodules~,
+    show_sparse~,
   )
   let tracked_candidate_paths : Array[String] = []
   for entry in tracked_entries {
@@ -745,11 +753,17 @@ fn ls_files_collect_cached_entries(
   git_dir : String,
   prefix : String,
   recurse_submodules? : Bool = false,
+  show_sparse? : Bool = false,
 ) -> Array[LsFilesTrackedEntry] raise Error {
   if recurse_submodules {
     ls_files_validate_repo_config(fs, git_dir)
   }
-  let entries = @bitlib.read_index_entries(fs, git_dir)
+  let raw_entries = @bitlib.read_index_entries(fs, git_dir)
+  let entries = if show_sparse {
+    raw_entries
+  } else {
+    @bitlib.expand_sparse_index_entries(fs, git_dir, raw_entries)
+  }
   if not(recurse_submodules) {
     return entries.map(fn(entry) {
       { path: prefix + entry.path, mode: entry.mode, id: entry.id }
@@ -782,6 +796,7 @@ fn ls_files_collect_cached_entries(
             sub_git_dir,
             prefix + submodule.path + "/",
             recurse_submodules=true,
+            show_sparse~,
           ) {
           out.push(sub_entry)
         }

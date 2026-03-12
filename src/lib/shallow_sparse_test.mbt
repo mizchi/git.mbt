@@ -230,6 +230,20 @@ test "sparse: multiple sparse patterns" {
 }
 
 ///|
+test "sparse: root directory negation excludes nested paths" {
+  let patterns = ["/*", "!/*/"]
+  assert_true(matches_sparse_pattern("a", patterns))
+  assert_false(matches_sparse_pattern("folder1/c", patterns))
+}
+
+///|
+test "sparse: wildcard substring matches nested folder paths" {
+  let patterns = ["/*", "!/*/", "*folder*"]
+  assert_true(matches_sparse_pattern("folder1/c", patterns))
+  assert_true(matches_sparse_pattern("nested/folder2/d", patterns))
+}
+
+///|
 test "sparse: leading slash pattern is normalized" {
   let patterns = ["/src/"]
   assert_true(matches_sparse_pattern("src/main.mbt", patterns))

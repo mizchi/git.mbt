@@ -443,6 +443,25 @@ fn tree_ops_remove_missing_paths(
 }
 
 ///|
+fn tree_ops_prepare_blob_path(
+  fs : &@bit.FileSystem,
+  rfs : &@bit.RepoFileSystem,
+  full_path : String,
+  path : String,
+) -> Unit raise @bit.GitError {
+  if not(rfs.is_dir(full_path)) {
+    return
+  }
+  let bit_marker = join_path(full_path, ".git")
+  if rfs.is_file(bit_marker) || rfs.is_dir(bit_marker) {
+    raise @bit.GitError::InvalidObject(
+      "Refusing to overwrite submodule: \{path}",
+    )
+  }
+  remove_worktree_path_recursive(fs, rfs, full_path)
+}
+
+///|
 pub fn write_worktree_from_files(
   db : ObjectDb,
   fs : &@bit.FileSystem,
@@ -496,14 +515,7 @@ pub fn write_worktree_from_files(
       continue
     }
     let full_path = join_path(root, path)
-    if rfs.is_dir(full_path) {
-      let bit_marker = join_path(full_path, ".git")
-      if rfs.is_file(bit_marker) || rfs.is_dir(bit_marker) {
-        raise @bit.GitError::InvalidObject(
-          "Refusing to overwrite submodule: \{path}",
-        )
-      }
-    }
+    tree_ops_prepare_blob_path(fs, rfs, full_path, path)
     let obj = db.get(rfs, info.id)
     match obj {
       None =>
@@ -594,14 +606,7 @@ pub fn write_worktree_and_build_index(
     }
     if not(skip_write) {
       let full_path = join_path(root, path)
-      if rfs.is_dir(full_path) {
-        let bit_marker = join_path(full_path, ".git")
-        if rfs.is_file(bit_marker) || rfs.is_dir(bit_marker) {
-          raise @bit.GitError::InvalidObject(
-            "Refusing to overwrite submodule: \{path}",
-          )
-        }
-      }
+      tree_ops_prepare_blob_path(fs, rfs, full_path, path)
     }
     let obj = db.get(rfs, info.id)
     match obj {

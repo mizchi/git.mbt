@@ -134,3 +134,29 @@ test "checkout: restores gitlink worktree from modules dir" {
   assert_eq(submodule_entries.length(), 1)
   assert_eq(submodule_entries[0].path, "a")
 }
+
+///|
+test "checkout: replaces directory path with file from target commit" {
+  let fs = setup_repo_checkout()
+  fs.mkdir_p("/repo/folder1/0/0")
+  fs.write_string("/repo/folder1/0/0/0", "nested\n")
+  add_paths(fs, fs, "/repo", ["folder1/0/0/0"])
+  let dir_commit = commit(
+    fs, fs, "/repo", "dir\n", "Test <t@example.com>", 1700000350L,
+  )
+
+  rm_paths(fs, fs, "/repo", ["folder1/0/0/0"])
+  fs.write_string("/repo/folder1/0/0", "file\n")
+  add_paths(fs, fs, "/repo", ["folder1/0/0"])
+  let file_commit = commit(
+    fs, fs, "/repo", "file\n", "Test <t@example.com>", 1700000351L,
+  )
+
+  ignore(checkout(fs, fs, "/repo", dir_commit.to_hex()))
+  assert_true(fs.is_dir("/repo/folder1/0/0"))
+
+  let target = checkout(fs, fs, "/repo", file_commit.to_hex())
+  assert_true(target == file_commit)
+  assert_true(fs.is_file("/repo/folder1/0/0"))
+  assert_eq(fs.read_string("/repo/folder1/0/0"), "file\n")
+}
