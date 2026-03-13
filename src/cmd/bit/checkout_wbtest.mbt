@@ -330,14 +330,11 @@ async fn checkout_wbtest_case_branch_in_use() -> Unit raise Error {
   @sys.unset_env_var("GIT_DIR")
   @sys.unset_env_var("GIT_WORK_TREE")
 
-  let err = try {
-    handle_checkout(["newmain"])
-    None
-  } catch {
-    err => Some(err.to_string())
-  }
-  assert_true(err is Some(_))
-  assert_true(err.unwrap_or("").contains("already used by worktree at"))
+  let (_, stdout, stderr) = checkout_wbtest_collect_shim_git_output(repo_dir, [
+    "checkout", "-q", "newmain",
+  ])
+  assert_eq(stdout, "")
+  assert_true(stderr.contains("already used by worktree at"))
   assert_eq(
     add_test_git_stdout(repo_dir, ["symbolic-ref", "--short", "HEAD"]),
     "main\n",
@@ -398,14 +395,11 @@ async fn checkout_wbtest_case_force_branch_in_use() -> Unit raise Error {
   let before_branch = add_test_git_stdout(repo_dir, [
     "rev-parse", "--verify", "refs/heads/newmain",
   ])
-  let err = try {
-    handle_checkout(["-B", "newmain"])
-    None
-  } catch {
-    err => Some(err.to_string())
-  }
-  assert_true(err is Some(_))
-  assert_true(err.unwrap_or("").contains("already used by worktree at"))
+  let (_, stdout, stderr) = checkout_wbtest_collect_shim_git_output(repo_dir, [
+    "checkout", "-q", "-B", "newmain",
+  ])
+  assert_eq(stdout, "")
+  assert_true(stderr.contains("already used by worktree at"))
   assert_eq(
     add_test_git_stdout(repo_dir, [
       "rev-parse", "--verify", "refs/heads/newmain",
@@ -474,14 +468,11 @@ async fn checkout_wbtest_case_symlinked_branch_in_use() -> Unit raise Error {
     checkout_branch_in_use_path(fs, repo_dir, "newmain"),
     Some(linked_dir),
   )
-  let err = try {
-    handle_checkout(["newmain"])
-    None
-  } catch {
-    err => Some(err.to_string())
-  }
-  assert_true(err is Some(_))
-  assert_true(err.unwrap_or("").contains("already used by worktree at"))
+  let (_, stdout, stderr) = checkout_wbtest_collect_shim_git_output(repo_dir, [
+    "checkout", "-q", "newmain",
+  ])
+  assert_eq(stdout, "")
+  assert_true(stderr.contains("already used by worktree at"))
 
   add_test_restore_env("GIT_SHIM_CWD", prev_shim_cwd)
   add_test_restore_env("GIT_SHIM_PWD", prev_shim_pwd)
@@ -579,13 +570,11 @@ async fn checkout_wbtest_case_bare_repo_checkout_fails() -> Unit raise Error {
   @sys.unset_env_var("GIT_DIR")
   @sys.unset_env_var("GIT_WORK_TREE")
 
-  let err = try {
-    handle_checkout(["main"])
-    None
-  } catch {
-    err => Some(err.to_string())
-  }
-  assert_true(err is Some(_))
+  let (_, stdout, stderr) = checkout_wbtest_collect_shim_git_output(bare_dir, [
+    "checkout", "-q", "main",
+  ])
+  assert_eq(stdout, "")
+  assert_true(stderr.length() > 0)
 
   add_test_restore_env("GIT_SHIM_CWD", prev_shim_cwd)
   add_test_restore_env("GIT_SHIM_PWD", prev_shim_pwd)
