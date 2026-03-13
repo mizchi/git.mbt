@@ -381,29 +381,38 @@ fn index_test_replace_single_entry_with_stages(
   stages : Array[Int],
 ) -> Unit {
   let data = fs.read_file(index_path) catch { _ => Bytes::default() }
+  if data.length() < 12 + 20 {
+    panic()
+  }
   let arr : Array[Byte] = []
   for b in data {
     arr.push(b)
   }
   let checksum_start = arr.length() - 20
-  let entry : Array[Byte] = []
-  for i in 12..<checksum_start {
-    entry.push(arr[i])
+  let entry_start = 12
+  let flags_offset = entry_start + 60
+  let flags = (arr[flags_offset].to_int() << 8) | arr[flags_offset + 1].to_int()
+  let has_extended = (flags & 0x4000) != 0
+  let fixed_size = if has_extended { 64 } else { 62 }
+  let path_start = entry_start + fixed_size
+  let mut path_end = path_start
+  while path_end < checksum_start && arr[path_end] != b'\x00' {
+    path_end += 1
   }
-  let body : Array[Byte] = []
-  for stage in stages {
-    let copied : Array[Byte] = []
-    for b in entry {
-      copied.push(b)
-    }
-    let flags_offset = 60
-    let flags_hi = copied[flags_offset].to_int()
-    let flags_lo = copied[flags_offset + 1].to_int()
-    let flags = (((flags_hi << 8) | flags_lo) & 0xCFFF) | (stage << 12)
-    copied[flags_offset] = (flags >> 8).to_byte()
-    copied[flags_offset + 1] = (flags & 0xFF).to_byte()
-    body.append(copied)
+  if path_end >= checksum_start {
+    panic()
   }
+  let path_len = path_end - path_start
+  let entry_size = (fixed_size + path_len + 1 + 7) / 8 * 8
+  let base_entry : Array[Byte] = []
+  for i in entry_start..<(entry_start + entry_size) {
+    base_entry.push(arr[i])
+  }
+  let trailing : Array[Byte] = []
+  for i in (entry_start + entry_size)..<checksum_start {
+    trailing.push(arr[i])
+  }
+
   let patched : Array[Byte] = []
   for i in 0..<12 {
     patched.push(arr[i])
@@ -413,9 +422,20 @@ fn index_test_replace_single_entry_with_stages(
   patched[9] = ((count >> 16) & 0xFF).to_byte()
   patched[10] = ((count >> 8) & 0xFF).to_byte()
   patched[11] = (count & 0xFF).to_byte()
-  patched.append(body)
-  for _ in 0..<20 {
-    patched.push(b'\x00')
+  for stage in stages {
+    let entry_copy = base_entry.copy()
+    let stage_flags = (flags & 0xCFFF) | ((stage & 0x3) << 12)
+    entry_copy[60] = ((stage_flags >> 8) & 0xFF).to_byte()
+    entry_copy[61] = (stage_flags & 0xFF).to_byte()
+    patched.append(entry_copy)
+  }
+  patched.append(trailing)
+  let content = Bytes::from_array(FixedArray::makei(patched.length(), fn(i) {
+    patched[i]
+  }))
+  let checksum = @bit.sha1(content)
+  for i in 0..<20 {
+    patched.push(checksum.bytes[i])
   }
   fs.write_file(
     index_path,
