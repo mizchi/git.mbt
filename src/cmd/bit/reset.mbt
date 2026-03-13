@@ -139,7 +139,7 @@ async fn handle_reset(args : Array[String]) -> Unit raise Error {
     @bitlib.ResetMode::Hard => true
     _ => false
   }
-  if hard_mode {
+  if hard_mode && not(quiet) {
     let short_id = String::unsafe_substring(commit_id.to_hex(), start=0, end=7)
     let subject = reset_commit_subject_bytes(rfs, git_dir, commit_id)
     reset_print_hard_reset_message(short_id, subject)

@@ -3,7 +3,12 @@ async fn restore_test_run_git(
   root : String,
   args : Array[String],
 ) -> Unit raise Error {
-  let code = @process.run("git", args[:], inherit_env=true, cwd=root)
+  let (code, _, _) = @process.collect_output(
+    "git",
+    args[:],
+    inherit_env=true,
+    cwd=root,
+  )
   assert_eq(code, 0)
 }
 
@@ -12,7 +17,7 @@ async fn restore_test_git_stdout(
   root : String,
   args : Array[String],
 ) -> String raise Error {
-  let (code, stdout) = @process.collect_stdout(
+  let (code, stdout, _) = @process.collect_output(
     "git",
     args[:],
     inherit_env=true,
@@ -29,7 +34,7 @@ async fn restore_test_git_stderr(
   root : String,
   args : Array[String],
 ) -> (Int, String) raise Error {
-  let (code, stderr) = @process.collect_stderr(
+  let (code, _, stderr) = @process.collect_output(
     "git",
     args[:],
     inherit_env=true,

@@ -1,9 +1,20 @@
 ///|
+let sparse_checkout_wbtest_shim_lock : @async.Semaphore = @async.Semaphore::new(
+  1,
+  initial_value=1,
+)
+
+///|
 async fn sparse_checkout_wbtest_run_git(
   cwd : String,
   args : Array[String],
 ) -> Unit raise Error {
-  let code = @process.run("git", args[:], inherit_env=true, cwd~)
+  let (code, _, _) = @process.collect_output(
+    "git",
+    args[:],
+    inherit_env=true,
+    cwd~,
+  )
   assert_eq(code, 0)
 }
 
@@ -12,7 +23,7 @@ async fn sparse_checkout_wbtest_git_stdout(
   cwd : String,
   args : Array[String],
 ) -> String raise Error {
-  let (code, stdout) = @process.collect_stdout(
+  let (code, stdout, _) = @process.collect_output(
     "git",
     args[:],
     inherit_env=true,
@@ -29,7 +40,7 @@ async fn sparse_checkout_wbtest_shell_stdout(
   cwd : String,
   script : String,
 ) -> String raise Error {
-  let (code, stdout) = @process.collect_stdout(
+  let (code, stdout, _) = @process.collect_output(
     "bash",
     ["-lc", script],
     inherit_env=true,
@@ -46,21 +57,14 @@ async fn sparse_checkout_wbtest_shim_moon_path(
   repo_root : String,
 ) -> String raise Error {
   let fs = OsFs::new()
-  let nonce = get_current_timestamp().to_string()
-  let wrapper_path = "/tmp/bit-sparse-shim-moon-" + nonce + ".sh"
-  let target_dir = "/tmp/bit-sparse-shim-target-" + nonce
+  let wrapper_path = "/tmp/bit-sparse-shim-moon.sh"
+  let target_dir = "/tmp/bit-sparse-shim-target"
   fs.write_string(
     wrapper_path,
     "#!/bin/sh\nset -eu\ncd '\{repo_root}'\nexec moon run --target native --target-dir '\{target_dir}' src/cmd/bit -- \"$@\"\n",
   )
   let chmod_code = @process.run("chmod", ["+x", wrapper_path], inherit_env=true)
   assert_eq(chmod_code, 0)
-  let (warmup_code, _, _) = @process.collect_output(
-    wrapper_path,
-    ["--version"],
-    inherit_env=true,
-  )
-  assert_eq(warmup_code, 0)
   wrapper_path
 }
 
@@ -103,6 +107,8 @@ async fn sparse_checkout_wbtest_collect_shim_git_output(
   cwd : String,
   args : Array[String],
 ) -> (Int, String, String) raise Error {
+  sparse_checkout_wbtest_shim_lock.acquire()
+  defer sparse_checkout_wbtest_shim_lock.release()
   let repo_root = @env.current_dir().unwrap_or(".")
   let shim_git = repo_root + "/tools/git-shim/bin/git"
   let shim_moon = sparse_checkout_wbtest_shim_moon_path(repo_root)
@@ -129,7 +135,8 @@ async fn sparse_checkout_wbtest_collect_shim_git_output(
       _ => ""
     },
   )
-  let normalized_code = if code == 0 && stderr_text.has_prefix("fatal:") {
+  let normalized_code = if code == 0 &&
+    (stderr_text.has_prefix("fatal:") || stderr_text.contains(" failed: ")) {
     1
   } else {
     code
@@ -138,10 +145,28 @@ async fn sparse_checkout_wbtest_collect_shim_git_output(
 }
 
 ///|
+async fn sparse_checkout_wbtest_run_shim_git(
+  cwd : String,
+  args : Array[String],
+) -> Unit raise Error {
+  let git_args : Array[String] = ["sparse-checkout"]
+  for arg in args {
+    git_args.push(arg)
+  }
+  let (code, _stdout, stderr) = sparse_checkout_wbtest_collect_shim_git_output(
+    cwd, git_args,
+  )
+  assert_eq(code, 0)
+  assert_eq(stderr, "")
+}
+
+///|
 async fn sparse_checkout_wbtest_collect_shim_git_shell_output(
   cwd : String,
   script : String,
 ) -> (Int, String, String) raise Error {
+  sparse_checkout_wbtest_shim_lock.acquire()
+  defer sparse_checkout_wbtest_shim_lock.release()
   let repo_root = @env.current_dir().unwrap_or(".")
   let shim_git = repo_root + "/tools/git-shim/bin/git"
   let shim_moon = sparse_checkout_wbtest_shim_moon_path(repo_root)
@@ -265,7 +290,9 @@ async test "sparse-checkout: set defaults to cone mode for fresh repo with --ski
   cleanup_tree(fs, root)
   fs.mkdir_p(root)
   let repo_dir = sparse_checkout_wbtest_init_repo(root, "repo")
-  handle_sparse_checkout_at_root(repo_dir, ["set", "--skip-checks", "a", "deep"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, [
+    "set", "--skip-checks", "a", "deep",
+  ])
   let patterns = decode_bytes(
     fs.read_file(repo_dir + "/.git/info/sparse-checkout"),
   )
@@ -283,13 +310,13 @@ async test "sparse-checkout: init re-enables sparse mode after disable and branc
   fs.mkdir_p(root)
   let repo_dir = sparse_checkout_wbtest_init_repo(root, "repo")
 
-  handle_sparse_checkout_at_root(repo_dir, ["init", "--no-cone"])
-  handle_sparse_checkout_at_root(repo_dir, ["set", "/*", "!b", "!/*/"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["init", "--no-cone"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["set", "/*", "!b", "!/*/"])
   assert_false(fs.is_file(repo_dir + "/b"))
   assert_false(fs.is_dir(repo_dir + "/folder1"))
   assert_false(fs.is_dir(repo_dir + "/folder2"))
 
-  handle_sparse_checkout_at_root(repo_dir, ["disable"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["disable"])
   let skip_paths_after_disable = @bitlib.read_skip_worktree_paths(
     fs,
     repo_dir + "/.git",
@@ -314,7 +341,7 @@ async test "sparse-checkout: init re-enables sparse mode after disable and branc
     "commit", "-qam", "modified-b-in-branchX",
   ])
 
-  handle_sparse_checkout_at_root(repo_dir, ["init"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["init"])
   let config = @utf8.decode_lossy(fs.read_file(repo_dir + "/.git/config")[:])
   assert_true(config.contains("sparseCheckout = true"))
   assert_false(fs.is_file(repo_dir + "/b"))
@@ -352,7 +379,7 @@ async test "sparse-checkout: set without patterns initializes defaults and confi
   fs.mkdir_p(root)
   let repo_dir = sparse_checkout_wbtest_init_repo(root, "repo")
 
-  handle_sparse_checkout_at_root(repo_dir, ["set"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["set"])
 
   let patterns = @bitlib.read_sparse_patterns(fs, repo_dir + "/.git")
   assert_eq(patterns, @bitlib.sparse_default_patterns())
@@ -381,14 +408,16 @@ async test "sparse-checkout: init and reapply update sparse-index worktree confi
   fs.mkdir_p(root)
   let repo_dir = sparse_checkout_wbtest_init_repo(root, "repo")
 
-  handle_sparse_checkout_at_root(repo_dir, ["init", "--cone", "--sparse-index"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, [
+    "init", "--cone", "--sparse-index",
+  ])
   let worktree_config = @utf8.decode_lossy(
     fs.read_file(repo_dir + "/.git/config.worktree")[:],
   )
   assert_true(worktree_config.contains("[index]"))
   assert_true(worktree_config.contains("sparse = true"))
 
-  handle_sparse_checkout_at_root(repo_dir, ["reapply", "--no-sparse-index"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["reapply", "--no-sparse-index"])
   let updated_config = @utf8.decode_lossy(
     fs.read_file(repo_dir + "/.git/config.worktree")[:],
   )
@@ -407,14 +436,16 @@ async test "sparse-checkout: init --no-sparse-index expands sparse directories i
   fs.mkdir_p(root)
   let repo_dir = sparse_checkout_wbtest_init_repo(root, "repo")
 
-  handle_sparse_checkout_at_root(repo_dir, ["init", "--cone", "--sparse-index"])
-  handle_sparse_checkout_at_root(repo_dir, ["set", "folder1"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, [
+    "init", "--cone", "--sparse-index",
+  ])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["set", "folder1"])
   let sparse_output = sparse_checkout_wbtest_git_stdout(repo_dir, [
     "ls-files", "--sparse", "--stage",
   ])
   assert_true(sparse_output.contains("\tfolder2/\n"))
 
-  handle_sparse_checkout_at_root(repo_dir, ["init", "--no-sparse-index"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["init", "--no-sparse-index"])
   let raw_entries = @bitlib.read_index_stage_entries(fs, repo_dir + "/.git")
   assert_false(
     raw_entries.any(fn(item) {
@@ -445,8 +476,10 @@ async test "sparse-checkout: set with sparse-index collapses skipped directories
   fs.mkdir_p(root)
   let repo_dir = sparse_checkout_wbtest_init_repo(root, "repo")
 
-  handle_sparse_checkout_at_root(repo_dir, ["init", "--cone", "--sparse-index"])
-  handle_sparse_checkout_at_root(repo_dir, ["set", "folder1"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, [
+    "init", "--cone", "--sparse-index",
+  ])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["set", "folder1"])
 
   let entries = @bitlib.read_index_stage_entries(fs, repo_dir + "/.git")
   assert_true(
@@ -476,10 +509,12 @@ async test "sparse-checkout: reapply preserves staged deletions while collapsing
   fs.mkdir_p(root)
   let repo_dir = sparse_checkout_wbtest_init_repo(root, "repo")
 
-  handle_sparse_checkout_at_root(repo_dir, ["init", "--cone", "--sparse-index"])
-  handle_sparse_checkout_at_root(repo_dir, ["set", "folder1"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, [
+    "init", "--cone", "--sparse-index",
+  ])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["set", "folder1"])
   sparse_checkout_wbtest_run_git(repo_dir, ["rm", "-r", "."])
-  handle_sparse_checkout_at_root(repo_dir, ["reapply"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["reapply"])
 
   let entries = @bitlib.read_index_stage_entries(fs, repo_dir + "/.git")
   assert_true(
@@ -527,8 +562,10 @@ async test "sparse-checkout: deep cone path collapses sibling subtree into spars
   ])
   sparse_checkout_wbtest_run_git(repo_dir, ["commit", "-q", "-m", "initial"])
 
-  handle_sparse_checkout_at_root(repo_dir, ["init", "--cone", "--sparse-index"])
-  handle_sparse_checkout_at_root(repo_dir, ["set", "folder2/2/3"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, [
+    "init", "--cone", "--sparse-index",
+  ])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["set", "folder2/2/3"])
 
   let entries = @bitlib.read_index_stage_entries(fs, repo_dir + "/.git")
   assert_true(
@@ -583,9 +620,11 @@ async test "sparse-checkout: narrowing from parent cone to deep cone re-collapse
   ])
   sparse_checkout_wbtest_run_git(repo_dir, ["commit", "-q", "-m", "initial"])
 
-  handle_sparse_checkout_at_root(repo_dir, ["init", "--cone", "--sparse-index"])
-  handle_sparse_checkout_at_root(repo_dir, ["set", "folder2"])
-  handle_sparse_checkout_at_root(repo_dir, ["set", "folder2/2/3"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, [
+    "init", "--cone", "--sparse-index",
+  ])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["set", "folder2"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["set", "folder2/2/3"])
 
   let tracked_entries = ls_files_collect_cached_entries(
     fs,
@@ -639,13 +678,17 @@ async test "sparse-checkout: repeated cone updates preserve nested sparse dirs" 
   ])
   sparse_checkout_wbtest_run_git(repo_dir, ["commit", "-q", "-m", "initial"])
 
-  handle_sparse_checkout_at_root(repo_dir, ["init", "--cone", "--sparse-index"])
-  handle_sparse_checkout_at_root(repo_dir, ["set", "folder1", "folder2", "x"])
-  handle_sparse_checkout_at_root(repo_dir, ["set", "deep", "folder2", "x"])
-  handle_sparse_checkout_at_root(repo_dir, [
+  sparse_checkout_wbtest_run_shim_git(repo_dir, [
+    "init", "--cone", "--sparse-index",
+  ])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, [
+    "set", "folder1", "folder2", "x",
+  ])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["set", "deep", "folder2", "x"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, [
     "set", "deep/deeper2", "folder1", "folder2", "x",
   ])
-  handle_sparse_checkout_at_root(repo_dir, [
+  sparse_checkout_wbtest_run_shim_git(repo_dir, [
     "set", "bogus", "deep/deeper1", "folder1/0/0", "folder2/2/3", "x",
   ])
 
@@ -703,13 +746,17 @@ async test "sparse-checkout: repeated cone updates preserve nested sparse dirs i
   ])
   sparse_checkout_wbtest_run_git(repo_dir, ["commit", "-q", "-m", "initial"])
 
-  handle_sparse_checkout_at_root(repo_dir, ["init", "--cone", "--sparse-index"])
-  handle_sparse_checkout_at_root(repo_dir, ["set", "folder1", "folder2", "x"])
-  handle_sparse_checkout_at_root(repo_dir, ["set", "deep", "folder2", "x"])
-  handle_sparse_checkout_at_root(repo_dir, [
+  sparse_checkout_wbtest_run_shim_git(repo_dir, [
+    "init", "--cone", "--sparse-index",
+  ])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, [
+    "set", "folder1", "folder2", "x",
+  ])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["set", "deep", "folder2", "x"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, [
     "set", "deep/deeper2", "folder1", "folder2", "x",
   ])
-  handle_sparse_checkout_at_root(repo_dir, [
+  sparse_checkout_wbtest_run_shim_git(repo_dir, [
     "set", "bogus", "deep/deeper1", "folder1/0/0", "folder2/2/3", "x",
   ])
 
@@ -735,8 +782,8 @@ async test "sparse-checkout: add keeps skipped paths out of porcelain status" {
   fs.mkdir_p(root)
   let repo_dir = sparse_checkout_wbtest_init_repo(root, "repo")
 
-  handle_sparse_checkout_at_root(repo_dir, ["init", "--cone"])
-  handle_sparse_checkout_at_root(repo_dir, ["set", "folder1"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["init", "--cone"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["set", "folder1"])
   fs.write_string(repo_dir + "/README.md", "readme\n")
   @bitlib.add_paths_async(fs, fs, repo_dir, ["README.md"])
 
@@ -756,7 +803,7 @@ async test "sparse-checkout: list warns when sparse-checkout file is missing" {
   fs.mkdir_p(root)
   let repo_dir = sparse_checkout_wbtest_init_repo(root, "repo")
 
-  handle_sparse_checkout_at_root(repo_dir, ["set"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["set"])
   fs.remove_file(repo_dir + "/.git/info/sparse-checkout")
 
   match sparse_checkout_list_state(fs, repo_dir + "/.git") {
@@ -812,8 +859,8 @@ async test "sparse-checkout: reapply restores worktree from current patterns" {
   fs.mkdir_p(root)
   let repo_dir = sparse_checkout_wbtest_init_repo(root, "repo")
 
-  handle_sparse_checkout_at_root(repo_dir, ["init", "--no-cone"])
-  handle_sparse_checkout_at_root(repo_dir, ["set", "/*", "!b", "!/*/"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["init", "--no-cone"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["set", "/*", "!b", "!/*/"])
 
   let initial_patterns = @bitlib.read_sparse_patterns(fs, repo_dir + "/.git")
   assert_eq(initial_patterns, ["/*", "!b", "!/*/"])
@@ -826,7 +873,7 @@ async test "sparse-checkout: reapply restores worktree from current patterns" {
   fs.write_string(repo_dir + "/b", "manual\n")
   assert_true(fs.is_file(repo_dir + "/b"))
 
-  handle_sparse_checkout_at_root(repo_dir, ["reapply"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["reapply"])
   assert_false(fs.is_file(repo_dir + "/b"))
   assert_false(fs.is_dir(repo_dir + "/folder1"))
   assert_false(fs.is_dir(repo_dir + "/folder2"))
@@ -858,8 +905,8 @@ async test "sparse-checkout: cone set collapses nested explicit paths to parent"
   ])
   sparse_checkout_wbtest_run_git(repo_dir, ["commit", "-q", "-m", "initial"])
 
-  handle_sparse_checkout_at_root(repo_dir, ["init", "--cone"])
-  handle_sparse_checkout_at_root(repo_dir, [
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["init", "--cone"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, [
     "set", "deep", "deep/deeper1/deepest",
   ])
 
@@ -884,21 +931,20 @@ async test "sparse-checkout: add fails when cone mode is enabled for non-cone pa
   fs.mkdir_p(root)
   let repo_dir = sparse_checkout_wbtest_init_repo(root, "repo")
 
-  handle_sparse_checkout_at_root(repo_dir, ["init", "--no-cone"])
-  handle_sparse_checkout_at_root(repo_dir, ["add", "dir"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["init", "--no-cone"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["add", "dir"])
   sparse_checkout_wbtest_run_git(repo_dir, [
     "config", "--worktree", "core.sparseCheckoutCone", "true",
   ])
 
-  let rejected = try {
-    handle_sparse_checkout_at_root(repo_dir, ["add", "dir"])
-    false
-  } catch {
-    @bitcore.GitError::InvalidObject(msg) =>
-      msg == "existing sparse-checkout patterns do not use cone mode"
-    _ => false
-  }
-  assert_true(rejected)
+  let (code, _stdout, stderr) = sparse_checkout_wbtest_collect_shim_git_output(
+    repo_dir,
+    ["sparse-checkout", "add", "dir"],
+  )
+  assert_true(code != 0)
+  assert_true(
+    stderr.contains("existing sparse-checkout patterns do not use cone mode"),
+  )
 
   cleanup_tree(fs, root)
 }
@@ -939,8 +985,10 @@ async test "sparse-checkout: reapply updates cone and sparse-index config" {
   fs.mkdir_p(root)
   let repo_dir = sparse_checkout_wbtest_init_repo(root, "repo")
 
-  handle_sparse_checkout_at_root(repo_dir, ["init", "--cone", "--sparse-index"])
-  handle_sparse_checkout_at_root(repo_dir, [
+  sparse_checkout_wbtest_run_shim_git(repo_dir, [
+    "init", "--cone", "--sparse-index",
+  ])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, [
     "reapply", "--no-cone", "--no-sparse-index",
   ])
 
@@ -966,15 +1014,13 @@ async test "sparse-checkout: set fails when sparse-checkout lock exists" {
 
   fs.mkdir_p(repo_dir + "/.git/info")
   fs.write_string(repo_dir + "/.git/info/sparse-checkout.lock", "held\n")
-  let rejected = try {
-    handle_sparse_checkout_at_root(repo_dir, ["set", "folder1"])
-    false
-  } catch {
-    @bitcore.GitError::InvalidObject(msg) =>
-      msg.contains("Unable to create") && msg.contains(".lock")
-    _ => false
-  }
-  assert_true(rejected)
+  let (code, _stdout, stderr) = sparse_checkout_wbtest_collect_shim_git_output(
+    repo_dir,
+    ["sparse-checkout", "set", "folder1"],
+  )
+  assert_true(code != 0)
+  assert_true(stderr.contains("Unable to create"))
+  assert_true(stderr.contains(".lock"))
 
   cleanup_tree(fs, root)
 }
@@ -993,8 +1039,8 @@ async test "sparse-checkout: no-checkout clone keeps worktree empty until switch
   sparse_checkout_wbtest_run_git(root, [
     "clone", "--no-checkout", origin_dir, "clone",
   ])
-  handle_sparse_checkout_at_root(clone_dir, ["init", "--cone"])
-  handle_sparse_checkout_at_root(clone_dir, ["set", "folder1"])
+  sparse_checkout_wbtest_run_shim_git(clone_dir, ["init", "--cone"])
+  sparse_checkout_wbtest_run_shim_git(clone_dir, ["set", "folder1"])
 
   let patterns = @bitlib.read_sparse_display_patterns(fs, clone_dir + "/.git")
   assert_eq(patterns, ["folder1"])
@@ -1070,7 +1116,7 @@ async test "sparse-checkout: clean refuses without force by default" {
   fs.mkdir_p(root)
   let repo_dir = sparse_checkout_wbtest_init_repo(root, "repo")
 
-  handle_sparse_checkout_at_root(repo_dir, ["set", "--cone", "folder1"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["set", "--cone", "folder1"])
   fs.mkdir_p(repo_dir + "/folder2/extra")
   fs.write_string(repo_dir + "/folder2/extra/file", "untracked\n")
 
@@ -1095,7 +1141,7 @@ async test "sparse-checkout: clean dry-run collapses outside sparse paths" {
   fs.mkdir_p(root)
   let repo_dir = sparse_checkout_wbtest_init_repo(root, "repo")
 
-  handle_sparse_checkout_at_root(repo_dir, ["set", "--cone", "folder1"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["set", "--cone", "folder1"])
   fs.mkdir_p(repo_dir + "/folder2/extra")
   fs.write_string(repo_dir + "/folder2/extra/file", "untracked\n")
 
@@ -1130,7 +1176,7 @@ async test "sparse-checkout: clean skips roots with tracked paths still present"
   fs.mkdir_p(root)
   let repo_dir = sparse_checkout_wbtest_init_repo(root, "repo")
 
-  handle_sparse_checkout_at_root(repo_dir, ["set", "--cone", "folder1"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["set", "--cone", "folder1"])
   fs.mkdir_p(repo_dir + "/folder2")
   fs.write_string(repo_dir + "/folder2/d", "dirty tracked\n")
   fs.write_string(repo_dir + "/folder2/file", "untracked\n")
@@ -1192,7 +1238,7 @@ async test "sparse-checkout: clean defers all managed roots while tracked sparse
   sparse_checkout_wbtest_run_git(repo_dir, ["add", "folder3/e"])
   sparse_checkout_wbtest_run_git(repo_dir, ["commit", "-q", "-m", "add folder3"])
 
-  handle_sparse_checkout_at_root(repo_dir, ["set", "--cone", "folder1"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["set", "--cone", "folder1"])
   fs.mkdir_p(repo_dir + "/folder2")
   fs.write_string(repo_dir + "/folder2/d", "dirty tracked\n")
   fs.write_string(repo_dir + "/folder2/file", "untracked\n")
@@ -1223,7 +1269,7 @@ async test "sparse-checkout: reapply warns about tracked sparse paths left in pl
   fs.mkdir_p(root)
   let repo_dir = sparse_checkout_wbtest_init_repo(root, "repo")
 
-  handle_sparse_checkout_at_root(repo_dir, ["set", "--cone", "folder1"])
+  sparse_checkout_wbtest_run_shim_git(repo_dir, ["set", "--cone", "folder1"])
   fs.mkdir_p(repo_dir + "/folder2")
   fs.write_string(repo_dir + "/folder2/d", "dirty tracked\n")
   fs.write_string(repo_dir + "/folder2/file", "untracked\n")

@@ -220,7 +220,7 @@ async test "rm: stage-only missing submodule is removable" {
   @sys.unset_env_var("GIT_DIR")
   @sys.unset_env_var("GIT_WORK_TREE")
 
-  handle_rm(["repo"])
+  handle_rm(["-q", "repo"])
 
   let status = submodule_wbtest_git_stdout(super_dir, ["status", "--short"])
   assert_false(status.contains("repo"))
@@ -260,7 +260,7 @@ async test "rm: orphan checkout keeps tracked files removable" {
   @sys.unset_env_var("GIT_WORK_TREE")
 
   handle_checkout(["--orphan", "orphan1"])
-  handle_rm(["-rf", "."])
+  handle_rm(["-q", "-rf", "."])
 
   assert_eq(add_test_git_stdout(repo_dir, ["ls-files"]), "")
   assert_false(fs.is_file(repo_dir + "/init.t"))
@@ -308,7 +308,7 @@ async test "rm: removing named submodule clears matching gitmodules section only
   let prev_allow_protocol = @sys.get_env_var("GIT_ALLOW_PROTOCOL")
   @sys.set_env_var("GIT_ALLOW_PROTOCOL", "file")
   handle_submodule_add(fs, super_dir, super_dir + "/.git", [
-    "--name", "repo_new", "./../source", "repo",
+    "--quiet", "--name", "repo_new", "./../source", "repo",
   ])
   submodule_wbtest_restore_env("GIT_ALLOW_PROTOCOL", prev_allow_protocol)
   submodule_wbtest_run_git(super_dir, ["commit", "-q", "-am", "add submodule"])
@@ -322,7 +322,7 @@ async test "rm: removing named submodule clears matching gitmodules section only
   @sys.unset_env_var("GIT_DIR")
   @sys.unset_env_var("GIT_WORK_TREE")
 
-  handle_rm(["repo"])
+  handle_rm(["-q", "repo"])
 
   let gitmodules = if fs.is_file(super_dir + "/.gitmodules") {
     decode_bytes(fs.read_file(super_dir + "/.gitmodules"))
@@ -380,7 +380,7 @@ async test "rm: cached submodule removal preserves gitmodules entry" {
   let prev_allow_protocol = @sys.get_env_var("GIT_ALLOW_PROTOCOL")
   @sys.set_env_var("GIT_ALLOW_PROTOCOL", "file")
   handle_submodule_add(fs, super_dir, super_dir + "/.git", [
-    "--name", "repo_new", "./../source", "repo",
+    "--quiet", "--name", "repo_new", "./../source", "repo",
   ])
   submodule_wbtest_restore_env("GIT_ALLOW_PROTOCOL", prev_allow_protocol)
   submodule_wbtest_run_git(super_dir, ["commit", "-q", "-am", "add submodule"])
@@ -396,7 +396,7 @@ async test "rm: cached submodule removal preserves gitmodules entry" {
   @sys.unset_env_var("GIT_DIR")
   @sys.unset_env_var("GIT_WORK_TREE")
 
-  handle_rm(["--cached", "repo"])
+  handle_rm(["-q", "--cached", "repo"])
 
   let after_gitmodules = decode_bytes(fs.read_file(super_dir + "/.gitmodules"))
   let tracked = submodule_wbtest_git_stdout(super_dir, ["ls-files"])

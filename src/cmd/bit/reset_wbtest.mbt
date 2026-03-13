@@ -6,6 +6,20 @@ test "reset normalize path strips leading and trailing separators" {
 }
 
 ///|
+async fn reset_wbtest_git_exit_code(
+  cwd : String,
+  args : Array[String],
+) -> Int raise Error {
+  let (code, _, _) = @process.collect_output(
+    "git",
+    args[:],
+    inherit_env=true,
+    cwd~,
+  )
+  code
+}
+
+///|
 async test "reset pathspec: trailing slash unstages submodule gitlink" {
   @bitnative.init_native_io()
   let fs = OsFs::new()
@@ -40,12 +54,9 @@ async test "reset pathspec: trailing slash unstages submodule gitlink" {
   add_test_run_git(super_dir + "/init", ["commit", "-m", "update a", "a"])
   add_test_run_git(super_dir, ["add", "init/"])
 
-  let diff_before = @process.run(
-    "git",
-    ["diff", "--exit-code", "--cached", "init"],
-    inherit_env=true,
-    cwd=super_dir,
-  )
+  let diff_before = reset_wbtest_git_exit_code(super_dir, [
+    "diff", "--exit-code", "--cached", "init",
+  ])
   assert_eq(diff_before, 1)
 
   let prev_shim_cwd = @sys.get_env_var("GIT_SHIM_CWD")
@@ -58,12 +69,9 @@ async test "reset pathspec: trailing slash unstages submodule gitlink" {
   @sys.unset_env_var("GIT_WORK_TREE")
   handle_reset(["init/"])
 
-  let diff_after = @process.run(
-    "git",
-    ["diff", "--exit-code", "--cached", "init"],
-    inherit_env=true,
-    cwd=super_dir,
-  )
+  let diff_after = reset_wbtest_git_exit_code(super_dir, [
+    "diff", "--exit-code", "--cached", "init",
+  ])
   assert_eq(diff_after, 0)
 
   add_test_restore_env("GIT_SHIM_CWD", prev_shim_cwd)
@@ -104,7 +112,7 @@ async test "reset: hard restores a valid root cache-tree for indexed-object nega
   @sys.set_env_var("GIT_SHIM_PWD", repo_dir)
   @sys.unset_env_var("GIT_DIR")
   @sys.unset_env_var("GIT_WORK_TREE")
-  handle_reset(["--hard", "HEAD"])
+  handle_reset(["-q", "--hard", "HEAD"])
 
   let head = add_test_trim_trailing_newline(
     add_test_git_stdout(repo_dir, ["rev-parse", "HEAD"]),

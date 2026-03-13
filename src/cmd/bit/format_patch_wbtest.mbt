@@ -1,4 +1,13 @@
 ///|
+async fn format_patch_wbtest_run_git(
+  cwd : String,
+  args : Array[String],
+) -> Unit raise Error {
+  let (code, _, _) = @process.collect_output("git", args[:], cwd~)
+  assert_eq(code, 0)
+}
+
+///|
 test "format_patch: parse options keeps count revision and output file" {
   let opts = parse_format_patch_options([
     "--output=outfile", "--signature=my sig", "--no-signature", "-3", "HEAD",
@@ -98,67 +107,36 @@ async test "format_patch: range excludes main history on OsFs" {
   let repo = root + "/repo"
   let git_dir = repo + "/.git"
 
-  let code = @process.run(
-    "git",
-    ["init", "--initial-branch=main", "-q", "repo"][:],
-    cwd=root,
-  )
-  assert_eq(code, 0)
-  assert_eq(
-    @process.run("git", ["config", "user.name", "Test User"][:], cwd=repo),
-    0,
-  )
-  assert_eq(
-    @process.run(
-      "git",
-      ["config", "user.email", "test@example.com"][:],
-      cwd=repo,
-    ),
-    0,
-  )
+  format_patch_wbtest_run_git(root, [
+    "init", "--initial-branch=main", "-q", "repo",
+  ])
+  format_patch_wbtest_run_git(repo, ["config", "user.name", "Test User"])
+  format_patch_wbtest_run_git(repo, ["config", "user.email", "test@example.com"])
 
   fs.write_string(repo + "/file", "one\n")
-  assert_eq(@process.run("git", ["add", "file"][:], cwd=repo), 0)
-  assert_eq(
-    @process.run("git", ["commit", "-q", "-m", "initial"][:], cwd=repo),
-    0,
-  )
-  assert_eq(
-    @process.run("git", ["checkout", "-q", "-b", "side"][:], cwd=repo),
-    0,
-  )
+  format_patch_wbtest_run_git(repo, ["add", "file"])
+  format_patch_wbtest_run_git(repo, ["commit", "-q", "-m", "initial"])
+  format_patch_wbtest_run_git(repo, ["checkout", "-q", "-b", "side"])
 
   fs.write_string(repo + "/file", "side-one\n")
-  assert_eq(@process.run("git", ["add", "file"][:], cwd=repo), 0)
-  assert_eq(
-    @process.run("git", ["commit", "-q", "-m", "side one"][:], cwd=repo),
-    0,
-  )
+  format_patch_wbtest_run_git(repo, ["add", "file"])
+  format_patch_wbtest_run_git(repo, ["commit", "-q", "-m", "side one"])
   let side_one = @bitrepo.rev_parse(fs, git_dir, "HEAD").unwrap()
 
   fs.write_string(repo + "/file", "side-two\n")
-  assert_eq(@process.run("git", ["add", "file"][:], cwd=repo), 0)
-  assert_eq(
-    @process.run("git", ["commit", "-q", "-m", "side two"][:], cwd=repo),
-    0,
-  )
+  format_patch_wbtest_run_git(repo, ["add", "file"])
+  format_patch_wbtest_run_git(repo, ["commit", "-q", "-m", "side two"])
   let side_two = @bitrepo.rev_parse(fs, git_dir, "HEAD").unwrap()
 
   fs.write_string(repo + "/file", "side-three\n")
-  assert_eq(@process.run("git", ["add", "file"][:], cwd=repo), 0)
-  assert_eq(
-    @process.run("git", ["commit", "-q", "-m", "side three"][:], cwd=repo),
-    0,
-  )
+  format_patch_wbtest_run_git(repo, ["add", "file"])
+  format_patch_wbtest_run_git(repo, ["commit", "-q", "-m", "side three"])
   let side_three = @bitrepo.rev_parse(fs, git_dir, "HEAD").unwrap()
 
-  assert_eq(@process.run("git", ["checkout", "-q", "main"][:], cwd=repo), 0)
+  format_patch_wbtest_run_git(repo, ["checkout", "-q", "main"])
   fs.write_string(repo + "/file", "main-two\n")
-  assert_eq(@process.run("git", ["add", "file"][:], cwd=repo), 0)
-  assert_eq(
-    @process.run("git", ["commit", "-q", "-m", "main two"][:], cwd=repo),
-    0,
-  )
+  format_patch_wbtest_run_git(repo, ["add", "file"])
+  format_patch_wbtest_run_git(repo, ["commit", "-q", "-m", "main two"])
   let main_two = @bitrepo.rev_parse(fs, git_dir, "HEAD").unwrap()
 
   let commits = collect_commits_in_range(fs, git_dir, main_two, side_three)

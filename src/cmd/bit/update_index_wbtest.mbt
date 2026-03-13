@@ -1,4 +1,10 @@
 ///|
+let update_index_wbtest_shim_lock : @async.Semaphore = @async.Semaphore::new(
+  1,
+  initial_value=1,
+)
+
+///|
 test "update-index: normalize_update_index_path rejects traversal paths" {
   let bad_paths : Array[String] = ["..", "../a.txt", "/a.txt", "a/../../b.txt"]
   for p in bad_paths {
@@ -66,8 +72,53 @@ async fn update_index_wbtest_run_git(
   cwd : String,
   args : Array[String],
 ) -> Unit raise Error {
-  let code = @process.run("git", args[:], inherit_env=true, cwd~)
+  let (code, _, _) = @process.collect_output(
+    "git",
+    args[:],
+    inherit_env=true,
+    cwd~,
+  )
   assert_eq(code, 0)
+}
+
+///|
+async fn update_index_wbtest_run_sparse_checkout_shim(
+  cwd : String,
+  args : Array[String],
+) -> Unit raise Error {
+  update_index_wbtest_shim_lock.acquire()
+  defer update_index_wbtest_shim_lock.release()
+  let repo_root = @env.current_dir().unwrap_or(".")
+  let shim_git = repo_root + "/tools/git-shim/bin/git"
+  let shim_moon = "/tmp/bit-update-index-sparse-shim-moon.sh"
+  let target_dir = "/tmp/bit-update-index-sparse-shim-target"
+  let fs = OsFs::new()
+  fs.write_string(
+    shim_moon,
+    "#!/bin/sh\nset -eu\ncd '\{repo_root}'\nexec moon run --target native --target-dir '\{target_dir}' src/cmd/bit -- \"$@\"\n",
+  )
+  let chmod_code = @process.run("chmod", ["+x", shim_moon], inherit_env=true)
+  assert_eq(chmod_code, 0)
+  let env : Map[String, String] = {
+    "SHIM_REAL_GIT": repo_root + "/third_party/git/git",
+    "SHIM_EXEC_PATH": repo_root + "/third_party/git",
+    "SHIM_MOON": shim_moon,
+    "SHIM_CMDS": "sparse-checkout",
+    "SHIM_STRICT": "1",
+  }
+  let git_args : Array[String] = ["-C", cwd, "sparse-checkout"]
+  for arg in args {
+    git_args.push(arg)
+  }
+  let (code, _stdout, stderr) = @process.collect_output(
+    shim_git,
+    git_args[:],
+    extra_env=env,
+    inherit_env=true,
+  )
+  assert_eq(code, 0)
+  let stderr_text = stderr.text() catch { _ => "" }
+  assert_eq(stderr_text, "")
 }
 
 ///|
@@ -102,8 +153,10 @@ async test "update-index: assume-unchanged works for sparse missing path" {
 
   let prev_cwd = @sys.get_env_var("GIT_SHIM_CWD")
   @sys.set_env_var("GIT_SHIM_CWD", repo_dir)
-  handle_sparse_checkout(["init", "--no-cone"])
-  handle_sparse_checkout(["set", "/*", "!b", "!/*/"])
+  update_index_wbtest_run_sparse_checkout_shim(repo_dir, ["init", "--no-cone"])
+  update_index_wbtest_run_sparse_checkout_shim(repo_dir, [
+    "set", "/*", "!b", "!/*/",
+  ])
   assert_false(fs.is_file(repo_dir + "/b"))
   handle_update_index(["--assume-unchanged", "b"])
   update_index_wbtest_restore_cwd(prev_cwd)
