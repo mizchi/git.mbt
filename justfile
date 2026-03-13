@@ -28,12 +28,12 @@ check:
 test:
     moon test --target js -p mizchi/bit -p mizchi/bit/lib
     moon test --target wasm -p mizchi/bit/runtime -f storage_runtime_wbtest.mbt
-    moon test --target native
+    moon test --target native --no-parallelize
 
 # Update snapshot tests (both js and native)
 test-update:
     moon test --update --target js -p mizchi/bit -p mizchi/bit/lib
-    moon test --update --target native
+    moon test --update --target native --no-parallelize
 
 # Run main (native)
 run:
