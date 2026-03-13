@@ -785,7 +785,7 @@ async fn worktree_wbtest_case_guess_remote_uses_configured_remote_name() -> Unit
   fs.write_string(upstream_dir + "/init.t", "init\n")
   add_test_run_git(upstream_dir, ["add", "init.t"])
   add_test_run_git(upstream_dir, ["commit", "-q", "-m", "main"])
-  add_test_run_git(upstream_dir, ["switch", "-c", "foo"])
+  add_test_run_git(upstream_dir, ["switch", "-q", "-c", "foo"])
 
   add_test_run_git(repo_dir, ["remote", "add", "upstream", "../upstream"])
 

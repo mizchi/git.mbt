@@ -2124,7 +2124,7 @@ async test "submodule add: reused name requires force after git rm" {
     "submodule", "add", "--name", "repo_new", source_url, "repo",
   ])
   cleanup_tree(fs, addtest_dir + "/repo")
-  submodule_wbtest_run_git(addtest_dir, ["rm", "repo"])
+  submodule_wbtest_run_git(addtest_dir, ["rm", "-q", "repo"])
   let addtest_git_dir = addtest_dir + "/.git"
   assert_true(fs.is_dir(addtest_dir + "/.git/modules/repo_new"))
 
