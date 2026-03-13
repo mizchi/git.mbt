@@ -17,6 +17,7 @@ async fn handle_switch(args : Array[String]) -> Unit raise Error {
   let mut orphan = false
   let mut discard_changes = false
   let mut ignore_other_worktrees = false
+  let mut quiet = false
   let mut track_mode : String? = None
   let mut guess_mode : Bool? = None
   let positional : Array[String] = []
@@ -56,6 +57,7 @@ async fn handle_switch(args : Array[String]) -> Unit raise Error {
       }
       "--discard-changes" => discard_changes = true
       "--ignore-other-worktrees" => ignore_other_worktrees = true
+      "-q" | "--quiet" => quiet = true
       "--track" => track_mode = Some("direct")
       "--guess" => guess_mode = Some(true)
       "--no-guess" => guess_mode = Some(false)
@@ -111,7 +113,9 @@ async fn handle_switch(args : Array[String]) -> Unit raise Error {
     let previous_location = current_checkout_location(rfs, git_dir)
     switch_write_head_ref(fs, git_dir, branch_name)
     save_previous_checkout_location(fs, git_dir, previous_location)
-    println("Switched to a new branch '\{branch_name}'")
+    if not(quiet) {
+      print_line("Switched to a new branch '\{branch_name}'")
+    }
     return
   }
   if create {
@@ -181,7 +185,9 @@ async fn handle_switch(args : Array[String]) -> Unit raise Error {
       }
     }
     save_previous_checkout_location(fs, git_dir, previous_location)
-    println("Switched to a new branch '\{branch_name}'")
+    if not(quiet) {
+      print_line("Switched to a new branch '\{branch_name}'")
+    }
     return
   }
   if detach {
@@ -214,7 +220,9 @@ async fn handle_switch(args : Array[String]) -> Unit raise Error {
     let previous_location = current_checkout_location(rfs, git_dir)
     ignore(checkout_with_promisor_retry(fs, root, target))
     save_previous_checkout_location(fs, git_dir, previous_location)
-    println("Switched to branch '\{target}'")
+    if not(quiet) {
+      print_line("Switched to branch '\{target}'")
+    }
     return
   }
   let guess = switch_effective_guess(rfs, git_dir, guess_mode)
@@ -224,7 +232,9 @@ async fn handle_switch(args : Array[String]) -> Unit raise Error {
     let previous_location = current_checkout_location(rfs, git_dir)
     ignore(checkout_with_promisor_retry(fs, root, target))
     save_previous_checkout_location(fs, git_dir, previous_location)
-    println("Switched to branch '\{target}'")
+    if not(quiet) {
+      print_line("Switched to branch '\{target}'")
+    }
     return
   }
   if @bitrepo.rev_parse(rfs, git_dir, target) is Some(_) {

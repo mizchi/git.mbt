@@ -1,4 +1,50 @@
 ///|
+let switch_wbtest_shim_lock : @async.Semaphore = @async.Semaphore::new(
+  1,
+  initial_value=1,
+)
+
+///|
+async fn switch_wbtest_run_shim_git(
+  cwd : String,
+  args : Array[String],
+) -> Unit raise Error {
+  switch_wbtest_shim_lock.acquire()
+  defer switch_wbtest_shim_lock.release()
+  let repo_root = @env.current_dir().unwrap_or(".")
+  let shim_git = repo_root + "/tools/git-shim/bin/git"
+  let shim_moon = "/tmp/bit-switch-shim-moon.sh"
+  let target_dir = "/tmp/bit-switch-shim-target"
+  let fs = OsFs::new()
+  fs.write_string(
+    shim_moon,
+    "#!/bin/sh\nset -eu\ncd '\{repo_root}'\nexec moon run --target native --target-dir '\{target_dir}' src/cmd/bit -- \"$@\"\n",
+  )
+  let chmod_code = @process.run("chmod", ["+x", shim_moon], inherit_env=true)
+  assert_eq(chmod_code, 0)
+  let env : Map[String, String] = {
+    "SHIM_REAL_GIT": repo_root + "/third_party/git/git",
+    "SHIM_EXEC_PATH": repo_root + "/third_party/git",
+    "SHIM_MOON": shim_moon,
+    "SHIM_CMDS": "switch rm",
+    "SHIM_STRICT": "1",
+  }
+  let git_args : Array[String] = ["-C", cwd]
+  for arg in args {
+    git_args.push(arg)
+  }
+  let (code, _stdout, stderr) = @process.collect_output(
+    shim_git,
+    git_args[:],
+    extra_env=env,
+    inherit_env=true,
+  )
+  assert_eq(code, 0)
+  let stderr_text = stderr.text() catch { _ => "" }
+  assert_eq(stderr_text, "")
+}
+
+///|
 async fn switch_wbtest_case_tracking_config_uses_short_branch_names() -> Unit raise Error {
   @bitnative.init_native_io()
   let fs = OsFs::new()
@@ -103,11 +149,6 @@ async fn switch_wbtest_case_orphan_preserves_index_entries() -> Unit raise Error
   let repo_dir = root + "/repo"
   let git_dir = repo_dir + "/.git"
 
-  let prev_shim_cwd = @sys.get_env_var("GIT_SHIM_CWD")
-  let prev_shim_pwd = @sys.get_env_var("GIT_SHIM_PWD")
-  let prev_git_dir = @sys.get_env_var("GIT_DIR")
-  let prev_work_tree = @sys.get_env_var("GIT_WORK_TREE")
-
   add_test_run_git(root, ["init", "--initial-branch=main", "-q", "repo"])
   add_test_run_git(repo_dir, ["config", "user.name", "Test User"])
   add_test_run_git(repo_dir, ["config", "user.email", "test@example.com"])
@@ -115,19 +156,10 @@ async fn switch_wbtest_case_orphan_preserves_index_entries() -> Unit raise Error
   add_test_run_git(repo_dir, ["add", "init.t"])
   add_test_run_git(repo_dir, ["commit", "-q", "-m", "main"])
 
-  @sys.set_env_var("GIT_SHIM_CWD", repo_dir)
-  @sys.set_env_var("GIT_SHIM_PWD", repo_dir)
-  @sys.unset_env_var("GIT_DIR")
-  @sys.unset_env_var("GIT_WORK_TREE")
-  handle_switch(["--orphan", "unborn"])
+  switch_wbtest_run_shim_git(repo_dir, ["switch", "-q", "--orphan", "unborn"])
 
   let entries = @bitlib.read_index_entries(fs, git_dir)
   assert_true(entries.length() > 0)
-
-  add_test_restore_env("GIT_SHIM_CWD", prev_shim_cwd)
-  add_test_restore_env("GIT_SHIM_PWD", prev_shim_pwd)
-  add_test_restore_env("GIT_DIR", prev_git_dir)
-  add_test_restore_env("GIT_WORK_TREE", prev_work_tree)
   cleanup_tree(fs, root)
 }
 
@@ -141,11 +173,6 @@ async fn switch_wbtest_case_orphan_allows_cached_rm() -> Unit raise Error {
   fs.mkdir_p(root)
   let repo_dir = root + "/repo"
 
-  let prev_shim_cwd = @sys.get_env_var("GIT_SHIM_CWD")
-  let prev_shim_pwd = @sys.get_env_var("GIT_SHIM_PWD")
-  let prev_git_dir = @sys.get_env_var("GIT_DIR")
-  let prev_work_tree = @sys.get_env_var("GIT_WORK_TREE")
-
   add_test_run_git(root, ["init", "--initial-branch=main", "-q", "repo"])
   add_test_run_git(repo_dir, ["config", "user.name", "Test User"])
   add_test_run_git(repo_dir, ["config", "user.email", "test@example.com"])
@@ -153,20 +180,11 @@ async fn switch_wbtest_case_orphan_allows_cached_rm() -> Unit raise Error {
   add_test_run_git(repo_dir, ["add", "init.t"])
   add_test_run_git(repo_dir, ["commit", "-q", "-m", "main"])
 
-  @sys.set_env_var("GIT_SHIM_CWD", repo_dir)
-  @sys.set_env_var("GIT_SHIM_PWD", repo_dir)
-  @sys.unset_env_var("GIT_DIR")
-  @sys.unset_env_var("GIT_WORK_TREE")
-  handle_switch(["--orphan", "unborn"])
-  handle_rm(["--cached", "-r", "."])
+  switch_wbtest_run_shim_git(repo_dir, ["switch", "-q", "--orphan", "unborn"])
+  switch_wbtest_run_shim_git(repo_dir, ["rm", "-q", "--cached", "-r", "."])
 
   assert_eq(add_test_git_stdout(repo_dir, ["ls-files"]), "")
   assert_true(fs.is_file(repo_dir + "/init.t"))
-
-  add_test_restore_env("GIT_SHIM_CWD", prev_shim_cwd)
-  add_test_restore_env("GIT_SHIM_PWD", prev_shim_pwd)
-  add_test_restore_env("GIT_DIR", prev_git_dir)
-  add_test_restore_env("GIT_WORK_TREE", prev_work_tree)
   cleanup_tree(fs, root)
 }
 
@@ -181,28 +199,17 @@ async fn switch_wbtest_case_create_branch_in_unborn_repo_keeps_ref_unborn() -> U
   let repo_dir = root + "/repo"
   let git_dir = repo_dir + "/.git"
 
-  let prev_shim_cwd = @sys.get_env_var("GIT_SHIM_CWD")
-  let prev_shim_pwd = @sys.get_env_var("GIT_SHIM_PWD")
-  let prev_git_dir = @sys.get_env_var("GIT_DIR")
-  let prev_work_tree = @sys.get_env_var("GIT_WORK_TREE")
-
   add_test_run_git(root, ["init", "--initial-branch=main", "-q", "repo"])
   add_test_run_git(repo_dir, ["config", "user.name", "Test User"])
   add_test_run_git(repo_dir, ["config", "user.email", "test@example.com"])
 
-  @sys.set_env_var("GIT_SHIM_CWD", repo_dir)
-  @sys.set_env_var("GIT_SHIM_PWD", repo_dir)
-  @sys.unset_env_var("GIT_DIR")
-  @sys.unset_env_var("GIT_WORK_TREE")
-  handle_switch(["-c", "topic"])
+  switch_wbtest_run_shim_git(repo_dir, ["switch", "-q", "-c", "topic"])
 
-  assert_eq(decode_bytes(fs.read_file(git_dir + "/HEAD")), "ref: refs/heads/topic\n")
+  assert_eq(
+    decode_bytes(fs.read_file(git_dir + "/HEAD")),
+    "ref: refs/heads/topic\n",
+  )
   assert_true(not(fs.is_file(git_dir + "/refs/heads/topic")))
-
-  add_test_restore_env("GIT_SHIM_CWD", prev_shim_cwd)
-  add_test_restore_env("GIT_SHIM_PWD", prev_shim_pwd)
-  add_test_restore_env("GIT_DIR", prev_git_dir)
-  add_test_restore_env("GIT_WORK_TREE", prev_work_tree)
 
   fs.write_string(repo_dir + "/topic.t", "topic\n")
   add_test_run_git(repo_dir, ["add", "topic.t"])
@@ -210,7 +217,7 @@ async fn switch_wbtest_case_create_branch_in_unborn_repo_keeps_ref_unborn() -> U
 
   assert_eq(
     add_test_git_stdout(repo_dir, ["rev-parse", "--abbrev-ref", "HEAD"])
-      |> add_test_trim_trailing_newline,
+    |> add_test_trim_trailing_newline,
     "topic",
   )
 
@@ -219,6 +226,8 @@ async fn switch_wbtest_case_create_branch_in_unborn_repo_keeps_ref_unborn() -> U
 
 ///|
 async test "switch: helper cases stay compatible" {
+  cmd_bit_wbtest_env_lock.acquire()
+  defer cmd_bit_wbtest_env_lock.release()
   switch_wbtest_case_tracking_config_uses_short_branch_names()
   switch_wbtest_case_branch_in_use_path_accepts_full_ref()
   switch_wbtest_case_orphan_preserves_index_entries()

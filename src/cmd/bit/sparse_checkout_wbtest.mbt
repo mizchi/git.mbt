@@ -513,7 +513,7 @@ async test "sparse-checkout: reapply preserves staged deletions while collapsing
     "init", "--cone", "--sparse-index",
   ])
   sparse_checkout_wbtest_run_shim_git(repo_dir, ["set", "folder1"])
-  sparse_checkout_wbtest_run_git(repo_dir, ["rm", "-r", "."])
+  sparse_checkout_wbtest_run_git(repo_dir, ["rm", "-q", "-r", "."])
   sparse_checkout_wbtest_run_shim_git(repo_dir, ["reapply"])
 
   let entries = @bitlib.read_index_stage_entries(fs, repo_dir + "/.git")
@@ -1048,7 +1048,7 @@ async test "sparse-checkout: no-checkout clone keeps worktree empty until switch
   assert_false(fs.is_dir(clone_dir + "/folder1"))
   assert_false(fs.is_file(clone_dir + "/.git/index"))
 
-  sparse_checkout_wbtest_run_git(clone_dir, ["switch", "main"])
+  sparse_checkout_wbtest_run_git(clone_dir, ["switch", "-q", "main"])
   assert_true(fs.is_file(clone_dir + "/a"))
   assert_true(fs.is_dir(clone_dir + "/folder1"))
   assert_false(fs.is_dir(clone_dir + "/deep"))
