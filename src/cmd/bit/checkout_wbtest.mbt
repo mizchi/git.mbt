@@ -66,8 +66,7 @@ async fn checkout_wbtest_run_shim_git(
   args : Array[String],
 ) -> Unit raise Error {
   let (code, stdout, stderr) = checkout_wbtest_collect_shim_git_output(
-    cwd,
-    args,
+    cwd, args,
   )
   assert_eq(code, 0)
   assert_eq(stdout, "")
@@ -129,7 +128,9 @@ async fn checkout_wbtest_case_treeish_restore() -> Unit raise Error {
   @sys.set_env_var("GIT_SHIM_PWD", repo_dir)
   @sys.unset_env_var("GIT_DIR")
   @sys.unset_env_var("GIT_WORK_TREE")
-  checkout_wbtest_run_shim_git(repo_dir, ["checkout", "-q", "newmain", "--", "init.t"])
+  checkout_wbtest_run_shim_git(repo_dir, [
+    "checkout", "-q", "newmain", "--", "init.t",
+  ])
 
   assert_eq(decode_bytes(fs.read_file(repo_dir + "/init.t")), "newmain\n")
   assert_eq(
@@ -610,7 +611,9 @@ async fn checkout_wbtest_case_orphan_branch() -> Unit raise Error {
   @sys.unset_env_var("GIT_DIR")
   @sys.unset_env_var("GIT_WORK_TREE")
 
-  checkout_wbtest_run_shim_git(repo_dir, ["checkout", "-q", "--orphan", "orphan1"])
+  checkout_wbtest_run_shim_git(repo_dir, [
+    "checkout", "-q", "--orphan", "orphan1",
+  ])
 
   assert_eq(
     add_test_git_stdout(repo_dir, ["symbolic-ref", "--short", "HEAD"]),
@@ -770,7 +773,9 @@ async fn checkout_wbtest_case_treeish_restore_updates_index() -> Unit raise Erro
   @sys.set_env_var("GIT_SHIM_PWD", repo_dir)
   @sys.unset_env_var("GIT_DIR")
   @sys.unset_env_var("GIT_WORK_TREE")
-  checkout_wbtest_run_shim_git(repo_dir, ["checkout", "-q", "HEAD", "--", "file"])
+  checkout_wbtest_run_shim_git(repo_dir, [
+    "checkout", "-q", "HEAD", "--", "file",
+  ])
 
   assert_eq(decode_bytes(fs.read_file(repo_dir + "/file")), "base\n")
   assert_eq(
@@ -859,10 +864,9 @@ async fn checkout_wbtest_case_track_sets_branch_config() -> Unit raise Error {
   @sys.set_env_var("GIT_SHIM_PWD", repo_dir)
   @sys.unset_env_var("GIT_DIR")
   @sys.unset_env_var("GIT_WORK_TREE")
-  checkout_wbtest_run_shim_git(
-    repo_dir,
-    ["checkout", "-q", "--track", "-b", "topic", "me/main"],
-  )
+  checkout_wbtest_run_shim_git(repo_dir, [
+    "checkout", "-q", "--track", "-b", "topic", "me/main",
+  ])
 
   assert_eq(
     add_test_git_stdout(repo_dir, ["config", "--get", "branch.topic.remote"]),

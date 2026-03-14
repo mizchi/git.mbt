@@ -398,10 +398,7 @@ async fn handle_merge(args : Array[String]) -> Unit raise Error {
             print_line("Fast-forward to \{short}")
           }
         }
-        None =>
-          if not(quiet) {
-            print_line("Fast-forward")
-          }
+        None => if not(quiet) { print_line("Fast-forward") }
       }
     @bitlib.MergeStatus::Merged =>
       match result.commit_id {
@@ -411,10 +408,7 @@ async fn handle_merge(args : Array[String]) -> Unit raise Error {
             print_line("Merge made by the 'ort' strategy. [\{short}]")
           }
         }
-        None =>
-          if not(quiet) {
-            print_line("Merged")
-          }
+        None => if not(quiet) { print_line("Merged") }
       }
     @bitlib.MergeStatus::Conflicted => {
       if not(quiet) {

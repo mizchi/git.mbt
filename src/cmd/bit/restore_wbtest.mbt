@@ -172,7 +172,9 @@ async fn restore_wbtest_case_ignore_unmerged() -> Unit raise Error {
   restore_test_run_git(repo_dir, ["switch", "-q", "-c", "second", "main"])
   fs.write_string(repo_dir + "/unmerged", "second\n")
   restore_test_run_git(repo_dir, ["commit", "-qam", "second"])
-  let (merge_code, _) = restore_test_git_stderr(repo_dir, ["merge", "-q", "first"])
+  let (merge_code, _) = restore_test_git_stderr(repo_dir, [
+    "merge", "-q", "first",
+  ])
   assert_not_eq(merge_code, 0)
 
   fs.write_string(repo_dir + "/common", "one\ndirty\n")

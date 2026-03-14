@@ -172,9 +172,10 @@ async test "merge: command path falls back when target is a merge commit" {
   grep_test_run_git(repo_dir, ["merge", "-q", "-m", "R", "-Xtheirs", "branchY"])
 
   grep_test_run_git(repo_dir, ["switch", "-q", "topic"])
-  let (merge_code, merge_stdout, merge_stderr) = merge_wbtest_collect_shim_git(repo_dir, [
-    "merge", "-q", "-m", "N", "branchR",
-  ])
+  let (merge_code, merge_stdout, merge_stderr) = merge_wbtest_collect_shim_git(
+    repo_dir,
+    ["merge", "-q", "-m", "N", "branchR"],
+  )
   assert_eq(merge_code, 0)
   assert_eq(merge_stdout, "")
   assert_eq(merge_stderr, "")
@@ -223,9 +224,10 @@ async test "merge: --continue records MERGE_HEAD as second parent" {
   fs.write_string(repo_dir + "/file", "main\nside\n")
   grep_test_run_git(repo_dir, ["add", "file"])
 
-  let (continue_code, continue_stdout, continue_stderr) = merge_wbtest_collect_shim_git(repo_dir, [
-    "merge", "-q", "--continue",
-  ])
+  let (continue_code, continue_stdout, continue_stderr) = merge_wbtest_collect_shim_git(
+    repo_dir,
+    ["merge", "-q", "--continue"],
+  )
   assert_eq(continue_code, 0)
   assert_eq(continue_stdout, "")
   assert_eq(continue_stderr, "")

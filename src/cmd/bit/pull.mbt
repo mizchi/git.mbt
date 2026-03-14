@@ -361,7 +361,7 @@ async fn handle_pull(args : Array[String]) -> Unit raise Error {
     pull_url,
     fetch_refspecs,
     update_head_ok=explicit_refspec.target_ref is Some(_),
-    quiet=quiet,
+    quiet~,
   )
   let mut target_id = @bitlib.resolve_ref(fs, git_dir, target_ref)
   if target_id is None {
@@ -577,18 +577,20 @@ async fn handle_pull(args : Array[String]) -> Unit raise Error {
                 if not(quiet) {
                   print_line("Fast-forward")
                 }
-              } else {
-                if not(quiet) {
-                  print_line("Updated to \{id.to_hex()}")
-                }
+              } else if not(quiet) {
+                print_line("Updated to \{id.to_hex()}")
               }
-              pull_apply_autostash(fs, fs, git_dir, root, autostash_state, quiet)
+              pull_apply_autostash(
+                fs, fs, git_dir, root, autostash_state, quiet,
+              )
             }
             None => {
               if not(quiet) {
                 print_line("Successfully rebased.")
               }
-              pull_apply_autostash(fs, fs, git_dir, root, autostash_state, quiet)
+              pull_apply_autostash(
+                fs, fs, git_dir, root, autostash_state, quiet,
+              )
             }
           }
         @bitlib.RebaseStatus::NothingToRebase => {
