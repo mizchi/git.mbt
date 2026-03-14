@@ -111,7 +111,7 @@ jobs:
 
           export SHIM_REAL_GIT="$real_git" SHIM_EXEC_PATH="$exec_path" \
           SHIM_MOON="$(pwd)/tools/git-shim/moon" \
-          SHIM_CMDS="init add diff diff-files diff-index ls-files tag branch checkout switch commit log show reflog reset update-ref update-index status merge rebase clone push fetch pull mv notes stash rm submodule worktree config show-ref for-each-ref rev-parse symbolic-ref cherry-pick remote cat-file hash-object ls-tree write-tree commit-tree receive-pack upload-pack pack-objects index-pack format-patch describe gc clean sparse-checkout restore blame grep shell" SHIM_STRICT=1 \
+          SHIM_CMDS="init add diff diff-files diff-index ls-files tag branch checkout switch commit log show reflog reset update-ref update-index status merge rebase clone push fetch pull mv notes stash rm submodule worktree config show-ref for-each-ref rev-parse symbolic-ref cherry-pick remote cat-file hash-object ls-tree write-tree commit-tree receive-pack upload-pack pack-objects index-pack format-patch describe gc clean sparse-checkout restore blame grep shell rev-list bisect" SHIM_STRICT=1 \
           GIT_TEST_INSTALLED="$shim_dir" GIT_TEST_EXEC_PATH="$exec_path" \
           GIT_TEST_DEFAULT_HASH=sha1
 
