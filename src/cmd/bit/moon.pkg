@@ -62,6 +62,7 @@ options(
     "bench_status_wbtest.mbt": [ "native" ],
     "bench_suppress_wbtest.mbt": [ "native" ],
     "bisect.mbt": [ "native" ],
+    "bisect_wbtest.mbt": [ "native" ],
     "blame.mbt": [ "native" ],
     "blame_wbtest.mbt": [ "native" ],
     "branch.mbt": [ "native" ],
