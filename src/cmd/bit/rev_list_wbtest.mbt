@@ -31,6 +31,16 @@ test "rev-list: cherry options require real git fallback" {
 }
 
 ///|
+async fn rev_list_test_init_repo(
+  root : String,
+  repo_dir : String,
+) -> Unit raise Error {
+  rev_list_test_run_git(root, ["init", "-q", "repo"])
+  rev_list_test_run_git(repo_dir, ["config", "user.name", "Test User"])
+  rev_list_test_run_git(repo_dir, ["config", "user.email", "test@example.com"])
+}
+
+///|
 async fn rev_list_test_run_git(
   root : String,
   args : Array[String],
@@ -141,7 +151,7 @@ async test "rev-list: indexed-objects includes staged blobs and cached subtree" 
   fs.mkdir_p(root)
   let repo_dir = root + "/repo"
 
-  rev_list_test_run_git(root, ["init", "-q", "repo"])
+  rev_list_test_init_repo(root, repo_dir)
   fs.write_string(repo_dir + "/one", "frotz\n")
   fs.mkdir_p(repo_dir + "/two")
   fs.write_string(repo_dir + "/two/three", "frotz\n")
@@ -180,7 +190,7 @@ async test "rev-list: not indexed-objects suppresses tree and blob output" {
   fs.mkdir_p(root)
   let repo_dir = root + "/repo"
 
-  rev_list_test_run_git(root, ["init", "-q", "repo"])
+  rev_list_test_init_repo(root, repo_dir)
   fs.write_string(repo_dir + "/one", "frotz\n")
   fs.mkdir_p(repo_dir + "/two")
   fs.write_string(repo_dir + "/two/three", "frotz\n")
@@ -216,7 +226,7 @@ async test "rev-list: indexed-objects tracks head tree ids even with extra stage
   let repo_dir = root + "/repo"
   let git_dir = repo_dir + "/.git"
 
-  rev_list_test_run_git(root, ["init", "-q", "repo"])
+  rev_list_test_init_repo(root, repo_dir)
   fs.write_string(repo_dir + "/one", "frotz\n")
   fs.mkdir_p(repo_dir + "/two")
   fs.write_string(repo_dir + "/two/three", "frotz\n")
@@ -258,7 +268,7 @@ async test "rev-list: indexed-objects keeps cached subtree after empty head comm
   let repo_dir = root + "/repo"
   let git_dir = repo_dir + "/.git"
 
-  rev_list_test_run_git(root, ["init", "-q", "repo"])
+  rev_list_test_init_repo(root, repo_dir)
   fs.write_string(repo_dir + "/one", "frotz\n")
   fs.mkdir_p(repo_dir + "/two")
   fs.write_string(repo_dir + "/two/three", "frotz\n")
@@ -506,7 +516,7 @@ async test "rev-list: negated indexed-objects suppresses clean head tree" {
   let repo_dir = root + "/repo"
   let git_dir = repo_dir + "/.git"
 
-  rev_list_test_run_git(root, ["init", "-q", "repo"])
+  rev_list_test_init_repo(root, repo_dir)
   fs.write_string(repo_dir + "/one", "frotz\n")
   fs.mkdir_p(repo_dir + "/two")
   fs.write_string(repo_dir + "/two/three", "frotz\n")
@@ -553,7 +563,7 @@ async test "rev-list: negated indexed-objects suppresses clean trees after empty
   let repo_dir = root + "/repo"
   let git_dir = repo_dir + "/.git"
 
-  rev_list_test_run_git(root, ["init", "-q", "repo"])
+  rev_list_test_init_repo(root, repo_dir)
   fs.write_string(repo_dir + "/one", "frotz\n")
   fs.mkdir_p(repo_dir + "/two")
   fs.write_string(repo_dir + "/two/three", "frotz\n")
@@ -603,7 +613,7 @@ async test "rev-list: command path suppresses clean head tree for negated indexe
   fs.mkdir_p(root)
   let repo_dir = root + "/repo"
 
-  rev_list_test_run_git(root, ["init", "-q", "repo"])
+  rev_list_test_init_repo(root, repo_dir)
   fs.write_string(repo_dir + "/one", "frotz\n")
   fs.mkdir_p(repo_dir + "/two")
   fs.write_string(repo_dir + "/two/three", "frotz\n")
