@@ -178,6 +178,12 @@ async test "commit: pathspec staging updates submodule gitlink entry" {
     None => @sys.unset_env_var("GIT_ALLOW_PROTOCOL")
   }
 
+  commit_wbtest_run_git(super_dir + "/submodule", [
+    "config", "user.name", "Test User",
+  ])
+  commit_wbtest_run_git(super_dir + "/submodule", [
+    "config", "user.email", "test@example.com",
+  ])
   fs.write_string(super_dir + "/submodule/b", "b\n")
   commit_wbtest_run_git(super_dir + "/submodule", ["add", "b"])
   commit_wbtest_run_git(super_dir + "/submodule", [

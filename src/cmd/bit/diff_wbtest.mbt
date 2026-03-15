@@ -403,6 +403,12 @@ async test "diff: real fs diff_worktree sees gitlink head change" {
   assert_eq(code_commit, 0)
   submodule_wbtest_restore_env("GIT_ALLOW_PROTOCOL", prev_allow_protocol)
 
+  submodule_wbtest_run_git(super_dir + "/init", [
+    "config", "user.name", "Test User",
+  ])
+  submodule_wbtest_run_git(super_dir + "/init", [
+    "config", "user.email", "test@example.com",
+  ])
   fs.write_string(super_dir + "/init/b", "b\n")
   let (code_sub_add, _, _) = @process.collect_output(
     "git",
