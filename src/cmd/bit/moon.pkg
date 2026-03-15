@@ -234,6 +234,7 @@ options(
     "update_ref_wbtest.mbt": [ "native" ],
     "upload_pack.mbt": [ "native" ],
     "verify_pack.mbt": [ "native" ],
+    "wbtest_env_lock_shared.mbt": [ "native" ],
     "workspace.mbt": [ "native" ],
     "worktree.mbt": [ "native" ],
     "worktree_wbtest.mbt": [ "native" ],
