@@ -532,13 +532,12 @@ async fn handle_rev_list(args : Array[String]) -> Unit raise Error {
   let db = @bitlib.ObjectDb::load(fs, git_dir)
   let visited : Map[String, Bool] = {}
   let result : Array[@bitcore.ObjectId] = []
-  let limit = rev_list_collection_limit(skip_count, max_count)
-  // BFS/DFS traversal
+  // BFS/DFS traversal — collect ALL reachable commits, then sort/slice
   let queue : Array[@bitcore.ObjectId] = []
   for id in start_ids {
     queue.push(id)
   }
-  while queue.length() > 0 && result.length() < limit {
+  while queue.length() > 0 {
     let id = queue.unsafe_pop()
     let hex = id.to_hex()
     if visited.contains(hex) || exclude_ids.contains(hex) {
@@ -843,15 +842,6 @@ fn rev_list_normalize_max_count(max_count : Int?) -> Int? {
   match max_count {
     Some(count) if count >= 0 => Some(count)
     _ => None
-  }
-}
-
-///|
-fn rev_list_collection_limit(skip_count : Int, max_count : Int?) -> Int {
-  let normalized_skip = rev_list_normalize_skip(skip_count)
-  match rev_list_normalize_max_count(max_count) {
-    Some(count) => normalized_skip + count
-    None => 2147483647
   }
 }
 
@@ -1482,45 +1472,22 @@ fn rev_list_topo_sort_impl(
             ready.push(phex)
           }
         }
-        // Push in reverse order: first parent is at index 0 in the parents
-        // array. We want it on top of the stack, so push it last.
-        // For non-first parents, sort by timestamp descending (newest first
-        // when popped) to match git's behavior.
-        if ready.length() > 1 {
-          // Separate first parent from the rest
-          let first_parent = ps[0]
-          let others : Array[String] = []
-          let mut has_first = false
-          for phex in ready {
-            if phex == first_parent && not(has_first) {
-              has_first = true
-            } else {
-              others.push(phex)
-            }
+        // Sort ready parents by timestamp ascending so newest ends up
+        // on top of the stack (processed first). This matches git's
+        // topo-order which processes by timestamp, not first-parent.
+        ready.sort_by(fn(a, b) {
+          let ta = timestamps.get(a).unwrap_or(0L)
+          let tb = timestamps.get(b).unwrap_or(0L)
+          if ta < tb {
+            -1
+          } else if ta > tb {
+            1
+          } else {
+            0
           }
-          // Sort others by timestamp ascending (so newest is pushed last
-          // = on top of stack, but below first parent which is pushed last)
-          others.sort_by(fn(a, b) {
-            let ta = timestamps.get(a).unwrap_or(0L)
-            let tb = timestamps.get(b).unwrap_or(0L)
-            if ta < tb {
-              -1
-            } else if ta > tb {
-              1
-            } else {
-              0
-            }
-          })
-          for phex in others {
-            stack.push(phex)
-          }
-          if has_first {
-            stack.push(first_parent)
-          }
-        } else {
-          for phex in ready {
-            stack.push(phex)
-          }
+        })
+        for phex in ready {
+          stack.push(phex)
         }
       }
       None => ()
