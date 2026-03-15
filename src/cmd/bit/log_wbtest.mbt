@@ -150,7 +150,7 @@ async test "log: command path supports excludes and pathspec separator" {
   fs.mkdir_p(root)
   let repo_dir = root + "/repo"
 
-  grep_test_run_git(root, ["init", "-q", "repo"])
+  grep_test_run_git(root, ["init", "--initial-branch=main", "-q", "repo"])
   grep_test_run_git(repo_dir, ["config", "user.name", "Test User"])
   grep_test_run_git(repo_dir, ["config", "user.email", "test@example.com"])
 
@@ -182,7 +182,7 @@ async test "log: command path supports --all with --not" {
   fs.mkdir_p(root)
   let repo_dir = root + "/repo"
 
-  grep_test_run_git(root, ["init", "-q", "repo"])
+  grep_test_run_git(root, ["init", "--initial-branch=main", "-q", "repo"])
   grep_test_run_git(repo_dir, ["config", "user.name", "Test User"])
   grep_test_run_git(repo_dir, ["config", "user.email", "test@example.com"])
 

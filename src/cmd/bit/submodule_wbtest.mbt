@@ -1289,7 +1289,9 @@ async test "submodule add: detects hash mismatch before writing gitmodules" {
   let super_dir = root + "/super"
   let sub_dir = root + "/sub"
 
-  submodule_wbtest_run_git(root, ["init", "--object-format=sha256", "super"])
+  submodule_wbtest_run_git(root, [
+    "init", "--initial-branch=main", "--object-format=sha256", "super",
+  ])
   submodule_wbtest_run_git(super_dir, ["config", "user.name", "Test User"])
   submodule_wbtest_run_git(super_dir, [
     "config", "user.email", "test@example.com",
@@ -1298,7 +1300,9 @@ async test "submodule add: detects hash mismatch before writing gitmodules" {
   submodule_wbtest_run_git(super_dir, ["add", "a"])
   submodule_wbtest_run_git(super_dir, ["commit", "-q", "-m", "super"])
 
-  submodule_wbtest_run_git(root, ["init", "--object-format=sha1", "sub"])
+  submodule_wbtest_run_git(root, [
+    "init", "--initial-branch=main", "--object-format=sha1", "sub",
+  ])
   submodule_wbtest_run_git(sub_dir, ["config", "user.name", "Test User"])
   submodule_wbtest_run_git(sub_dir, ["config", "user.email", "test@example.com"])
   fs.write_string(sub_dir + "/b", "b\n")
@@ -1318,7 +1322,7 @@ async test "submodule add: detects hash mismatch before writing gitmodules" {
   let reverse_super_dir = root + "/reverse-super"
   let reverse_sub_dir = root + "/reverse-sub"
   submodule_wbtest_run_git(root, [
-    "init", "--object-format=sha1", "reverse-super",
+    "init", "--initial-branch=main", "--object-format=sha1", "reverse-super",
   ])
   submodule_wbtest_run_git(reverse_super_dir, [
     "config", "user.name", "Test User",
@@ -1333,7 +1337,7 @@ async test "submodule add: detects hash mismatch before writing gitmodules" {
   ])
 
   submodule_wbtest_run_git(root, [
-    "init", "--object-format=sha256", "reverse-sub",
+    "init", "--initial-branch=main", "--object-format=sha256", "reverse-sub",
   ])
   submodule_wbtest_run_git(reverse_sub_dir, ["config", "user.name", "Test User"])
   submodule_wbtest_run_git(reverse_sub_dir, [
@@ -1711,7 +1715,9 @@ async test "submodule init: relative url resolves against origin remote" {
   submodule_wbtest_run_git(reltest_dir, [
     "config", "user.email", "test@example.com",
   ])
-  submodule_wbtest_run_git(reltest_dir, ["init", "-q", "sub"])
+  submodule_wbtest_run_git(reltest_dir, [
+    "init", "--initial-branch=main", "-q", "sub",
+  ])
   submodule_wbtest_run_git(sub_dir, ["config", "user.name", "Test User"])
   submodule_wbtest_run_git(sub_dir, ["config", "user.email", "test@example.com"])
   fs.write_string(sub_dir + "/a", "a\n")
@@ -1758,7 +1764,7 @@ async test "submodule add: relative repo with normalized path keeps resolved con
     "config", "user.email", "test@example.com",
   ])
   fs.mkdir_p(nested_dir)
-  submodule_wbtest_run_git(nested_dir, ["init", "-q"])
+  submodule_wbtest_run_git(nested_dir, ["init", "--initial-branch=main", "-q"])
   submodule_wbtest_run_git(nested_dir, ["config", "user.name", "Test User"])
   submodule_wbtest_run_git(nested_dir, [
     "config", "user.email", "test@example.com",

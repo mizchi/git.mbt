@@ -204,7 +204,9 @@ async test "show: command path prints graft deprecation advice and honors config
   fs.mkdir_p(root)
   let repo_dir = root + "/repo"
 
-  show_wbtest_run_git(root, ["init", "-q", "repo"])
+  show_wbtest_run_git(root, ["init", "--initial-branch=main", "-q", "repo"])
+  show_wbtest_run_git(repo_dir, ["config", "user.name", "Test User"])
+  show_wbtest_run_git(repo_dir, ["config", "user.email", "test@example.com"])
   fs.write_string(repo_dir + "/a.txt", "first\n")
   show_wbtest_run_git(repo_dir, ["add", "a.txt"])
   show_wbtest_run_git(repo_dir, ["commit", "-q", "-m", "first"])

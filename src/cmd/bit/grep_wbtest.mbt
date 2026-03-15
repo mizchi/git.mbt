@@ -1313,7 +1313,7 @@ async fn grep_wbtest_case_dashdash_prefers_rev_before_separator() -> Unit raise 
   fs.mkdir_p(root)
   let repo_dir = root + "/repo"
 
-  grep_test_run_git(root, ["init", "-q", "repo"])
+  grep_test_run_git(root, ["init", "--initial-branch=main", "-q", "repo"])
   grep_test_run_git(repo_dir, ["config", "user.name", "Test User"])
   grep_test_run_git(repo_dir, ["config", "user.email", "test@example.com"])
   fs.write_string(repo_dir + "/hello.c", "hello world\n")

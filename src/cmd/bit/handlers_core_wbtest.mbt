@@ -128,7 +128,7 @@ async test "core: commit --allow-empty creates initial commit" {
   @sys.set_env_var("GIT_AUTHOR_EMAIL", "test@example.com")
   @sys.set_env_var("GIT_COMMITTER_NAME", "Test User")
   @sys.set_env_var("GIT_COMMITTER_EMAIL", "test@example.com")
-  handle_init(["-q", path])
+  handle_init(["-q", "-b", "main", path])
   @sys.set_env_var("GIT_SHIM_CWD", path)
   @sys.set_env_var("GIT_SHIM_PWD", path)
   handle_commit(["-q", "--allow-empty", "-m", "empty commit"])

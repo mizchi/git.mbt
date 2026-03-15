@@ -357,7 +357,7 @@ async test "diff: real fs diff_worktree sees gitlink head change" {
   let super_dir = root + "/super"
 
   let (code_init, _, _) = @process.collect_output(
-    "/usr/bin/git",
+    "git",
     ["init", "--initial-branch=main", "-q", init_dir],
     inherit_env=true,
     cwd=root,
@@ -374,7 +374,7 @@ async test "diff: real fs diff_worktree sees gitlink head change" {
     |> add_test_trim_trailing_newline
 
   let (code_super, _, _) = @process.collect_output(
-    "/usr/bin/git",
+    "git",
     ["init", "--initial-branch=main", "-q", super_dir],
     inherit_env=true,
     cwd=root,
@@ -388,14 +388,14 @@ async test "diff: real fs diff_worktree sees gitlink head change" {
   let prev_allow_protocol = @sys.get_env_var("GIT_ALLOW_PROTOCOL")
   @sys.set_env_var("GIT_ALLOW_PROTOCOL", "file")
   let (code_add, _, _) = @process.collect_output(
-    "/usr/bin/git",
+    "git",
     ["-C", super_dir, "submodule", "add", "./../init", "init"],
     inherit_env=true,
     cwd=root,
   )
   assert_eq(code_add, 0)
   let (code_commit, _, _) = @process.collect_output(
-    "/usr/bin/git",
+    "git",
     ["-C", super_dir, "commit", "-qam", "initial"],
     inherit_env=true,
     cwd=root,
@@ -405,14 +405,14 @@ async test "diff: real fs diff_worktree sees gitlink head change" {
 
   fs.write_string(super_dir + "/init/b", "b\n")
   let (code_sub_add, _, _) = @process.collect_output(
-    "/usr/bin/git",
+    "git",
     ["-C", super_dir + "/init", "add", "b"],
     inherit_env=true,
     cwd=root,
   )
   assert_eq(code_sub_add, 0)
   let (code_sub_commit, _, _) = @process.collect_output(
-    "/usr/bin/git",
+    "git",
     ["-C", super_dir + "/init", "commit", "-q", "-m", "second"],
     inherit_env=true,
     cwd=root,
