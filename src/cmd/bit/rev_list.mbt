@@ -169,6 +169,8 @@ async fn handle_rev_list(args : Array[String]) -> Unit raise Error {
       "--graph" => graph = true
       "--no-min-parents" => min_parents = None
       "--no-max-parents" => max_parents = None
+      // Negative values for min/max-parents mean "no limit" (infinity)
+      // This is handled after parsing by converting negative to None
       "--first-parent" => first_parent = true
       "--all" => all = true
       "--branches" => {
@@ -235,7 +237,7 @@ async fn handle_rev_list(args : Array[String]) -> Unit raise Error {
       "--stdin" => stdin = true
       "--test-bitmap" => test_bitmap = true
       "--use-bitmap-index" => use_bitmap = true
-      "--no-use-bitmap-index" | "--ignore-missing" => ()
+      "--no-use-bitmap-index" | "--ignore-missing" | "--in-commit-order" => ()
       "--no-object-names" => no_object_names = true
       "--object-names" => no_object_names = false
       "--color" | "--color=always" => pretty_color_cli_mode = Some("always")
@@ -356,9 +358,15 @@ async fn handle_rev_list(args : Array[String]) -> Unit raise Error {
   if stdin {
     let input = decode_bytes(read_all_stdin())
     let mut stdin_not_mode = false
+    let mut stdin_end_of_options = false
     for line_view in input.split("\n") {
       let line = trim_string(line_view.to_string())
       if line.length() == 0 || line.has_prefix("#") {
+        continue
+      }
+      // After --end-of-options, treat everything as a ref
+      if stdin_end_of_options {
+        if stdin_not_mode { excludes.push(line) } else { refs.push(line) }
         continue
       }
       if line == "--not" {
@@ -396,10 +404,21 @@ async fn handle_rev_list(args : Array[String]) -> Unit raise Error {
       } else if line == "--glob" {
         eprint_line("fatal: Option '--glob' requires a value")
         @sys.exit(128)
+      } else if line.has_prefix("--no-walk=") {
+        let val = String::unsafe_substring(line, start=10, end=line.length())
+        if val != "sorted" && val != "unsorted" {
+          eprint_line("error: invalid argument to --no-walk")
+          eprint_line("fatal: invalid option '\{line}' in --stdin mode")
+          @sys.exit(128)
+        }
       } else if line == "--end-of-options" {
-        () // accept, no-op
+        stdin_end_of_options = true
       } else if line == "--" {
         () // pathspec separator, ignore
+      } else if line.has_prefix("-") && not(line.has_prefix("^")) {
+        // Unknown option in stdin mode
+        eprint_line("fatal: invalid option '\{line}' in --stdin mode")
+        @sys.exit(128)
       } else if line.has_prefix("^") {
         excludes.push(
           String::unsafe_substring(line, start=1, end=line.length()),
@@ -437,32 +456,8 @@ async fn handle_rev_list(args : Array[String]) -> Unit raise Error {
       }
     }
   }
-  // Apply --exclude patterns to filter refs (for glob-added refs)
-  if rev_list_exclude_patterns.length() > 0 {
-    let filtered : Array[String] = []
-    for r in refs {
-      let mut excluded = false
-      for pat in rev_list_exclude_patterns {
-        let full_pat = if pat.has_prefix("refs/") { pat } else { "refs/" + pat }
-        if full_pat.contains("*") || full_pat.contains("?") {
-          if rev_list_glob_match(full_pat, r) {
-            excluded = true
-            break
-          }
-        } else if r == full_pat || r.has_prefix(full_pat + "/") {
-          excluded = true
-          break
-        }
-      }
-      if not(excluded) {
-        filtered.push(r)
-      }
-    }
-    refs.clear()
-    for r in filtered {
-      refs.push(r)
-    }
-  }
+  // Note: --exclude patterns are applied at the point of ref addition
+  // (--all, --branches, --tags, --remotes, --glob) so no post-filter needed
   // If no refs specified and no explicit ref source was given, default to HEAD
   if refs.length() == 0 && excludes.length() == 0 && not(indexed_objects) &&
     not(stdin) && not(all) && not(had_ref_source) &&
@@ -537,6 +532,15 @@ async fn handle_rev_list(args : Array[String]) -> Unit raise Error {
       }
       _ => ()
     }
+  }
+  // Negative values mean infinity (no limit)
+  match min_parents {
+    Some(v) => if v < 0 { min_parents = None }
+    None => ()
+  }
+  match max_parents {
+    Some(v) => if v < 0 { max_parents = None }
+    None => ()
   }
   // Apply parent count filter (--merges, --no-merges, --min/max-parents)
   if min_parents is Some(_) || max_parents is Some(_) {
