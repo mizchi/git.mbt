@@ -16,7 +16,7 @@ async fn handle_repack(args : Array[String]) -> Unit raise Error {
   let mut cruft = false
   let mut write_midx = false
   let keep_packs : Array[String] = []
-  let mut filter_spec : String = ""
+  let filter_specs : Array[String] = []
   let mut geometric_factor : String = ""
   let mut keep_unreachable = false
   let mut unpack_unreachable_arg : String = ""
@@ -53,11 +53,13 @@ async fn handle_repack(args : Array[String]) -> Unit raise Error {
         keep_packs.push(args[i])
       }
     } else if arg.has_prefix("--filter=") {
-      filter_spec = String::unsafe_substring(arg, start=9, end=arg.length())
+      filter_specs.push(
+        String::unsafe_substring(arg, start=9, end=arg.length()),
+      )
     } else if arg == "--filter" {
       i += 1
       if i < args.length() {
-        filter_spec = args[i]
+        filter_specs.push(args[i])
       }
     } else if arg.has_prefix("--unpack-unreachable=") {
       unpack_unreachable_arg = arg
@@ -103,6 +105,38 @@ async fn handle_repack(args : Array[String]) -> Unit raise Error {
   }
   ignore(cruft)
   ignore(write_midx)
+  // Auto-enable bitmaps for bare repos (matches git behavior) unless
+  // explicitly disabled via --no-write-bitmap-index or config.
+  let is_bare = root == git_dir || is_bare_repo_dir(root)
+  let bitmap_from_cmdline = write_bitmap
+  if not(write_bitmap) && not(no_write_bitmap) && all {
+    // Check repack.writeBitmaps config, defaulting to true for bare repos
+    let config_val = bit_config_get(git_dir, "repack", "writeBitmaps")
+    match config_val {
+      Some(v) => if parse_bool_value(v).unwrap_or(false) { write_bitmap = true }
+      None => if is_bare { write_bitmap = true }
+    }
+  }
+  // When bitmaps were auto-enabled (not explicitly from command line),
+  // suppress them if .keep packs exist (git behavior).
+  if write_bitmap && not(bitmap_from_cmdline) && not(pack_kept_objects) {
+    let entries = fs.readdir(pack_dir) catch { _ => [] }
+    let has_keep = entries.iter().any(fn(e) { e.has_suffix(".keep") })
+    if has_keep {
+      write_bitmap = false
+    }
+  }
+  // When --filter is used, suppress auto-enabled bitmaps (only error
+  // if bitmap was explicitly requested on the command line).
+  if filter_specs.length() > 0 {
+    if bitmap_from_cmdline {
+      @stdio.stderr.write(
+        "error: cannot use --filter with --write-bitmap-index\n",
+      )
+      @sys.exit(1)
+    }
+    write_bitmap = false
+  }
   // Build pack-objects arguments
   let po_args : Array[String] = ["pack-objects", "--delta-base-offset"]
   // Always pass --all --reflog to enumerate objects.
@@ -133,8 +167,12 @@ async fn handle_repack(args : Array[String]) -> Unit raise Error {
   if unpack_unreachable_arg.length() > 0 {
     po_args.push(unpack_unreachable_arg)
   }
-  if filter_spec.length() > 0 {
-    po_args.push("--filter=" + filter_spec)
+  if filter_specs.length() > 0 {
+    for spec in filter_specs {
+      po_args.push("--filter=" + spec)
+    }
+    // Write filtered-out objects to a separate pack in the same directory
+    po_args.push("--filter-to=" + pack_dir + "/pack")
   }
   if geometric_factor.length() > 0 {
     po_args.push("--geometric=" + geometric_factor)

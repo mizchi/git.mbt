@@ -35,6 +35,8 @@ priv struct PackObjectsConfig {
   unpack_unreachable : Bool
   unpack_unreachable_expiration : Int64 // 0 = loosen all unreachable
   threads_warning : Bool
+  keep_pack_names : Array[String]
+  filter_to : String? // prefix path for filtered-out objects pack
 }
 
 ///|
@@ -94,6 +96,8 @@ fn parse_pack_objects_args(args : Array[String]) -> PackObjectsParse {
   let mut unpack_unreachable = false
   let mut unpack_unreachable_expiration = 0L
   let mut threads_warning = false
+  let keep_pack_names : Array[String] = []
+  let mut filter_to : String? = None
   let mut i = 0
   let mut in_opts = true
   let mut extra_args = 0
@@ -159,6 +163,7 @@ fn parse_pack_objects_args(args : Array[String]) -> PackObjectsParse {
             return PackObjectsParse::Unsupported
           }
           i += 1
+          keep_pack_names.push(args[i])
         }
         "--write-bitmap-index" => write_bitmap = true
         "--progress" => progress = true
@@ -280,6 +285,8 @@ fn parse_pack_objects_args(args : Array[String]) -> PackObjectsParse {
               parse_pack_filter_spec(args[i + 1]),
             )
             i += 1
+          } else if arg.has_prefix("--filter-to=") {
+            filter_to = Some(string_slice_from(arg, 12))
           } else if arg.has_prefix("--object-format=") {
             object_format = normalize_object_format(string_slice_from(arg, 16))
             if object_format is None {
@@ -324,7 +331,7 @@ fn parse_pack_objects_args(args : Array[String]) -> PackObjectsParse {
             unpack_unreachable = true
             unpack_unreachable_expiration = parse_approxidate(value)
           } else if arg.has_prefix("--keep-pack=") {
-            ()
+            keep_pack_names.push(string_slice_from(arg, 12))
           } else if arg.has_prefix("--no-reuse-delta") ||
             arg.has_prefix("--no-reuse-object") {
             // bit doesn't use delta or object reuse, so these are no-ops
@@ -418,6 +425,8 @@ fn parse_pack_objects_args(args : Array[String]) -> PackObjectsParse {
     unpack_unreachable,
     unpack_unreachable_expiration,
     threads_warning,
+    keep_pack_names,
+    filter_to,
   })
 }
 
@@ -569,6 +578,52 @@ fn apply_pack_filter_spec(
       // handled separately in apply_sparse_oid_filter
       objects
     SparsePathUnsupported => objects // should not reach here; caught earlier
+  }
+}
+
+///|
+/// Return the complement of a filter — objects that WOULD BE excluded by
+/// the filter.  Used by --filter-to to collect filtered-out objects into
+/// a separate pack.
+fn apply_pack_filter_complement(
+  objects : Array[@bitcore.PackObject],
+  filter : @protocol.FilterSpec,
+) -> Array[@bitcore.PackObject] {
+  match filter {
+    NoFilter => []
+    BlobNone => {
+      let result : Array[@bitcore.PackObject] = []
+      for obj in objects {
+        if obj.obj_type == @bitcore.ObjectType::Blob {
+          result.push(obj)
+        }
+      }
+      result
+    }
+    BlobLimit(max_size) => {
+      let result : Array[@bitcore.PackObject] = []
+      for obj in objects {
+        if obj.obj_type == @bitcore.ObjectType::Blob &&
+          obj.data.length().to_int64() >= max_size {
+          result.push(obj)
+        }
+      }
+      result
+    }
+    TreeDepth(depth) =>
+      if depth == 0 {
+        let result : Array[@bitcore.PackObject] = []
+        for obj in objects {
+          if obj.obj_type == @bitcore.ObjectType::Tree ||
+            obj.obj_type == @bitcore.ObjectType::Blob {
+            result.push(obj)
+          }
+        }
+        result
+      } else {
+        []
+      }
+    SparseOid(_) | SparsePathUnsupported => []
   }
 }
 
@@ -1006,6 +1061,34 @@ fn collect_pack_ids_from_marker(
     }
     let base = string_slice_to(name, name.length() - suffix.length())
     let idx_path = pack_dir + "/" + base + ".idx"
+    if not(fs.is_file(idx_path)) {
+      continue
+    }
+    let ids = collect_pack_index_ids(fs, idx_path)
+    for id in ids {
+      out[id] = true
+    }
+  }
+  out
+}
+
+///|
+/// Collect all object IDs from packs whose filenames are in the given list.
+/// Pack names may be just the filename (e.g., "pack-HASH.pack") or a full path.
+fn collect_pack_ids_from_names(
+  fs : OsFs,
+  pack_dir : String,
+  names : Array[String],
+) -> Map[String, Bool] {
+  let out : Map[String, Bool] = {}
+  for name in names {
+    // The name might be just "pack-HASH.pack" or a full path
+    let stem = if name.has_suffix(".pack") {
+      string_slice_to(name, name.length() - 5)
+    } else {
+      name
+    }
+    let idx_path = pack_dir + "/" + stem + ".idx"
     if not(fs.is_file(idx_path)) {
       continue
     }
@@ -2294,7 +2377,8 @@ async fn try_reuse_single_stdin_pack(
     cfg.local_only ||
     cfg.honor_pack_keep ||
     cfg.incremental ||
-    cfg.exclude_promisor_objects {
+    cfg.exclude_promisor_objects ||
+    cfg.keep_pack_names.length() > 0 {
     return false
   }
   let pack_dir = git_dir + "/objects/pack"
@@ -2728,7 +2812,8 @@ async fn handle_pack_objects(args : Array[String]) -> Unit raise Error {
           cfg.local_only ||
           cfg.honor_pack_keep ||
           cfg.incremental ||
-          cfg.unpacked
+          cfg.unpacked ||
+          cfg.keep_pack_names.length() > 0
         // Determine if sparse algorithm should be used
         let use_sparse = match cfg.sparse_mode {
           Some(v) => v
@@ -2860,6 +2945,13 @@ async fn handle_pack_objects(args : Array[String]) -> Unit raise Error {
         objects = apply_sparse_oid_filter(fs, git_dir, db, objects, oid_spec)
       }
       // Apply filter specification (e.g., blob:none for partial clone)
+      // When filter_to is set, collect filtered-out objects for a separate pack.
+      let filtered_out_objects : Array[@bitcore.PackObject] = if cfg.filter_to
+        is Some(_) {
+        apply_pack_filter_complement(objects, cfg.filter)
+      } else {
+        []
+      }
       let mut objects = apply_pack_filter_spec(objects, cfg.filter)
       // Add back user-given objects that bypass filters (e.g., explicitly
       // specified trees/blobs in --revs input)
@@ -2896,6 +2988,14 @@ async fn handle_pack_objects(args : Array[String]) -> Unit raise Error {
       }
       if cfg.honor_pack_keep {
         let keep_ids = collect_pack_ids_from_marker(fs, pack_dir, ".keep")
+        objects = filter_objects(objects, keep_ids)
+      }
+      if cfg.keep_pack_names.length() > 0 {
+        let keep_ids = collect_pack_ids_from_names(
+          fs,
+          pack_dir,
+          cfg.keep_pack_names,
+        )
         objects = filter_objects(objects, keep_ids)
       }
       if (cfg.incremental || cfg.unpacked) && !cfg.stdin_packs {
@@ -3048,6 +3148,35 @@ async fn handle_pack_objects(args : Array[String]) -> Unit raise Error {
             corrupt_pack_file(fs, pack_path)
           }
           @stdio.stdout.write(hash_hex + "\n")
+        }
+      }
+      // Write filtered-out objects to separate pack (--filter-to)
+      if cfg.filter_to is Some(filter_to_prefix) {
+        if filtered_out_objects.length() > 0 {
+          let deduped = dedup_objects(filtered_out_objects)
+          let (ft_pack, _dc) = @pack.create_packfile_with_delta_stats_compression_reuse(
+            deduped,
+            cfg.delta_mode,
+            pack_compression,
+            true, // reuse_only
+            cfg.depth,
+            cfg.window,
+          )
+          let ft_hash = pack_hash_hex(ft_pack)
+          let ft_prefix = resolve_in_cwd(filter_to_prefix)
+          let ft_pack_path = ft_prefix + "-" + ft_hash + ".pack"
+          let ft_idx_path = ft_prefix + "-" + ft_hash + ".idx"
+          fs.write_file(ft_pack_path, ft_pack)
+          let ft_idx_objects = @pack.parse_packfile(ft_pack)
+          @pack.write_pack_index_from_objects_versioned(
+            fs,
+            ft_idx_path,
+            ft_pack,
+            ft_idx_objects,
+            cfg.index_version,
+            cfg.off64_threshold,
+          )
+          @stdio.stdout.write(ft_hash + "\n")
         }
       }
       if cfg.progress {

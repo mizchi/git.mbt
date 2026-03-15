@@ -104,6 +104,7 @@ async fn handle_rev_list(args : Array[String]) -> Unit raise Error {
   let mut format : String? = None
   let mut pretty_color_cli_mode : String? = None
   let mut topo_order = false
+  let mut author_date_order = false
   let date_order = false
   let mut parents = false
   let mut header = false
@@ -134,6 +135,7 @@ async fn handle_rev_list(args : Array[String]) -> Unit raise Error {
       "--reverse" => reverse = true
       "--ancestry-path" => () // Ignored for now
       "--topo-order" => topo_order = true
+      "--author-date-order" => author_date_order = true
       "--date-order" => ignore(date_order) // date order is now default
       "--parents" => parents = true
       "--header" => header = true
@@ -194,25 +196,34 @@ async fn handle_rev_list(args : Array[String]) -> Unit raise Error {
       _ if arg.has_prefix("--branches=") => {
         had_ref_source = true
         rev_list_add_typed_refs(
-          fs, git_dir, "refs/heads/",
+          fs,
+          git_dir,
+          "refs/heads/",
           String::unsafe_substring(arg, start=11, end=arg.length()),
-          rev_list_exclude_patterns, refs,
+          rev_list_exclude_patterns,
+          refs,
         )
       }
       _ if arg.has_prefix("--tags=") => {
         had_ref_source = true
         rev_list_add_typed_refs(
-          fs, git_dir, "refs/tags/",
+          fs,
+          git_dir,
+          "refs/tags/",
           String::unsafe_substring(arg, start=7, end=arg.length()),
-          rev_list_exclude_patterns, refs,
+          rev_list_exclude_patterns,
+          refs,
         )
       }
       _ if arg.has_prefix("--remotes=") => {
         had_ref_source = true
         rev_list_add_typed_refs(
-          fs, git_dir, "refs/remotes/",
+          fs,
+          git_dir,
+          "refs/remotes/",
           String::unsafe_substring(arg, start=10, end=arg.length()),
-          rev_list_exclude_patterns, refs,
+          rev_list_exclude_patterns,
+          refs,
         )
       }
       _ if arg.has_prefix("--exclude=") => {
@@ -288,7 +299,9 @@ async fn handle_rev_list(args : Array[String]) -> Unit raise Error {
             }
           } else if next.has_prefix("--glob=") {
             let pattern = String::unsafe_substring(
-              next, start=7, end=next.length(),
+              next,
+              start=7,
+              end=next.length(),
             )
             rev_list_add_glob_refs(fs, git_dir, pattern, excludes)
           } else if not(next.has_prefix("-")) {
@@ -366,7 +379,11 @@ async fn handle_rev_list(args : Array[String]) -> Unit raise Error {
       }
       // After --end-of-options, treat everything as a ref
       if stdin_end_of_options {
-        if stdin_not_mode { excludes.push(line) } else { refs.push(line) }
+        if stdin_not_mode {
+          excludes.push(line)
+        } else {
+          refs.push(line)
+        }
         continue
       }
       if line == "--not" {
@@ -377,21 +394,33 @@ async fn handle_rev_list(args : Array[String]) -> Unit raise Error {
         let branch_refs = @bitrepo.show_ref(fs, git_dir) catch { _ => [] }
         for item in branch_refs {
           if item.0.has_prefix("refs/heads/") {
-            if stdin_not_mode { excludes.push(item.0) } else { refs.push(item.0) }
+            if stdin_not_mode {
+              excludes.push(item.0)
+            } else {
+              refs.push(item.0)
+            }
           }
         }
       } else if line == "--tags" {
         let tag_refs = @bitrepo.show_ref(fs, git_dir) catch { _ => [] }
         for item in tag_refs {
           if item.0.has_prefix("refs/tags/") {
-            if stdin_not_mode { excludes.push(item.0) } else { refs.push(item.0) }
+            if stdin_not_mode {
+              excludes.push(item.0)
+            } else {
+              refs.push(item.0)
+            }
           }
         }
       } else if line == "--remotes" {
         let remote_refs = @bitrepo.show_ref(fs, git_dir) catch { _ => [] }
         for item in remote_refs {
           if item.0.has_prefix("refs/remotes/") {
-            if stdin_not_mode { excludes.push(item.0) } else { refs.push(item.0) }
+            if stdin_not_mode {
+              excludes.push(item.0)
+            } else {
+              refs.push(item.0)
+            }
           }
         }
       } else if line.has_prefix("--glob=") {
@@ -459,8 +488,12 @@ async fn handle_rev_list(args : Array[String]) -> Unit raise Error {
   // Note: --exclude patterns are applied at the point of ref addition
   // (--all, --branches, --tags, --remotes, --glob) so no post-filter needed
   // If no refs specified and no explicit ref source was given, default to HEAD
-  if refs.length() == 0 && excludes.length() == 0 && not(indexed_objects) &&
-    not(stdin) && not(all) && not(had_ref_source) &&
+  if refs.length() == 0 &&
+    excludes.length() == 0 &&
+    not(indexed_objects) &&
+    not(stdin) &&
+    not(all) &&
+    not(had_ref_source) &&
     rev_list_exclude_patterns.length() == 0 {
     refs.push("HEAD")
   }
@@ -478,8 +511,7 @@ async fn handle_rev_list(args : Array[String]) -> Unit raise Error {
     match @bitrepo.rev_parse(fs, git_dir, spec) {
       Some(id) => {
         let hex = id.to_hex()
-        if id != @bitcore.ObjectId::zero() &&
-          not(start_seen.contains(hex)) {
+        if id != @bitcore.ObjectId::zero() && not(start_seen.contains(hex)) {
           start_seen[hex] = true
           start_ids.push(id)
         }
@@ -573,6 +605,8 @@ async fn handle_rev_list(args : Array[String]) -> Unit raise Error {
   // Apply ordering. git defaults to date order (committer timestamp desc).
   if topo_order {
     rev_list_topo_sort(db, fs, result)
+  } else if author_date_order {
+    rev_list_topo_sort_author_date(db, fs, result)
   } else {
     // Default: date order (same as git's default chronological ordering)
     rev_list_date_sort(db, fs, result)
@@ -1321,73 +1355,226 @@ fn rev_list_topo_sort(
   rfs : &@bitcore.RepoFileSystem,
   commits : Array[@bitcore.ObjectId],
 ) -> Unit raise Error {
+  rev_list_topo_sort_impl(db, rfs, commits, false)
+}
+
+///|
+/// DFS-based topological sort matching git's --topo-order / --author-date-order.
+///
+/// Children are emitted before parents. First-parent chains are kept together
+/// by always exploring the first parent next (pushed last onto the stack).
+///
+/// When `use_author_date` is true, tie-breaking among ready commits uses
+/// the author timestamp (--author-date-order) instead of the committer
+/// timestamp (--topo-order default).
+fn rev_list_topo_sort_impl(
+  db : @bitlib.ObjectDb,
+  rfs : &@bitcore.RepoFileSystem,
+  commits : Array[@bitcore.ObjectId],
+  use_author_date : Bool,
+) -> Unit raise Error {
   if commits.length() <= 1 {
     return
   }
-  // Build parent map and in-degree for commits in the result set
+  // Build commit set and lookup maps
   let commit_set : Map[String, Int] = {} // hex -> index in commits
   for idx, id in commits {
     commit_set[id.to_hex()] = idx
   }
-  let children : Map[String, Array[String]] = {} // parent -> children
-  let in_degree : Map[String, Int] = {} // hex -> number of parents in set
+  // Parse all commits: parents and timestamps
+  let parents_map : Map[String, Array[String]] = {} // hex -> parent hexes (in set)
+  let timestamps : Map[String, Int64] = {} // hex -> sort timestamp
   for id in commits {
     let hex = id.to_hex()
-    in_degree[hex] = 0
-    children[hex] = []
-  }
-  for id in commits {
-    let hex = id.to_hex()
+    parents_map[hex] = []
     match db.get(rfs, id) {
       Some(obj) if obj.obj_type == @bitcore.ObjectType::Commit => {
         let info = @bitcore.parse_commit(obj.data) catch { _ => continue }
+        let ps : Array[String] = []
         for p in info.parents {
           let phex = p.to_hex()
           if commit_set.contains(phex) {
-            match children.get(phex) {
-              Some(arr) => arr.push(hex)
-              None => ()
-            }
-            in_degree[hex] = in_degree.get(hex).unwrap_or(0) + 1
+            ps.push(phex)
           }
         }
+        parents_map[hex] = ps
+        timestamps[hex] = if use_author_date {
+          rev_list_extract_author_timestamp(obj.data)
+        } else {
+          rev_list_extract_committer_timestamp(obj.data)
+        }
       }
-      _ => ()
+      _ => timestamps[hex] = 0L
     }
   }
-  // Kahn's algorithm: start with nodes with in_degree 0
-  let queue : Array[@bitcore.ObjectId] = []
+  // Build in-degree: number of children in the result set for each commit.
+  // A commit's in-degree is incremented for each other commit that lists it
+  // as a parent.
+  let in_degree : Map[String, Int] = {}
   for id in commits {
-    if in_degree.get(id.to_hex()).unwrap_or(0) == 0 {
-      queue.push(id)
-    }
+    in_degree[id.to_hex()] = 0
   }
-  let sorted : Array[@bitcore.ObjectId] = []
-  while queue.length() > 0 {
-    let id = queue.unsafe_pop()
-    sorted.push(id)
+  for id in commits {
     let hex = id.to_hex()
-    match children.get(hex) {
-      Some(child_hexes) =>
-        for chex in child_hexes {
-          let deg = in_degree.get(chex).unwrap_or(1) - 1
-          in_degree[chex] = deg
-          if deg == 0 {
-            match commit_set.get(chex) {
-              Some(idx) => queue.push(commits[idx])
-              None => ()
-            }
-          }
+    match parents_map.get(hex) {
+      Some(ps) =>
+        for phex in ps {
+          in_degree[phex] = in_degree.get(phex).unwrap_or(0) + 1
         }
       None => ()
     }
   }
-  // Copy sorted back
+  // Collect tip commits (in-degree 0 = no children in set).
+  // Sort by timestamp descending so the newest tip is processed first.
+  let tips : Array[String] = []
+  for id in commits {
+    let hex = id.to_hex()
+    if in_degree.get(hex).unwrap_or(0) == 0 {
+      tips.push(hex)
+    }
+  }
+  // Sort tips by timestamp ascending so that when pushed onto the stack
+  // the newest (highest timestamp) ends up on top.
+  tips.sort_by(fn(a, b) {
+    let ta = timestamps.get(a).unwrap_or(0L)
+    let tb = timestamps.get(b).unwrap_or(0L)
+    if ta < tb {
+      -1
+    } else if ta > tb {
+      1
+    } else {
+      0
+    }
+  })
+  // DFS using a stack. Push tips so newest is on top.
+  let stack : Array[String] = []
+  for hex in tips {
+    stack.push(hex)
+  }
+  let emitted : Map[String, Bool] = {}
+  let sorted : Array[@bitcore.ObjectId] = []
+  while stack.length() > 0 {
+    let hex = stack.unsafe_pop()
+    if emitted.get(hex).unwrap_or(false) {
+      continue
+    }
+    // Check that all children have been emitted (in-degree should be 0).
+    if in_degree.get(hex).unwrap_or(0) > 0 {
+      continue
+    }
+    // Emit this commit
+    emitted[hex] = true
+    match commit_set.get(hex) {
+      Some(idx) => sorted.push(commits[idx])
+      None => ()
+    }
+    // Process parents: decrement their in-degree and push ready ones.
+    // Push in reverse order so that the first parent ends up on top of the
+    // stack and is processed next, keeping first-parent chains together.
+    match parents_map.get(hex) {
+      Some(ps) => {
+        // Collect parents that become ready (in-degree reaches 0)
+        let ready : Array[String] = []
+        for phex in ps {
+          let deg = in_degree.get(phex).unwrap_or(1) - 1
+          in_degree[phex] = deg
+          if deg == 0 && not(emitted.get(phex).unwrap_or(false)) {
+            ready.push(phex)
+          }
+        }
+        // Push in reverse order: first parent is at index 0 in the parents
+        // array. We want it on top of the stack, so push it last.
+        // For non-first parents, sort by timestamp descending (newest first
+        // when popped) to match git's behavior.
+        if ready.length() > 1 {
+          // Separate first parent from the rest
+          let first_parent = ps[0]
+          let others : Array[String] = []
+          let mut has_first = false
+          for phex in ready {
+            if phex == first_parent && not(has_first) {
+              has_first = true
+            } else {
+              others.push(phex)
+            }
+          }
+          // Sort others by timestamp ascending (so newest is pushed last
+          // = on top of stack, but below first parent which is pushed last)
+          others.sort_by(fn(a, b) {
+            let ta = timestamps.get(a).unwrap_or(0L)
+            let tb = timestamps.get(b).unwrap_or(0L)
+            if ta < tb {
+              -1
+            } else if ta > tb {
+              1
+            } else {
+              0
+            }
+          })
+          for phex in others {
+            stack.push(phex)
+          }
+          if has_first {
+            stack.push(first_parent)
+          }
+        } else {
+          for phex in ready {
+            stack.push(phex)
+          }
+        }
+      }
+      None => ()
+    }
+  }
+  // Copy sorted back into commits
   for idx, id in sorted {
     if idx < commits.length() {
       commits[idx] = id
     }
   }
+}
+
+///|
+/// DFS-based topological sort using author date for tie-breaking
+/// (git's --author-date-order).
+fn rev_list_topo_sort_author_date(
+  db : @bitlib.ObjectDb,
+  rfs : &@bitcore.RepoFileSystem,
+  commits : Array[@bitcore.ObjectId],
+) -> Unit raise Error {
+  rev_list_topo_sort_impl(db, rfs, commits, true)
+}
+
+///|
+/// Extract author timestamp from raw commit data.
+fn rev_list_extract_author_timestamp(data : Bytes) -> Int64 {
+  let text = @utf8.decode_lossy(data[:])
+  for line_view in text.split("\n") {
+    let line = line_view.to_string()
+    if line.length() == 0 {
+      break
+    }
+    if line.has_prefix("author ") {
+      // author Name <email> timestamp timezone
+      let mut last_space = -1
+      let mut second_last_space = -1
+      for i in 0..<line.length() {
+        if line.get_char(i).unwrap() == ' ' {
+          second_last_space = last_space
+          last_space = i
+        }
+      }
+      if second_last_space > 0 {
+        let ts_str = String::unsafe_substring(
+          line,
+          start=second_last_space + 1,
+          end=last_space,
+        )
+        return @strconv.parse_int64(ts_str) catch { _ => 0L }
+      }
+    }
+  }
+  0L
 }
 
 ///|
@@ -1472,7 +1659,9 @@ fn rev_list_ref_excluded_in_namespace(
     return false
   }
   let suffix = String::unsafe_substring(
-    name, start=prefix.length(), end=name.length(),
+    name,
+    start=prefix.length(),
+    end=name.length(),
   )
   for pat in exclude_patterns {
     let effective = if pat.has_suffix("/") { pat + "*" } else { pat }
@@ -1539,9 +1728,7 @@ fn rev_list_add_typed_refs(
     let name = item.0
     if name.has_prefix(prefix) {
       // Check exclude patterns within the typed namespace
-      if rev_list_ref_excluded_in_namespace(
-        name, prefix, exclude_patterns,
-      ) {
+      if rev_list_ref_excluded_in_namespace(name, prefix, exclude_patterns) {
         continue
       }
       if pattern.length() == 0 {
@@ -1549,7 +1736,9 @@ fn rev_list_add_typed_refs(
       } else {
         // Match the part after prefix against the pattern
         let suffix = String::unsafe_substring(
-          name, start=prefix.length(), end=name.length(),
+          name,
+          start=prefix.length(),
+          end=name.length(),
         )
         let full_pattern = if pattern.has_suffix("/") {
           pattern + "*"
@@ -1598,13 +1787,11 @@ fn rev_list_add_glob_refs(
       if rev_list_glob_match(full_pattern, name) {
         out.push(name)
       }
-    } else {
       // Prefix match with / boundary
-      if name.has_prefix(full_pattern) {
-        if full_pattern.length() >= name.length() ||
-          name.get_char(full_pattern.length()) == Some('/') {
-          out.push(name)
-        }
+    } else if name.has_prefix(full_pattern) {
+      if full_pattern.length() >= name.length() ||
+        name.get_char(full_pattern.length()) == Some('/') {
+        out.push(name)
       }
     }
   }
